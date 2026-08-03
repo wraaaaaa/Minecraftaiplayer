@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "denyBreakingPlayerProperty": true,
+  "denyOpeningPlayerContainers": true,
+  "denyTakingPlayerItems": true,
+  "wildernessDevelopmentOnly": true,
+  "allowSelfDefense": true,
+  "selfDefenseWindowMs": 15000,
+  "stopSelfDefenseWhenThreatEnds": true,
+  "allowPlayerOrderedPvp": false,
+  "allowDestructiveActionsWhenOwnershipUnknown": false,
+  "proactiveChat": {
+    "enabled": true,
+    "avoidSecrets": true,
+    "avoidSpam": true
+  }
+}

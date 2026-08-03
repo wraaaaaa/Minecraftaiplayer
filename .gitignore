@@ -1,0 +1,17 @@
+node_modules/
+dist/
+data/
+logs/
+.env
+config/bot.json
+config/persona.json
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+fabric-bridge/.gradle/
+fabric-bridge/build/
+fabric-bridge/run/
+.runtime/
+HeadlessMC/

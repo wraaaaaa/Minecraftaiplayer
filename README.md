@@ -1,125 +1,252 @@
 # Minecraft AI Player
 
-面向 Minecraft 的 AI 玩家机器人项目。
+让大模型以真正的 Minecraft 客户端玩家身份进入 Java Edition `26.2` Fabric 模组服务器，在后台接收聊天指令、区分玩家、保存记忆，并执行受行为准则约束的游戏动作。
 
-> 当前状态：项目处于初始化阶段，尚未实现可运行的机器人、安装包或部署流程。后续功能、依赖和使用方法会随开发持续更新在本文档中。
+当前是可运行的第一阶段版本：原生 Fabric 无界面客户端、AI 控制器、聊天/状态桥、三种模型 API、记忆与经验文件、EasyAuth、安全规则和静默后台运行均已实现。客户端已经真实连接到 `ciallo.kim`；由于测试实例没有该服务器的完整客户端模组包，服务器在同步 611 个模组注册项时拒绝进入。复制服务器对应的客户端模组包后才能完成正式进服验证。
 
-## 文档说明
+## 当前能力
 
-- `README.md`（本文档）：面向使用者和开发者，提供安装、部署、使用和参与开发的教程。
-- `README_AI.md`：面向后续 AI Agent，记录完整项目状态、技术决策、操作历史、待办事项和 Git 推送流程。
-- 每次修改代码、配置、依赖、部署方式或项目决策时，必须同步更新这两份文档后再提交。
+已实现：
 
-## 项目目标
+- Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2` 原生客户端桥。
+- Windows 无界面启动，控制器与游戏客户端均隐藏在后台；提供安全启动、停止和 PID 记录。
+- DeepSeek、火山方舟（豆包）OpenAI 兼容接口、OpenAI Responses API；模型名、端点与推理强度均可配置。
+- 通过结构化世界状态和动作接口控制游戏，不依赖屏幕、图像、声音或鼠标模拟，适合 DeepSeek 等纯文本模型。
+- 玩家聊天、系统消息、位置、生命、饱食度、维度、时间、背包和附近玩家状态。
+- 按玩家 UUID 保存独立档案和事件的单一 `memory.json`；经验另存为 `experience.json`；两者原子写入并保留 `.bak`。
+- 自定义人设、回复限频、被提及时回复、空闲主动聊天。
+- EasyAuth 自动执行 `/login`，密码只从环境变量读取且日志脱敏。
+- `聊天、停止、看向玩家、跟随、走向玩家、有限半径闲逛、受击后一次自卫反击`动作。
+- 独立行为准则：禁止破坏玩家物品、禁止打开玩家容器、未知归属时拒绝破坏、仅允许短时针对实际攻击者自卫。
+- Mineflayer 兼容探针与固定来源的 26.2 协议数据，供诊断使用；目标模组服默认使用原生 Fabric 适配器。
+- 中国大陆下载路线：npm 镜像、BMCLAPI/CERNET Minecraft 资源镜像、GitHub 下载镜像回退，并对游戏资源或工具执行官方 SHA-1/SHA-256 校验。
 
-- 构建能够加入 Minecraft 游戏并自主行动的 AI 玩家机器人。
-- 提供清晰、可复现的安装、配置、运行和开发流程。
-- 保证项目在中国大陆常规网络环境下可以安装、部署和正常使用。
+尚未实现：完整寻路、挖掘、采集、制作、建筑、自主生存闭环、Microsoft 正版登录自动化、皮肤/披风管理、Simple Voice Chat 语音适配。当前移动是轻量键位控制，不能绕开复杂障碍。
 
-## 已确认需求（基线 v0.1）
+## 运行结构
 
-1. AI 通过 API 接入大模型，目标支持 DeepSeek 当前全系列、火山引擎豆包 Seed 2.1 Pro 和 OpenAI GPT-5.6，并允许配置推理强度。
-2. 可配置 Bot 名称、人设、说话风格、皮肤和披风；玩家通过游戏聊天框与其交流和下达指令。
-3. 记忆必须持久化为一个可携带文件；只要保留该文件，Bot 在重启、重装或重新部署后仍能恢复历史记忆。
-4. 分玩家维护身份和关系记忆，按玩家名称/UUID 区分对话，不能把所有玩家混为一人。
-5. Bot 能作为人类队友执行聊天指令；空闲时可以适度主动聊天，并能自主探索、采集、制作、生存和发展。
-6. Bot 能总结成功与失败经验，并保存为独立经验文件，执行任务前检索经验以避免重复犯错。
-7. 目标为 Minecraft Java Edition `26.2`、Fabric Loader `0.19.3` 的模组服务器。Bot 支持在个人电脑或服务器主机运行，至少应能稳定进入服务器并游玩原版内容。
-8. 支持 EasyAuth：检测登录状态并安全发送 `/login <密码>`；密码不得写入 README、日志、记忆或 Git。
-9. 支持离线玩家模式；也预留 Microsoft 正版账号登录，以获得更可靠的正版身份、皮肤与账号已有披风。
-10. 遇到协议、模组或行为能力难题时，优先研究可复用的开源项目；引入或修改前必须审查许可证、安全性和中国大陆网络可用性。
-11. 预留语音输入/输出接口，并尽量适配 Simple Voice Chat `voicechat-fabric-2.6.20+26.2`；语音适配是可选增强，不阻塞核心文本与游戏功能。
-12. 行为准则必须独立成文件：不得破坏其他玩家的建筑或物品，自主发展应远离玩家聚居区；遭受玩家攻击时允许进行限度内的自卫反击。
-13. 所有能力模块化，便于替换模型、Minecraft 接入方案和继续添加行为、记忆、语音等功能。
+```text
+玩家聊天/世界事件
+        ↓
+Minecraft 26.2 + Fabric 桥（无界面）
+        ↕ 仅本机 127.0.0.1:8765，JSON Lines
+Node.js AI 控制器
+        ├─ 模型适配器（DeepSeek / 豆包 / OpenAI）
+        ├─ 人设、多人记忆、经验
+        └─ 行为规则审查 → 结构化游戏动作
+```
 
-## 计划中的模块
+Fabric 桥只监听/连接本机回环地址，不向局域网或公网开放控制端口。大模型只能返回白名单动作，不能直接操作协议、文件或系统命令。
 
-- **Minecraft 接入层**：连接、协议、世界感知、移动、战斗、背包、采集、制作和聊天事件。
-- **模型供应商层**：统一消息、流式输出、工具调用和推理强度配置，分别适配 DeepSeek、火山方舟和 OpenAI。
-- **智能体编排层**：把玩家指令或自主目标转换为可校验、可中断的游戏动作。
-- **角色与多人对话层**：人设、说话风格、玩家身份隔离、回复对象选择和聊天频率控制。
-- **记忆层**：单文件长期记忆、玩家档案、事件记录、摘要、备份、导入和恢复。
-- **经验学习层**：独立经验文件，记录任务、上下文、失败原因、修正方案和验证结果。
-- **自主生存层**：空闲调度、安全选址、资源规划、探索、采集、制作和生存循环。
-- **行为安全层**：从独立规则文件加载禁止事项、领地保护、自卫边界和动作前检查。
-- **认证与外观层**：EasyAuth 登录、离线/Microsoft 账号模式、名称、皮肤与披风能力。
-- **语音层（可选）**：统一语音接口及 Simple Voice Chat 适配器。
-- **运行与运维层**：本地/服务器部署、日志脱敏、重连、健康检查、配置校验和备份。
+## Windows 部署教程
 
-## 当前技术状态与风险
+### 1. 准备环境
 
-- Fabric 官方元数据已确认 Minecraft `26.2` 存在稳定的 Loader `0.19.3`。
-- EasyAuth 已有面向 `26.2` 的 Fabric 版本；登录功能仍需在目标服务器进行真实验证。
-- Simple Voice Chat 已发布 `fabric-2.6.20+26.2`，但 Bot 语音协议适配尚未验证。
-- Mineflayer 官方公开支持范围目前主要到 `1.21.11`；`26.2` 连接属于最高优先级技术风险。项目首先要实现连接探针，再决定扩展 PrismarineJS 协议栈，还是采用原生 Fabric 客户端适配器。
-- “无在线认证模式（正版认证）”存在表述冲突：EasyAuth 通常用于 `online-mode=false` 或混合场景。实现账号模块前需要确认目标服务器的 `server.properties` 中 `online-mode` 实际值。
-- 正版披风只能使用 Microsoft/Minecraft 账号已经拥有的披风，项目不能凭空授予官方披风；离线模式的皮肤/披风显示还取决于服务器端外观模组或插件。
-- 当前仅完成需求归档，以上能力均尚未实现或在真实服务器验证。
+- Windows 10/11 或 Windows Server。
+- Node.js `22` 或更新版本（开发测试使用 Node `24`）。
+- Java `25`。安装 Minecraft 26.2 官方启动器运行时后，脚本通常可自动找到 `%APPDATA%\.minecraft\runtime\java-runtime-epsilon`。
+- 至少约 2 GB 可用内存；无界面客户端实测工作集约 0.8–1 GB。
+- 目标服务器完整的 **26.2 客户端模组包**。只有 Fabric API 无法进入本项目的目标服务器。
 
-## 建议实施顺序
+在项目目录执行：
 
-1. **连接可行性原型**：连接 `26.2` Fabric 测试服，记录握手、模组同步、EasyAuth 和断线原因。
-2. **最小队友版本**：聊天、多人身份隔离、人设、一个模型供应商、基础移动和安全停止。
-3. **动作与生存能力**：工具调用、寻路、采集、制作、战斗和自主发展。
-4. **持久化能力**：单文件记忆、独立经验文件、备份恢复和迁移测试。
-5. **供应商矩阵**：DeepSeek、豆包和 OpenAI 的模型发现、推理强度映射、降级和成本/限流处理。
-6. **外观与部署**：离线/Microsoft 认证、名称、皮肤、本地与服务器部署。
-7. **可选语音**：在核心能力稳定后接入 Simple Voice Chat。
+```powershell
+npm install
+Copy-Item config\bot.example.json config\bot.json
+Copy-Item config\persona.example.json config\persona.json
+```
 
-## 中国大陆网络兼容要求
+`npm install` 使用仓库中的 `.npmrc`，默认从 npmmirror 获取 npm 包。
 
-这是项目的强制验收条件，而不是可选优化：
+### 2. 配置模型、服务器和人设
 
-- 核心运行链路不得强制依赖在中国大陆常规网络下无法稳定访问的服务。
-- 如需模型、依赖、镜像或外部 API，必须提供中国大陆可访问的方案、镜像或可替换配置。
-- 不得把代理工具作为唯一安装或运行方式。
-- 所有外部服务都应支持通过配置切换端点；密钥只能通过环境变量或本地配置注入，不得提交到 Git。
-- 新增依赖前需评估其下载源、运行时网络请求、许可证以及在中国大陆的可用性。
-- 发布前需记录一次无特殊代理条件下的安装与核心功能验证结果。
+编辑 `config\bot.json`。默认服务器已设为：
 
-## 安装与部署
+```json
+{
+  "server": {
+    "adapter": "fabric_bridge",
+    "host": "ciallo.kim",
+    "port": 25565,
+    "version": "26.2",
+    "username": "CialloAI",
+    "auth": "offline"
+  }
+}
+```
 
-尚未实现。确定技术栈并产生首个可运行版本后，本节必须补充：
+不要删除示例中其余字段。`online-mode:false` 对应 `auth:"offline"`。离线名称可直接修改 `username`；离线皮肤和披风是否显示取决于服务器的皮肤插件/模组。官方披风只能来自拥有该披风的正版账号。
 
-1. 支持的操作系统、Minecraft 版本和服务端类型。
-2. 中国大陆可用的运行环境与依赖安装方式。
-3. 环境变量和配置文件示例。
-4. 从零启动、停止、升级和故障排查命令。
-5. 无特殊代理条件下的验证步骤。
+编辑 `config\persona.json` 可以修改名字、性格、说话方式、目标和边界；编辑 `config\behavior-rules.json` 可以调整行为准则。
+
+模型配置示例：
+
+```json
+{
+  "model": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "apiKeyEnv": "DEEPSEEK_API_KEY",
+    "baseUrl": "https://api.deepseek.com",
+    "reasoningEffort": "high",
+    "timeoutMs": 60000
+  }
+}
+```
+
+- `provider:"deepseek"`：使用 `/chat/completions`；`none` 关闭思考，其余强度映射为 DeepSeek 当前支持的 `high/max`。
+- `provider:"volcengine"`：把 `model` 改成方舟控制台创建的豆包 Seed 2.1 Pro 端点/模型 ID，把 `baseUrl` 改成控制台给出的 OpenAI 兼容地址，密钥变量建议用 `ARK_API_KEY`。
+- `provider:"openai"`：使用 `/responses`，密钥变量建议用 `OPENAI_API_KEY`；模型和推理强度按账号可用范围填写。
+
+### 3. 注入秘密
+
+可在当前终端、系统服务环境或被 Git 忽略的 `.env` 中设置。最简单的方式是复制模板后填写：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+也可以只为当前终端注入：
+
+```powershell
+$env:DEEPSEEK_API_KEY='你的 API Key'
+$env:MINECRAFT_LOGIN_PASSWORD='你的 EasyAuth 密码'
+```
+
+改用豆包或 OpenAI 时设置 `ARK_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。
+
+### 4. 构建控制器和 Fabric 桥
+
+```powershell
+npm run check
+npm run build
+
+$env:JAVA_HOME="$env:APPDATA\.minecraft\runtime\java-runtime-epsilon"
+$env:Path="$env:JAVA_HOME\bin;$env:Path"
+Set-Location fabric-bridge
+.\gradlew.bat build --no-daemon
+Set-Location ..
+```
+
+Gradle 配置包含国内镜像回退；所有版本都固定在 `fabric-bridge\gradle.properties`。
+
+### 5. 准备无界面客户端
+
+先下载并校验 Minecraft 26.2 客户端、库文件和 HeadlessMc：
+
+```powershell
+npm run prefetch:minecraft
+.\scripts\install-headlessmc.ps1
+```
+
+然后把服务器客户端模组包合并进隔离实例。假设模组包在 `D:\server-mods`：
+
+```powershell
+.\scripts\prepare-fabric-client.ps1 -AdditionalModsDirectory 'D:\server-mods'
+```
+
+该步骤会复制本项目桥接模组和 Fabric API。不要把服务端专用、明确不能装客户端的模组盲目复制进来；优先使用服主提供的同版本客户端整合包。实例位于 `.runtime\minecraft`，不会把模组写进项目源码。
+
+如默认镜像不可达，可设置：
+
+```powershell
+$env:MCAI_MINECRAFT_LIBRARY_MIRROR='https://你可用的BMCLAPI镜像/bmclapi'
+$env:MCAI_BMCLAPI_BASE='https://你可用的BMCLAPI镜像'
+$env:MCAI_HEADLESSMC_DOWNLOAD_URL='https://可访问的、内容相同的HeadlessMc文件地址'
+$env:MCAI_FABRIC_API_URL='https://可访问的、内容相同的Fabric-API文件地址'
+```
+
+下载文件仍会按官方元数据 SHA-1 或仓库固定 SHA-256 校验，镜像内容不符会立即停止。
+
+### 6. 静默启动和停止
+
+```powershell
+npm run start:all
+```
+
+控制器与 Minecraft 客户端都会隐藏运行，不弹出游戏窗口。状态和错误写入：
+
+- `logs\bot.log`
+- `logs\background.stderr.log`
+- `logs\minecraft-client.stderr.log`
+- `.runtime\minecraft\logs\latest.log`
+
+停止全部组件：
+
+```powershell
+npm run stop:all
+```
+
+也可分别使用 `npm run start:background`、`npm run stop:background`、`npm run start:client` 和 `npm run stop:client`。停止脚本会核对 PID 和可执行文件，避免误杀复用同一 PID 的其他程序。
 
 ## 使用方法
 
-尚未实现。首个功能完成后，本节将提供最小可运行示例、常用命令和预期结果。
-
-## 开发指南
-
-当前默认分支为 `main`，远端仓库为：
+默认 `requireMention:true`，玩家消息中包含 Bot 名称时才触发回复，例如：
 
 ```text
-https://github.com/wraaaaaa/Minecraftaiplayer.git
+CialloAI 跟着我
+CialloAI 过来
+CialloAI 看着我
+CialloAI 停下
 ```
 
-开始开发前：
+模型会根据当前世界状态返回回复和白名单动作。每名玩家使用 UUID 建立独立档案；显示名会随最近一次消息更新。空闲发言可用 `chat.proactiveEnabled` 关闭或调整间隔。
 
-```bash
-git pull --ff-only origin main
+记忆迁移时至少保留：
+
+- `data\memory.json`：所有玩家档案、长期事件与摘要，满足“统一为一个记忆文件”。
+- `data\experience.json`：任务经验和纠错记录。
+
+正常写入时程序还生成同名 `.bak`。误删主文件但备份仍在时，应先停止程序，再把 `.bak` 复制回原文件名。
+
+## EasyAuth 与安全行为
+
+Fabric 客户端进入世界后会从 `MINECRAFT_LOGIN_PASSWORD` 读取密码并直接发送 `login <密码>`，不会把密码交给大模型。聊天和日志会将 `/login` 参数及已知密码替换为 `[REDACTED]`。
+
+当前安全规则默认：
+
+- 不破坏玩家财产，不打开玩家容器，不拿玩家物品。
+- 无法识别归属时按“不允许破坏”处理。
+- 自主发展必须位于荒野；完整选址算法仍待实现，所以当前不会执行自主挖掘/建造。
+- 只在记录到真实玩家伤害事件后的 15 秒内允许针对该攻击者反击；其他 PVP 指令会被拒绝。
+
+## 故障排查
+
+**日志出现 `Received 611 registry entries that are unknown to this client`**
+
+客户端缺少服务器模组。目标服实测涉及 `beautify`、`farmersdelight`、`waystones`、`xaerominimap` 和另一个命名空间。使用服主提供的完整 26.2 客户端整合包重新执行 `prepare-fabric-client.ps1`。
+
+**日志出现大量 `Missing sound` 或 `OpenAL 1.1 not supported`**
+
+这是无界面模式使用虚拟资源/无音频设备的预期警告；声音系统会关闭，不影响文本、网络与结构化游戏控制。
+
+**出现 Mojang Realms 401**
+
+离线账号无法访问 Realms，目标服务器为 `online-mode:false`，该错误不阻断普通服务器连接。
+
+**控制器提示等待 Fabric 桥超时**
+
+确认客户端也已启动、桥接 jar 在 `.runtime\minecraft\mods`、端口 `127.0.0.1:8765` 未被其他程序占用。控制器会按配置自动重试。
+
+**模型没有回复**
+
+检查 API Key 环境变量、`config\bot.json` 的模型 ID/端点，以及 `logs\bot.log`。默认需要在消息中提到 Bot 名称，并有 2.5 秒聊天冷却。
+
+## 开发与验证
+
+```powershell
+npm run check
+npm test
+npm run build
+npm run probe
 ```
 
-每次提交前至少完成：
+`probe` 使用 Mineflayer 做只读连接诊断，不适合作为该模组服的正式客户端。正式路线是 `fabric_bridge`。
 
-1. 检查代码、配置和测试是否符合本次需求。
-2. 检查是否意外包含密钥、令牌、账号信息或大型生成文件。
-3. 验证中国大陆网络兼容性；若无法实际验证，必须在文档中明确未验证项及原因。
-4. 更新本文档中的人类使用/开发说明。
-5. 更新 `README_AI.md` 中的状态、决策、改动记录和下一步。
-6. 查看 `git diff` 和 `git status` 后再提交、推送。
+每次变更必须同步更新本文档和 `README_AI.md`。提交前还应运行 Fabric 构建、`git diff --check`、秘密扫描和相关真实环境测试。远端为 `https://github.com/wraaaaaa/Minecraftaiplayer.git`，默认分支 `main`。
 
-## 安全说明
+## 兼容范围与许可证
 
-- 不提交 `.env`、访问令牌、密码、私钥或个人信息。
-- 后续应提供 `.env.example`，只包含变量名和安全示例值。
-- 涉及远程控制、玩家账号或服务端权限时，默认使用最小权限并提供明确的风险说明。
-
-## 许可证
-
-尚未确定。正式发布或引入第三方代码前必须补充许可证并完成依赖许可证审查。
+- 当前完整部署脚本针对 Windows/Windows Server；核心 Node 和 Java 代码可移植，但 Linux 无界面服务脚本尚未提供。
+- Simple Voice Chat `fabric-2.6.20+26.2` 接口仅在路线图中，当前无语音能力。
+- 项目许可证尚未确定，暂不应把仓库内容视为已授予开源再分发许可。引入第三方内容前继续核对其许可证。

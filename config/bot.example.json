@@ -1,0 +1,48 @@
+{
+  "server": {
+    "adapter": "fabric_bridge",
+    "host": "ciallo.kim",
+    "port": 25565,
+    "version": "26.2",
+    "username": "CialloAI",
+    "auth": "offline",
+    "connectTimeoutMs": 30000,
+    "reconnectDelayMs": 10000,
+    "bridgeHost": "127.0.0.1",
+    "bridgePort": 8765,
+    "actionTimeoutMs": 10000
+  },
+  "easyAuth": {
+    "enabled": true,
+    "passwordEnv": "MINECRAFT_LOGIN_PASSWORD",
+    "loginDelayMs": 1500
+  },
+  "model": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "apiKeyEnv": "DEEPSEEK_API_KEY",
+    "baseUrl": "https://api.deepseek.com",
+    "reasoningEffort": "high",
+    "timeoutMs": 60000
+  },
+  "chat": {
+    "requireMention": true,
+    "replyPrefix": "",
+    "cooldownMs": 2500,
+    "proactiveEnabled": true,
+    "proactiveIdleMs": 180000,
+    "proactiveMinIntervalMs": 300000
+  },
+  "storage": {
+    "memoryFile": "data/memory.json",
+    "experienceFile": "data/experience.json",
+    "maxEvents": 5000
+  },
+  "policyFile": "config/behavior-rules.json",
+  "personaFile": "config/persona.json",
+  "logging": {
+    "file": "logs/bot.log",
+    "level": "info",
+    "console": false
+  }
+}

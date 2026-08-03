@@ -1,0 +1,9 @@
+{
+  "required": true,
+  "package": "kim.ciallo.minecraftai.bridge.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": ["LivingEntityDamageMixin"],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

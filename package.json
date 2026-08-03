@@ -1,0 +1,36 @@
+{
+  "name": "minecraft-ai-player",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless, API-driven AI player for Minecraft Java Edition",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "dev": "tsx src/index.ts",
+    "postinstall": "node scripts/apply-minecraft-data-26.2.mjs",
+    "prefetch:minecraft": "node scripts/prefetch-minecraft-libraries.mjs",
+    "probe": "tsx src/probe.ts",
+    "start": "node dist/src/index.js",
+    "start:background": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-background.ps1",
+    "stop:background": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-background.ps1",
+    "start:client": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-headless-client.ps1",
+    "stop:client": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-headless-client.ps1",
+    "start:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-all-background.ps1",
+    "stop:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-all-background.ps1",
+    "test": "tsx --test test/**/*.test.ts"
+  },
+  "dependencies": {
+    "minecraft-data": "3.112.0",
+    "mineflayer": "4.37.1",
+    "mineflayer-pathfinder": "2.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "tsx": "4.23.5",
+    "typescript": "7.0.2"
+  }
+}
