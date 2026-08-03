@@ -5,6 +5,7 @@ logs/
 .env
 config/bot.json
 config/persona.json
+config/mods.json
 *.log
 *.tmp
 *.bak

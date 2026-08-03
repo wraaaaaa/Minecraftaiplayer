@@ -26,6 +26,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private int tick;
     private int lastConnectAttempt = -600;
     private boolean easyAuthSent;
+    private boolean easyAuthPromptSeen;
+    private int joinedTick;
     private UUID activeSession;
     private MovementTarget movement;
 
@@ -43,6 +45,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             bridge.send(event);
         });
         ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+            handleEasyAuthPrompt(message.getString());
             JsonObject event = baseMessage("game_message");
             event.addProperty("message", redactLogin(message.getString()));
             event.addProperty("overlay", overlay);
@@ -56,6 +59,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (player == null || client.level == null) {
             activeSession = null;
             easyAuthSent = false;
+            easyAuthPromptSeen = false;
             movement = null;
             autoConnect(client);
             return;
@@ -63,12 +67,14 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (!player.getUUID().equals(activeSession)) {
             activeSession = player.getUUID();
             easyAuthSent = false;
+            easyAuthPromptSeen = false;
+            joinedTick = tick;
             JsonObject event = baseMessage("joined_world");
             event.addProperty("name", player.getGameProfile().name());
             event.addProperty("uuid", player.getUUID().toString());
             bridge.send(event);
         }
-        if (!easyAuthSent && tick % 20 == 0) sendEasyAuth(player);
+        if (!easyAuthSent && !easyAuthPromptSeen && tick - joinedTick >= 100 && tick % 20 == 0) sendEasyAuth(player);
         processActions(client, player);
         updateMovement(client, player);
         if (tick % 20 == 0) bridge.send(buildState(client, player));
@@ -97,10 +103,29 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     }
 
     private void sendEasyAuth(LocalPlayer player) {
+        if (!Boolean.parseBoolean(environment("MCAI_EASYAUTH_ENABLED", "true"))) return;
         String password = System.getenv("MINECRAFT_LOGIN_PASSWORD");
         if (password == null || password.isBlank()) return;
         player.connection.sendCommand("login " + password);
         easyAuthSent = true;
+    }
+
+    private void handleEasyAuthPrompt(String message) {
+        Minecraft client = Minecraft.getInstance();
+        LocalPlayer player = client.player;
+        if (player == null || easyAuthSent || !Boolean.parseBoolean(environment("MCAI_EASYAUTH_ENABLED", "true"))) return;
+        String password = System.getenv("MINECRAFT_LOGIN_PASSWORD");
+        if (password == null || password.isBlank()) return;
+        String normalized = message.toLowerCase(Locale.ROOT);
+        if (normalized.contains("/register") && Boolean.parseBoolean(environment("MCAI_EASYAUTH_REGISTER_IF_NEEDED", "false"))) {
+            easyAuthPromptSeen = true;
+            player.connection.sendCommand("register " + password + " " + password);
+            easyAuthSent = true;
+        } else if (normalized.contains("/login")) {
+            easyAuthPromptSeen = true;
+            player.connection.sendCommand("login " + password);
+            easyAuthSent = true;
+        }
     }
 
     private void processActions(Minecraft client, LocalPlayer player) {
@@ -275,7 +300,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     }
 
     private static String redactLogin(String text) {
-        String redacted = text.replaceAll("(?i)/login\\s+\\S+", "/login [REDACTED]");
+        String redacted = text
+            .replaceAll("(?i)/login\\s+\\S+", "/login [REDACTED]")
+            .replaceAll("(?i)/register\\s+\\S+(?:\\s+\\S+)?", "/register [REDACTED]");
         String password = System.getenv("MINECRAFT_LOGIN_PASSWORD");
         return password == null || password.isBlank() ? redacted : redacted.replace(password, "[REDACTED]");
     }

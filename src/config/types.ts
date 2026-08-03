@@ -16,6 +16,7 @@ export interface BotConfig {
   }
   easyAuth: {
     enabled: boolean
+    registerIfNeeded: boolean
     passwordEnv: string
     loginDelayMs: number
   }
@@ -47,6 +48,12 @@ export interface BotConfig {
     level: 'debug' | 'info' | 'warn' | 'error'
     console: boolean
   }
+}
+
+export interface ModsConfig {
+  sourceDirectory: string
+  syncOnClientStart: boolean
+  excludeFilePatterns: string[]
 }
 
 export interface Persona {

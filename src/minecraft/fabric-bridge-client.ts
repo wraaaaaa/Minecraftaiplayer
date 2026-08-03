@@ -6,6 +6,7 @@ import type { WorldState } from '../agent/world-state.js'
 import type { BotConfig, Persona } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
 import type { MemoryStore, PlayerIdentity } from '../memory/memory-store.js'
+import type { RuntimeStatus } from '../runtime/status-store.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
@@ -40,6 +41,7 @@ export class FabricBridgeClient implements ActionExecutor {
   readonly #memory: MemoryStore
   readonly #policy: PolicyEngine
   readonly #pending = new Map<string, PendingAction>()
+  readonly #statusHandler: (phase: RuntimeStatus['phase'], world: WorldState) => Promise<void>
   #server?: Server
   #socket: Socket | undefined
   #buffer = ''
@@ -53,12 +55,13 @@ export class FabricBridgeClient implements ActionExecutor {
   #connected = false
   #closing = false
 
-  constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine }) {
+  constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine; statusHandler: (phase: RuntimeStatus['phase'], world: WorldState) => Promise<void> }) {
     this.#config = options.config
     this.#persona = options.persona
     this.#logger = options.logger
     this.#memory = options.memory
     this.#policy = options.policy
+    this.#statusHandler = options.statusHandler
   }
 
   setMessageHandler(handler: PlayerMessageHandler): void { this.#messageHandler = handler }
@@ -171,10 +174,12 @@ export class FabricBridgeClient implements ActionExecutor {
         this.#connectResolve = undefined
         this.#connectReject = undefined
         this.#logger.info('Fabric 26.2 客户端已连接本机控制器')
+        void this.#publishStatus('connected')
         break
       case 'joined_world':
         this.#world.connected = true
         this.#logger.info('Fabric 客户端已进入世界', { name: message.name, uuid: message.uuid })
+        void this.#publishStatus('in_world')
         if (!this.#proactiveTimer) {
           this.#proactiveTimer = setInterval(() => {
             if (this.#proactiveHandler) void this.#proactiveHandler(this.snapshot()).catch((error) => this.#logger.warn('空闲任务失败', error))
@@ -204,6 +209,7 @@ export class FabricBridgeClient implements ActionExecutor {
       inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count }] : []),
       nearbyPlayers: (message.nearbyPlayers ?? []).flatMap((player) => typeof player.name === 'string' && typeof player.distance === 'number' ? [{ name: player.name, distance: player.distance }] : [])
     }
+    void this.#publishStatus(this.#world.connected ? 'in_world' : 'connected')
   }
 
   #handlePlayerChat(message: BridgeMessage): void {
@@ -276,6 +282,7 @@ export class FabricBridgeClient implements ActionExecutor {
     this.#connected = false
     this.#socket = undefined
     this.#world = { connected: false, inventory: [], nearbyPlayers: [] }
+    void this.#publishStatus('disconnected')
     if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
     this.#proactiveTimer = undefined
     this.#failPending('Fabric 客户端连接已断开')
@@ -292,5 +299,10 @@ export class FabricBridgeClient implements ActionExecutor {
       pending.resolve({ ok: false, detail })
     }
     this.#pending.clear()
+  }
+
+  async #publishStatus(phase: RuntimeStatus['phase']): Promise<void> {
+    try { await this.#statusHandler(phase, this.snapshot()) }
+    catch (error) { this.#logger.warn('写入运行状态失败', error) }
   }
 }

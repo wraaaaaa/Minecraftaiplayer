@@ -1,0 +1,155 @@
+let state
+let dirty = false
+
+const $ = id => document.getElementById(id)
+const value = id => $(id).value
+const number = id => Number($(id).value)
+const checked = id => $(id).checked
+const lines = id => value(id).split(/\r?\n/).map(item => item.trim()).filter(Boolean)
+const set = (id, next) => { $(id).value = next ?? '' }
+const setNumber = (id, next) => { $(id).value = Number(next ?? 0) }
+const setChecked = (id, next) => { $(id).checked = Boolean(next) }
+
+async function request(url, options = {}) {
+  const response = await fetch(url, { headers: { 'content-type': 'application/json' }, ...options })
+  const payload = await response.json()
+  if (!response.ok || payload.ok === false) throw new Error(payload.error || `请求失败 (${response.status})`)
+  return payload
+}
+
+function toast(message, error = false) {
+  const element = $('toast')
+  element.textContent = message
+  element.className = error ? 'show error' : 'show'
+  clearTimeout(toast.timer)
+  toast.timer = setTimeout(() => { element.className = '' }, 3500)
+}
+
+function setDirty(next) {
+  dirty = next
+  $('saveState').textContent = next ? '有未保存修改' : '设置已同步'
+  $('saveState').style.color = next ? 'var(--amber)' : 'var(--muted)'
+}
+
+function renderStatus(snapshot) {
+  const bot = snapshot.runtime.bot
+  const client = snapshot.runtime.client
+  $('botStatus').textContent = bot.running ? '运行中' : '已停止'
+  $('botStatus').style.color = bot.running ? 'var(--green)' : 'var(--muted)'
+  $('botPid').textContent = bot.pid ? `PID ${bot.pid}` : '没有后台进程'
+  $('clientStatus').textContent = client.running ? '运行中' : '已停止'
+  $('clientStatus').style.color = client.running ? 'var(--green)' : 'var(--muted)'
+  $('clientPid').textContent = client.pid ? `PID ${client.pid}` : '没有后台进程'
+  const mods = snapshot.manifest.files || []
+  $('modCount').textContent = `${mods.length} 个外部模组`
+  $('modSyncTime').textContent = snapshot.manifest.syncedAt ? new Date(snapshot.manifest.syncedAt).toLocaleString() : '尚未同步'
+  const selectedKey = snapshot.config.model.apiKeyEnv
+  $('keyStatus').textContent = snapshot.secrets[selectedKey] ? '已配置' : '未配置'
+  $('keyStatus').style.color = snapshot.secrets[selectedKey] ? 'var(--green)' : 'var(--amber)'
+  const live = snapshot.live
+  const world = live?.world
+  const phaseLabels = { starting: '正在启动', waiting_for_client: '等待游戏客户端', connected: '客户端已连接', in_world: '已进入世界', disconnected: '连接已断开', stopped: '已停止' }
+  $('worldPhase').textContent = live ? (phaseLabels[live.phase] || live.phase) : '没有状态记录'
+  $('worldPosition').textContent = world?.position ? `${world.position.x.toFixed(1)}, ${world.position.y.toFixed(1)}, ${world.position.z.toFixed(1)}` : '—'
+  $('worldVitals').textContent = world && (world.health !== undefined || world.food !== undefined) ? `${world.health ?? '—'} HP / ${world.food ?? '—'}` : '—'
+  $('worldContext').textContent = world ? `${world.dimension || '—'} / ${world.nearbyPlayers?.length ?? 0} 人` : '—'
+  $('modsSummary').textContent = snapshot.manifest.sourceDirectory ? `来源：${snapshot.manifest.sourceDirectory}` : '尚未设置模组来源'
+  $('modList').replaceChildren(...mods.map(mod => {
+    const item = document.createElement('div')
+    item.className = 'mod-item'
+    const name = document.createElement('span')
+    name.textContent = mod.name
+    const size = document.createElement('span')
+    size.textContent = `${(mod.size / 1024 / 1024).toFixed(2)} MB`
+    item.append(name, size)
+    return item
+  }))
+  $('botLogs').textContent = snapshot.logs.bot.join('\n') || '暂无日志'
+  $('gameLogs').textContent = snapshot.logs.game.join('\n') || '暂无日志'
+}
+
+function populate(snapshot) {
+  state = snapshot
+  const c = snapshot.config
+  set('serverAdapter', c.server.adapter); set('serverHost', c.server.host); setNumber('serverPort', c.server.port)
+  set('serverVersion', c.server.version); set('serverUsername', c.server.username); set('serverAuth', c.server.auth)
+  setNumber('connectTimeout', c.server.connectTimeoutMs); setNumber('reconnectDelay', c.server.reconnectDelayMs); setNumber('actionTimeout', c.server.actionTimeoutMs)
+  set('bridgeHost', c.server.bridgeHost); setNumber('bridgePort', c.server.bridgePort)
+  setChecked('easyAuthEnabled', c.easyAuth.enabled); setChecked('registerIfNeeded', c.easyAuth.registerIfNeeded); set('passwordEnv', c.easyAuth.passwordEnv); setNumber('loginDelay', c.easyAuth.loginDelayMs)
+  set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs)
+  setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
+  set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
+  set('personaName', snapshot.persona.name); set('personaDescription', snapshot.persona.description); set('speakingStyle', snapshot.persona.speakingStyle); set('personaGoals', snapshot.persona.goals.join('\n')); set('personaBoundaries', snapshot.persona.boundaries.join('\n'))
+  const r = snapshot.rules
+  setChecked('denyBreaking', r.denyBreakingPlayerProperty); setChecked('denyContainers', r.denyOpeningPlayerContainers); setChecked('denyTaking', r.denyTakingPlayerItems); setChecked('wildernessOnly', r.wildernessDevelopmentOnly); setChecked('allowSelfDefense', r.allowSelfDefense); setNumber('selfDefenseWindow', r.selfDefenseWindowMs); setChecked('stopDefense', r.stopSelfDefenseWhenThreatEnds); setChecked('allowOrderedPvp', r.allowPlayerOrderedPvp); setChecked('allowUnknownDestruction', r.allowDestructiveActionsWhenOwnershipUnknown); setChecked('policyProactive', r.proactiveChat.enabled); setChecked('avoidSecrets', r.proactiveChat.avoidSecrets); setChecked('avoidSpam', r.proactiveChat.avoidSpam)
+  set('modsSource', snapshot.mods.sourceDirectory); setChecked('syncOnStart', snapshot.mods.syncOnClientStart); set('excludePatterns', snapshot.mods.excludeFilePatterns.join('\n'))
+  renderStatus(snapshot)
+  setDirty(false)
+}
+
+function collect() {
+  const c = structuredClone(state.config)
+  Object.assign(c.server, { adapter: value('serverAdapter'), host: value('serverHost').trim(), port: number('serverPort'), version: value('serverVersion').trim(), username: value('serverUsername').trim(), auth: value('serverAuth'), connectTimeoutMs: number('connectTimeout'), reconnectDelayMs: number('reconnectDelay'), bridgeHost: value('bridgeHost').trim(), bridgePort: number('bridgePort'), actionTimeoutMs: number('actionTimeout') })
+  Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
+  Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout') })
+  Object.assign(c.chat, { requireMention: checked('requireMention'), replyPrefix: value('replyPrefix'), cooldownMs: number('cooldownMs'), proactiveEnabled: checked('proactiveEnabled'), proactiveIdleMs: number('proactiveIdleMs'), proactiveMinIntervalMs: number('proactiveMinIntervalMs') })
+  Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), maxEvents: number('maxEvents') })
+  Object.assign(c.logging, { file: value('logFile').trim(), level: value('logLevel'), console: checked('logConsole') })
+  const persona = { name: value('personaName').trim(), description: value('personaDescription').trim(), speakingStyle: value('speakingStyle').trim(), goals: lines('personaGoals'), boundaries: lines('personaBoundaries') }
+  const rules = { version: 1, denyBreakingPlayerProperty: checked('denyBreaking'), denyOpeningPlayerContainers: checked('denyContainers'), denyTakingPlayerItems: checked('denyTaking'), wildernessDevelopmentOnly: checked('wildernessOnly'), allowSelfDefense: checked('allowSelfDefense'), selfDefenseWindowMs: number('selfDefenseWindow'), stopSelfDefenseWhenThreatEnds: checked('stopDefense'), allowPlayerOrderedPvp: checked('allowOrderedPvp'), allowDestructiveActionsWhenOwnershipUnknown: checked('allowUnknownDestruction'), proactiveChat: { enabled: checked('policyProactive'), avoidSecrets: checked('avoidSecrets'), avoidSpam: checked('avoidSpam') } }
+  const mods = { sourceDirectory: value('modsSource').trim(), syncOnClientStart: checked('syncOnStart'), excludeFilePatterns: lines('excludePatterns') }
+  return { config: c, persona, rules, mods }
+}
+
+async function load() {
+  try { populate(await request('/api/snapshot')) } catch (error) { toast(error.message, true) }
+}
+
+async function save() {
+  try {
+    $('saveButton').disabled = true
+    await request('/api/settings', { method: 'PUT', body: JSON.stringify(collect()) })
+    toast('全部设置已安全保存')
+    await load()
+  } catch (error) { toast(error.message, true) } finally { $('saveButton').disabled = false }
+}
+
+async function saveSecrets() {
+  try {
+    const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey') }
+    await request('/api/secrets', { method: 'PUT', body: JSON.stringify(secrets) })
+    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey']) set(id, '')
+    toast('密钥已保存到本机 .env，不会在页面中回显')
+    await refreshStatus()
+  } catch (error) { toast(error.message, true) }
+}
+
+async function action(url, success) {
+  try {
+    document.querySelectorAll('.runtime-actions button').forEach(button => { button.disabled = true })
+    await request(url, { method: 'POST', body: '{}' })
+    toast(success)
+    await new Promise(resolve => setTimeout(resolve, 700))
+    await refreshStatus()
+  } catch (error) { toast(error.message, true) } finally { document.querySelectorAll('.runtime-actions button').forEach(button => { button.disabled = false }) }
+}
+
+async function refreshStatus() {
+  try { const next = await request('/api/snapshot'); state.runtime = next.runtime; state.manifest = next.manifest; state.live = next.live; state.secrets = next.secrets; state.logs = next.logs; renderStatus({ ...state, ...next }) } catch (error) { toast(error.message, true) }
+}
+
+$('saveButton').addEventListener('click', save)
+$('reloadButton').addEventListener('click', () => { if (!dirty || confirm('放弃尚未保存的修改？')) load() })
+$('saveSecretsButton').addEventListener('click', saveSecrets)
+$('startButton').addEventListener('click', () => action('/api/runtime/start', 'Bot 已在后台启动'))
+$('stopButton').addEventListener('click', () => action('/api/runtime/stop', 'Bot 已停止'))
+$('restartButton').addEventListener('click', () => action('/api/runtime/restart', 'Bot 已重新启动'))
+$('syncModsButton').addEventListener('click', async () => { try { if (dirty) await save(); await request('/api/mods/sync', { method: 'POST', body: '{}' }); toast('服务器模组同步完成'); await load() } catch (error) { toast(error.message, true) } })
+$('testModelButton').addEventListener('click', async () => { try { $('modelTestResult').textContent = '正在进行一次最小请求…'; const result = await request('/api/model/test', { method: 'POST', body: '{}' }); $('modelTestResult').textContent = `${result.model} · ${result.elapsedMs}ms · ${result.effectiveEffort}`; toast('模型接口测试成功') } catch (error) { $('modelTestResult').textContent = ''; toast(error.message, true) } })
+$('refreshLogsButton').addEventListener('click', refreshStatus)
+document.querySelectorAll('input, select, textarea').forEach(control => control.addEventListener('input', () => setDirty(true)))
+document.querySelectorAll('.sidebar a').forEach(link => link.addEventListener('click', () => { document.querySelectorAll('.sidebar a').forEach(item => item.classList.remove('active')); link.classList.add('active') }))
+window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = '' } })
+
+load()
+setInterval(() => { if (!dirty) refreshStatus() }, 10000)

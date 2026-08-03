@@ -59,7 +59,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
       adapter: 'fabric_bridge', host: 'ciallo.kim', port: 25565, version: '26.2', username: 'CialloAI', auth: 'offline',
       connectTimeoutMs: 2000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
     },
-    easyAuth: { enabled: true, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
+    easyAuth: { enabled: true, registerIfNeeded: true, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
     model: { provider: 'deepseek', model: 'test', apiKeyEnv: 'TEST_KEY', baseUrl: 'https://example.invalid', reasoningEffort: 'low', timeoutMs: 1000 },
     chat: { requireMention: true, replyPrefix: '', cooldownMs: 10, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
     storage: { memoryFile: path.join(directory, 'memory.json'), experienceFile: path.join(directory, 'experience.json'), maxEvents: 10 },
@@ -69,7 +69,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
   const logger = new Logger(config.logging)
   const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
   await memory.load()
-  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules) })
+  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), statusHandler: async () => {} })
 
   try {
     const connecting = bridge.connect()

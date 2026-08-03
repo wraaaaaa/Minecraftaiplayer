@@ -37,9 +37,8 @@ if ($needsFabricApi) {
 
 if (-not [string]::IsNullOrWhiteSpace($AdditionalModsDirectory)) {
     $resolvedMods = (Resolve-Path -LiteralPath $AdditionalModsDirectory).Path
-    Get-ChildItem -LiteralPath $resolvedMods -Filter '*.jar' -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $modsDirectory $_.Name) -Force
-    }
+    & node (Join-Path $projectRoot 'scripts\sync-client-mods.mjs') --source $resolvedMods
+    if ($LASTEXITCODE -ne 0) { throw 'Server mod synchronization failed.' }
 }
 
 @(

@@ -23,6 +23,15 @@ if ($config.server.adapter -ne 'fabric_bridge') {
     throw 'The headless Fabric client requires server.adapter=fabric_bridge.'
 }
 
+$modsConfigFile = Join-Path $projectRoot 'config\mods.json'
+if (Test-Path -LiteralPath $modsConfigFile) {
+    $modsConfig = Get-Content -LiteralPath $modsConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($modsConfig.syncOnClientStart) {
+        & node (Join-Path $projectRoot 'scripts\sync-client-mods.mjs')
+        if ($LASTEXITCODE -ne 0) { throw 'Server mod synchronization failed.' }
+    }
+}
+
 $minecraftHome = if ([string]::IsNullOrWhiteSpace($env:MCAI_MINECRAFT_HOME)) {
     Join-Path $env:APPDATA '.minecraft'
 } else {
@@ -53,6 +62,8 @@ if (Test-Path -LiteralPath $pidFile) {
 
 $env:MCAI_SERVER_HOST = [string]$config.server.host
 $env:MCAI_SERVER_PORT = [string]$config.server.port
+$env:MCAI_EASYAUTH_ENABLED = [string]$config.easyAuth.enabled
+$env:MCAI_EASYAUTH_REGISTER_IF_NEEDED = [string]$config.easyAuth.registerIfNeeded
 $offline = $config.server.auth -eq 'offline'
 if (-not $offline) {
     throw 'Microsoft authentication is not implemented for the headless Fabric launcher yet. Use auth=offline for this server.'

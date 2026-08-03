@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Minecraft AI 总控台</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">MINECRAFT AI PLAYER</p>
+      <h1>Bot 总控台</h1>
+    </div>
+    <div class="top-actions">
+      <span id="saveState" class="save-state">尚未修改</span>
+      <button id="reloadButton" class="button ghost">重新读取</button>
+      <button id="saveButton" class="button primary">保存全部设置</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="sidebar" aria-label="设置导航">
+      <a href="#overview" class="active">运行概览</a>
+      <a href="#server">服务器</a>
+      <a href="#model">大模型</a>
+      <a href="#chat">聊天与自主</a>
+      <a href="#persona">AI 人设</a>
+      <a href="#policy">行为安全</a>
+      <a href="#mods">服务器模组</a>
+      <a href="#storage">存储与日志</a>
+      <a href="#logs">运行日志</a>
+    </nav>
+
+    <main>
+      <section id="overview" class="hero panel">
+        <div>
+          <p class="eyebrow">LOCAL CONTROL CENTER</p>
+          <h2>一个页面管理 Bot 的连接、思考和行为</h2>
+          <p class="muted">页面仅监听本机 127.0.0.1，不会向服务器或公网暴露管理接口。</p>
+        </div>
+        <div class="runtime-actions">
+          <button id="startButton" class="button success">启动 Bot</button>
+          <button id="restartButton" class="button ghost">重新启动</button>
+          <button id="stopButton" class="button danger">停止 Bot</button>
+        </div>
+        <div class="status-grid">
+          <article class="status-card"><span>AI 控制器</span><strong id="botStatus">检查中</strong><small id="botPid">—</small></article>
+          <article class="status-card"><span>Minecraft 客户端</span><strong id="clientStatus">检查中</strong><small id="clientPid">—</small></article>
+          <article class="status-card"><span>服务器模组</span><strong id="modCount">0 个</strong><small id="modSyncTime">尚未同步</small></article>
+          <article class="status-card"><span>模型密钥</span><strong id="keyStatus">未配置</strong><small>只显示状态，不回传内容</small></article>
+        </div>
+        <div class="world-strip">
+          <span><small>游戏阶段</small><strong id="worldPhase">未运行</strong></span>
+          <span><small>坐标</small><strong id="worldPosition">—</strong></span>
+          <span><small>生命 / 饱食度</small><strong id="worldVitals">—</strong></span>
+          <span><small>维度 / 附近玩家</small><strong id="worldContext">—</strong></span>
+        </div>
+      </section>
+
+      <section id="server" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">CONNECTION</p><h2>服务器与客户端</h2></div><details><summary>这些参数有什么用？</summary><p>这里决定 Bot 用什么身份、通过哪种适配器连接哪个服务器。模组服应保持 Fabric 桥；本机桥地址不要改成公网地址。</p></details></div>
+        <div class="form-grid three">
+          <label>接入方式<select id="serverAdapter"><option value="fabric_bridge">Fabric 原生桥（推荐）</option><option value="mineflayer">Mineflayer 诊断</option></select></label>
+          <label>服务器地址<input id="serverHost" type="text"></label>
+          <label>服务器端口<input id="serverPort" type="number" min="1" max="65535"></label>
+          <label>Minecraft 版本<input id="serverVersion" type="text"></label>
+          <label>Bot 游戏名<input id="serverUsername" type="text" maxlength="16"></label>
+          <label>账号模式<select id="serverAuth"><option value="offline">离线账号</option><option value="microsoft">Microsoft 正版（尚未实现）</option></select></label>
+          <label>连接等待（毫秒）<input id="connectTimeout" type="number" min="1000"></label>
+          <label>断线重连间隔（毫秒）<input id="reconnectDelay" type="number" min="1000"></label>
+          <label>动作超时（毫秒）<input id="actionTimeout" type="number" min="1000"></label>
+          <label>本机桥地址<input id="bridgeHost" type="text"></label>
+          <label>本机桥端口<input id="bridgePort" type="number" min="1024" max="65535"></label>
+        </div>
+        <div class="subpanel">
+          <h3>EasyAuth</h3>
+          <div class="toggle-row"><label class="switch"><input id="easyAuthEnabled" type="checkbox"><span></span>启用服内认证</label><label class="switch"><input id="registerIfNeeded" type="checkbox"><span></span>首次进入时允许自动注册</label></div>
+          <div class="form-grid three"><label>密码变量名<input id="passwordEnv" type="text"></label><label>登录等待（毫秒）<input id="loginDelay" type="number" min="0"></label><label>EasyAuth 密码<input id="minecraftPassword" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label></div>
+        </div>
+      </section>
+
+      <section id="model" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">INTELLIGENCE</p><h2>大模型</h2></div><details><summary>推理强度说明</summary><p>强度越高通常思考更久、费用更高。DeepSeek 会把 low/medium/high 映射到 high，把 xhigh/max 映射到 max；none 会关闭思考。</p></details></div>
+        <div class="form-grid three">
+          <label>供应商<select id="modelProvider"><option value="deepseek">DeepSeek</option><option value="volcengine">火山方舟 / 豆包</option><option value="openai">OpenAI</option></select></label>
+          <label>模型或端点 ID<input id="modelName" type="text"></label>
+          <label>推理强度<select id="reasoningEffort"><option>none</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
+          <label class="span-two">API Base URL<input id="modelBaseUrl" type="url"></label>
+          <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000"></label>
+          <label>密钥变量名<input id="apiKeyEnv" type="text"></label>
+          <label>DeepSeek API Key<input id="deepseekKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+          <label>火山方舟 API Key<input id="arkKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+          <label>OpenAI API Key<input id="openaiKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+        </div>
+        <div class="inline-actions"><button id="saveSecretsButton" class="button ghost">安全保存密钥</button><button id="testModelButton" class="button ghost">最小额度测试模型</button><span id="modelTestResult" class="muted"></span></div>
+      </section>
+
+      <section id="chat" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>主动聊天会不会刷屏？</summary><p>空闲时间和最小间隔共同限制主动发言；还会经过行为规则。关闭“允许主动聊天”即可完全禁用。</p></details></div>
+        <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>必须提到 Bot 名称才回复</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>允许空闲主动聊天</label></div>
+        <div class="form-grid three"><label>回复前缀<input id="replyPrefix" type="text"></label><label>聊天冷却（毫秒）<input id="cooldownMs" type="number" min="0"></label><label>进入空闲（毫秒）<input id="proactiveIdleMs" type="number" min="1000"></label><label>主动发言最小间隔（毫秒）<input id="proactiveMinIntervalMs" type="number" min="1000"></label></div>
+      </section>
+
+      <section id="persona" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">PERSONA</p><h2>AI 人设</h2></div><details><summary>如何写人设？</summary><p>描述“它是谁”和“怎么说话”，目标写希望长期坚持的方向，边界写绝对不能做的事。每行一个目标或边界。</p></details></div>
+        <div class="form-grid two"><label>角色名称<input id="personaName" type="text"></label><label>说话风格<input id="speakingStyle" type="text"></label><label class="span-two">角色描述<textarea id="personaDescription" rows="3"></textarea></label><label>长期目标（每行一个）<textarea id="personaGoals" rows="6"></textarea></label><label>角色边界（每行一个）<textarea id="personaBoundaries" rows="6"></textarea></label></div>
+      </section>
+
+      <section id="policy" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">SAFETY</p><h2>行为安全</h2></div><details open><summary>为什么默认很保守？</summary><p>Bot 目前还不能可靠识别所有建筑和领地。无法判断归属时拒绝破坏，能避免误拆玩家成果；自卫只针对刚刚实际攻击 Bot 的玩家。</p></details></div>
+        <div class="policy-grid">
+          <label class="switch"><input id="denyBreaking" type="checkbox"><span></span>禁止破坏玩家财产</label><label class="switch"><input id="denyContainers" type="checkbox"><span></span>禁止打开玩家容器</label><label class="switch"><input id="denyTaking" type="checkbox"><span></span>禁止拿走玩家物品</label><label class="switch"><input id="wildernessOnly" type="checkbox"><span></span>只能在荒野自主发展</label><label class="switch"><input id="allowSelfDefense" type="checkbox"><span></span>允许受击后自卫</label><label class="switch"><input id="stopDefense" type="checkbox"><span></span>威胁结束立即停止</label><label class="switch"><input id="allowOrderedPvp" type="checkbox"><span></span>允许玩家命令 Bot 主动 PVP</label><label class="switch"><input id="allowUnknownDestruction" type="checkbox"><span></span>允许破坏未知归属内容（危险）</label><label class="switch"><input id="policyProactive" type="checkbox"><span></span>规则层允许主动聊天</label><label class="switch"><input id="avoidSecrets" type="checkbox"><span></span>主动聊天避免秘密</label><label class="switch"><input id="avoidSpam" type="checkbox"><span></span>主动聊天避免刷屏</label>
+        </div>
+        <label class="narrow">自卫有效窗口（毫秒）<input id="selfDefenseWindow" type="number" min="1000"></label>
+      </section>
+
+      <section id="mods" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">MOD COMPATIBILITY</p><h2>服务器模组</h2></div><details><summary>以后服务器加新模组怎么办？</summary><p>把新客户端模组放进来源文件夹，然后点“立即同步”。系统会删除上次由它复制的旧版本、复制新版本并记录 SHA-256，不会删除项目桥或固定 Fabric API。</p></details></div>
+        <div class="form-grid two"><label class="span-two">模组来源文件夹<input id="modsSource" type="text" placeholder="例如 D:\Minecraft\服务器客户端模组"></label><label class="switch"><input id="syncOnStart" type="checkbox"><span></span>每次启动客户端前自动同步</label><label>排除文件名规则（每行一个正则）<textarea id="excludePatterns" rows="4"></textarea></label></div>
+        <div class="inline-actions"><button id="syncModsButton" class="button primary">立即同步模组</button><span id="modsSummary" class="muted"></span></div>
+        <div id="modList" class="mod-list"></div>
+      </section>
+
+      <section id="storage" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json 和 experience.json。前者保存所有玩家和长期记忆，后者保存总结经验；程序还会生成 .bak。</p></details></div>
+        <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label></div>
+      </section>
+
+      <section id="logs" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">DIAGNOSTICS</p><h2>最近日志</h2></div><button id="refreshLogsButton" class="button ghost">刷新</button></div>
+        <div class="log-grid"><div><h3>AI 控制器</h3><pre id="botLogs">暂无日志</pre></div><div><h3>Minecraft 客户端</h3><pre id="gameLogs">暂无日志</pre></div></div>
+      </section>
+    </main>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

@@ -8,6 +8,7 @@ import { MinecraftClient } from '../minecraft/minecraft-client.js'
 import { FabricBridgeClient } from '../minecraft/fabric-bridge-client.js'
 import { PolicyEngine } from '../policy/policy-engine.js'
 import { AgentController } from '../agent/agent-controller.js'
+import { RuntimeStatusStore } from './status-store.js'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -24,14 +25,18 @@ export class BotRuntime {
     const { config, persona, rules, apiKey, easyAuthPassword } = this.#loaded
     const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
     const experience = new ExperienceStore(config.storage.experienceFile)
-    await Promise.all([memory.load(), experience.load()])
+    const status = new RuntimeStatusStore()
+    await Promise.all([memory.load(), experience.load(), status.load()])
+    const serverLabel = `${config.server.host}:${config.server.port}`
+    await status.report('starting', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
     while (!this.#stopping) {
       const policy = new PolicyEngine(rules)
       const client = config.server.adapter === 'fabric_bridge'
-        ? new FabricBridgeClient({ config, persona, logger: this.#logger, memory, policy })
+        ? new FabricBridgeClient({ config, persona, logger: this.#logger, memory, policy, statusHandler: (phase, world) => status.report(phase, config.server.adapter, serverLabel, world) })
         : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
+      await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
       const controller = new AgentController({ config, persona, provider, memory, experience, policy, executor: client, logger: this.#logger })
       client.setMessageHandler((identity, message, world) => controller.handlePlayerMessage(identity, message, world))
       client.setProactiveHandler((world) => controller.proactiveTick(world))
@@ -45,6 +50,7 @@ export class BotRuntime {
       await client.close('reconnect')
       if (!this.#stopping) await delay(config.server.reconnectDelayMs)
     }
+    await status.report('stopped', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
     await this.#logger.flush()
   }
 

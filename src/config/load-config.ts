@@ -42,7 +42,7 @@ function requirePositiveInteger(value: unknown, name: string): asserts value is 
   if (!Number.isInteger(value) || Number(value) <= 0) throw new Error(`${name} 必须是正整数`)
 }
 
-function validateConfig(config: BotConfig): void {
+export function validateConfig(config: BotConfig): void {
   if (!['fabric_bridge', 'mineflayer'].includes(config.server?.adapter)) throw new Error('server.adapter 只能是 fabric_bridge 或 mineflayer')
   requireString(config.server?.host, 'server.host')
   requirePositiveInteger(config.server?.port, 'server.port')
@@ -62,6 +62,7 @@ function validateConfig(config: BotConfig): void {
   if (path.resolve(config.storage.memoryFile) === path.resolve(config.storage.experienceFile)) {
     throw new Error('记忆文件与经验文件必须分开')
   }
+  if (typeof config.easyAuth?.registerIfNeeded !== 'boolean') throw new Error('easyAuth.registerIfNeeded 必须是布尔值')
 }
 
 export interface LoadedProjectConfig {

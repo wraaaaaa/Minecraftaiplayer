@@ -13,6 +13,7 @@
     "dev": "tsx src/index.ts",
     "postinstall": "node scripts/apply-minecraft-data-26.2.mjs",
     "prefetch:minecraft": "node scripts/prefetch-minecraft-libraries.mjs",
+    "sync:mods": "node scripts/sync-client-mods.mjs",
     "probe": "tsx src/probe.ts",
     "start": "node dist/src/index.js",
     "start:background": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-background.ps1",
@@ -21,6 +22,10 @@
     "stop:client": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-headless-client.ps1",
     "start:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-all-background.ps1",
     "stop:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-all-background.ps1",
+    "webui": "node dist/src/webui/server.js",
+    "start:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-webui-background.ps1",
+    "stop:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-webui-background.ps1",
+    "dashboard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-control-center.ps1",
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {

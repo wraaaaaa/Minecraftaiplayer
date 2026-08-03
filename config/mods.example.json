@@ -1,0 +1,8 @@
+{
+  "sourceDirectory": "",
+  "syncOnClientStart": true,
+  "excludeFilePatterns": [
+    "^fabric-api-.*\\.jar$",
+    "^minecraft-ai-fabric-bridge-.*\\.jar$"
+  ]
+}

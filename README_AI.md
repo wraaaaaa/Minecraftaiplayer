@@ -14,6 +14,11 @@
 6. DeepSeek 不是多模态模型，AI 根基必须是结构化世界状态、API/指令和动作接口，不能依赖视觉、听觉或模拟人类桌面操作。
 7. Bot 运行时必须静默在后台。
 8. 用户授权开发完成后先自行测试目标服务器；测试必须低风险，不聊天、不移动、不尝试密码时无需额外确认。
+9. 必须提供简洁直观的图形总控页面，集中修改 Bot 可设置参数、查看状态和解释复杂功能；本项目选择仅本机 WebUI。
+10. 当前开发机的目标服模组包位于 `D:\开发\进服必须mod`；必须支持未来新 mod 的受管理添加/升级。
+11. 最终面向没有任何运行环境的纯净 Windows，优先提供一键安装程序，失败时提供人工教程。
+12. 人类 README 必须说明各文件作用/原理，以及每个参数具体存储位置。
+13. 当前电脑开启全局美国 VPN，任何本机下载成功都不得标记为“中国大陆无代理实测通过”。
 
 任何代码、配置、依赖、部署、架构或测试变化没有同时反映到两份 README，就不能视为完成。
 
@@ -22,10 +27,10 @@
 - 工作区：`D:\开发\minecraft aibot`
 - 远端：`https://github.com/wraaaaaa/Minecraftaiplayer.git`
 - 远端名/默认分支：`origin` / `main`
-- 本轮大规模开发前的 HEAD：`16a04c7 docs: capture AI player requirements baseline`
+- 当前补充需求开发前的 HEAD：`9f44535 feat: add headless Fabric AI player foundation`（已在 origin/main）。
 - 更早提交：`c638099 docs: establish human and AI project guides`、`93dd822 Initial commit`
 - 仓库级作者：`wraaaaaa <310438732+wraaaaaa@users.noreply.github.com>`（仅在本仓库配置过；不要擅改全局 Git 身份）。
-- 本文件记录时，本轮代码尚待最终测试、提交和推送；接手时以 `git status --short --branch` 和 `git log` 为准。
+- 本文件记录时，WebUI/模组同步/一键安装/真实进服补充轮尚待最终回归、提交和推送；接手时以 `git status --short --branch` 和 `git log` 为准。
 
 安全推送流程：
 
@@ -56,6 +61,8 @@ Node.js TypeScript AI 控制器
   ├─ Policy
   ├─ Memory / Experience
   └─ Runtime / JSONL Logger
+       ↕ data/runtime-status.json
+本机 WebUI 127.0.0.1:3210（设置、状态、启停、模组、日志）
 ```
 
 Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户端对象状态，向 Node 发玩家聊天、系统消息、世界状态、受击者信息；Node 只发送白名单动作。大模型不看画面、不听声音、不直接发任意网络包或系统命令。
@@ -71,21 +78,25 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - 聊天提及、冷却、主动聊天调度、结构化 JSON 决策解析和长度清洗。
 - 动作：none、stop、chat、follow_player、come_to_player、look_at_player、wander、attack_player。策略层还理解但 Fabric 暂不执行 break_block/open_container，用于先拒绝危险动作。
 - EasyAuth：进入世界后环境变量直发 `login <password>`，不是把命令交给 LLM；日志和系统消息脱敏。
+- EasyAuth 已改为提示优先：识别 `/login` 或 `/register`；`registerIfNeeded` 控制首次注册，5 秒无提示才回退登录；两种命令及实际密码都脱敏。
 - 受击 Mixin：只有真实 `Player` 造成伤害才发 `attacked_by_player`；Node 策略在 15 秒窗口内只允许攻击该人一次/受控反击。
 - Windows 后台 Node、后台 Headless Minecraft、组合启停，PID 与可执行路径核验。
-- 国内资源预取、哈希校验、隔离游戏目录和服务器客户端模组复制入口。
+- 国内资源预取、哈希校验、隔离游戏目录和受管理服务器模组同步。当前外部包 24 个 jar，跳过旧 Fabric API 后导入 23 个，并生成 SHA-256 清单。
 - Mineflayer 26.2 诊断适配和目标服探针，但不会用于正式模组连接。
+- 本机 WebUI：全部配置表单、解释、运行/世界状态、启停、模组同步、日志、秘密状态和最小模型测试；只绑定 loopback，Host/Origin 校验，CSP，无外部 CDN。
+- `runtime-status.json` 原子状态通道，Fabric 每秒世界快照供独立 WebUI 读取。
+- 纯净 Windows 一键入口：winget 安装 Node LTS/JDK25→创建本地配置→Node/Fabric 构建→校验资源→Headless→模组→WebUI；支持手动跳过环境安装。
 
 ### 尚未完成
 
-- 缺目标服务器完整客户端模组包，因此尚未进入世界、执行 EasyAuth、聊天或动作的目标服端到端测试。
+- 已真实进入目标服务器世界；由于未注入 EasyAuth 密码，尚未验证注册/登录、LLM 聊天和动作端到端。
 - 可靠寻路、避障、采集、挖掘、制作、放置、战斗循环和自主生存闭环。
 - “荒无人烟选址”的世界扫描/领地判断；当前策略保守拒绝破坏，安全但不自主发展。
 - 经验自动总结目前只有存储与提示检索基础，未形成完整任务结果→失败归因→复验闭环。
 - Microsoft 正版认证自动化、皮肤/披风设置；Fabric 后台脚本当前面向 `offline`。
-- Simple Voice Chat API/UDP 适配；当前只有未来模块边界，没有语音代码。
+- Simple Voice Chat 已兼容加载、加入服务器并发起 secret 请求，但 headless OpenAL 不可用，当前日志为 Speaker unavailable，未实现语音收发。
 - Linux systemd/无界面启动脚本；核心可移植，现有运维脚本是 PowerShell/Windows。
-- 三个真实模型端到端调用未测试，因为工作区没有用户 API Key；不要伪造已验证结论。
+- 用户在聊天中提供了一个余额有限的 DeepSeek Key。**不得在任何文件、命令记录、工具输出或本文复述其值**；当前尚未安全注入工作区，因此真实模型调用仍待通过 WebUI秘密表单做一次最小测试。因 Key 已出现在聊天，最终提醒用户轮换。
 
 ## 4. 文件地图
 
@@ -97,12 +108,17 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `.npmrc` | `registry=https://registry.npmmirror.com` |
 | `.env.example` | 秘密变量模板；代码会加载被忽略的 `.env`，但不覆盖进程环境已有变量 |
 | `.gitignore` | 排除 node_modules、dist、data、logs、本地配置、Fabric 构建缓存、`.runtime`、HeadlessMC 临时目录 |
+| `Install-and-Open-Control-Center.cmd` | 纯净 Windows 双击入口 |
 | `config/bot.example.json` | 服务器、桥、EasyAuth、模型、聊天、存储、日志完整示例 |
 | `config/persona.example.json` | 默认人设；本地复制为被忽略的 `persona.json` |
+| `config/mods.example.json` | 模组来源、启动同步和排除正则模板；实际 `mods.json` 被忽略 |
 | `config/behavior-rules.json` | 版本化行为准则，当前允许受控自卫、拒绝财产破坏 |
 | `scripts/start-background.ps1` / `stop-background.ps1` | 隐藏 Node 控制器与精确 PID 停止 |
 | `scripts/start-headless-client.ps1` / `stop-headless-client.ps1` | 隐藏 HeadlessMc 父进程及其项目子进程 |
 | `scripts/start-all-background.ps1` / `stop-all-background.ps1` | 组合启停；客户端启动失败时回滚控制器 |
+| `scripts/start-webui-background.ps1` / `stop-webui-background.ps1` / `open-control-center.ps1` | 本机总控台隐藏启停与打开浏览器 |
+| `scripts/install-windows.ps1` | winget 环境安装与完整部署；`-SkipEnvironmentInstall` 手动环境回退，`-NoOpen` 自动测试用 |
+| `scripts/sync-client-mods.mjs` | 受管理 mod 替换、SHA-256 清单；跳过 Fabric API/桥重复项 |
 
 ### Node 控制器
 
@@ -123,8 +139,11 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `src/minecraft/minecraft-client.ts` | Mineflayer 备选诊断适配器，pathfinder 加载与基础动作 |
 | `src/minecraft/easy-auth.ts` | Mineflayer 路线 EasyAuth 辅助；Fabric 路线在模组中执行 |
 | `src/runtime/bot-runtime.ts` | 选择适配器、生命周期、关闭后重连 |
+| `src/runtime/status-store.ts` | 原子写 `data/runtime-status.json` 供独立 WebUI 显示世界状态 |
+| `src/webui/server.ts` | loopback HTTP/API、设置校验、秘密写入、启停、同步、模型最小测试 |
 | `src/index.ts` | 信号处理与主入口 |
 | `src/probe.ts` | 不发聊天/动作的只读连接探针 |
+| `public/webui/index.html` / `styles.css` / `app.js` | 无外部依赖的图形总控台、响应式布局与表单交互 |
 
 ### Fabric 桥
 
@@ -146,6 +165,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `scripts/prefetch-minecraft-libraries.mjs` | 读 BMCLAPI 26.2 元数据，按当前 OS 规则下载客户端及 88 个库/原生包，逐项官方 SHA-1 验证 |
 | `scripts/install-headlessmc.ps1` | 下载固定 HeadlessMc 2.10.0 并校验 SHA-256 |
 | `scripts/prepare-fabric-client.ps1` | 复制桥、下载固定 Fabric API、合并额外模组到隔离实例 |
+| `.runtime/minecraft/managed-mods.json` | 忽略的运行清单：来源、同步时间、23 个文件的大小/SHA-256 |
 | `test/*.test.ts` | 决策、记忆、经验、策略、日志脱敏、桥协议回环测试 |
 
 运行时生成内容均被忽略：`data/`、`logs/`、`dist/`、`.runtime/`、`HeadlessMC/`、Fabric `build/.gradle/run`。
@@ -158,6 +178,8 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - `bridgeHost` 必须保持 loopback；当前默认 `127.0.0.1:8765`。
 - `auth`: 目标服是 `offline`。
 - `connectTimeoutMs`: Node 等 Fabric 桥的单次等待；超时后必须确保 server close，再重试，避免 EADDRINUSE。
+- `easyAuth.registerIfNeeded`: 只在服务器明确发 `/register` 提示时允许创建离线服内账号；未给密码的探针绝不注册。
+- `config/mods.json`: `sourceDirectory`、`syncOnClientStart`、排除正则；当前开发机实际文件被忽略但指向用户给的目录。
 
 秘密：
 
@@ -166,9 +188,9 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - `ARK_API_KEY`
 - `OPENAI_API_KEY`
 
-运维覆盖：`MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_VERSION`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_SERVER_HOST`、`MCAI_SERVER_PORT`。后两个由启动脚本从 bot config 传给 Fabric 子进程。
+运维覆盖：`MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_VERSION`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_SERVER_HOST`、`MCAI_SERVER_PORT`、`MCAI_WEBUI_PORT`。服务器和 EasyAuth开关由启动脚本从 bot config 传给 Fabric 子进程。
 
-绝对禁止把登录命令原文交给 LLM。Fabric `GAME` 消息会正则替换 `/login <anything>`，并再次替换实际密码。Logger 也递归脱敏典型 key/authorization/password/token 值。
+绝对禁止把登录命令原文交给 LLM。Fabric `GAME` 消息会正则替换 `/login` 和 `/register` 参数，并再次替换实际密码。Logger 也递归脱敏典型 key/authorization/password/token 值。WebUI `GET` 只返回秘密是否存在；`PUT /api/secrets` 可写 `.env` 但响应不含值，运行中更新同时替换 WebUI 进程环境。
 
 ## 6. 关键技术决策与研究结果
 
@@ -210,9 +232,21 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 
 模型决策必须过 PolicyEngine。无法确认物品归属时拒绝破坏；玩家命令也不能绕过禁止 PVP。受击事件来自客户端 Mixin 而不是 LLM 猜测，攻击者姓名必须匹配，窗口过期后拒绝。完整领地/建筑识别前不要实现随意挖掘。
 
+### ADR-007：管理面采用仅本机、无外部前端依赖的 WebUI
+
+绑定 `127.0.0.1:3210`，不用云端托管、不向 LAN 暴露。原因：页面含启停和秘密写入能力，远程发布会扩大攻击面；纯 HTML/CSS/JS 不需 CDN，符合中国网络和一键部署。API 验证 Host/Origin、CSP、路径范围、1 MiB body；所有配置保存前走后端 schema，Fabric bridge 仍只允许 loopback。
+
+### ADR-008：外部服务器模组采用清单式同步
+
+直接重复复制会同时留下新旧 jar 或两个 Fabric API，Fabric Loader 会因重复 mod ID 失败。`sync-client-mods.mjs` 只删除上一份 manifest 声明的受管理文件，再复制当前来源并 SHA-256；排除固定 Fabric API/bridge。不要改成清空整个 `mods/`，那里可能有未知的用户文件。
+
+### ADR-009：纯净 Windows 使用 winget 引导，手动安装为回退
+
+双击 cmd 调 PowerShell；缺 Node/JDK 时安装 `OpenJS.NodeJS.LTS` 和 `EclipseAdoptium.Temurin.25.JDK`，之后走与人工部署完全相同的构建/校验脚本。没有 winget 或网络不可用时，README 引导手动 Node 22+/Temurin 25，再用 `-SkipEnvironmentInstall`，避免把 winget 当唯一渠道。
+
 ## 7. 中国大陆网络实现与实测
 
-实测环境：Windows，中文且含空格项目路径，Asia/Shanghai，普通中国网络。PowerShell 5 对无 BOM UTF-8 中文脚本曾出现解析错误，因此所有运行脚本的输出/异常文本改为 ASCII；README 仍为 UTF-8。路径参数显式加引号，后台 Node 中文路径启动已测试。
+实测环境：Windows，中文且含空格项目路径，Asia/Shanghai。**用户于 2026-08-04 明确说明电脑全局挂美国 VPN**，此前“普通中国网络”表述作废。所有下载/构建结果只能证明功能路线和哈希正确，不能证明中国大陆无代理可达。PowerShell 5 对无 BOM UTF-8 中文脚本曾出现解析错误，因此所有运行脚本的输出/异常文本保持 ASCII；README 仍为 UTF-8。路径参数显式加引号，后台 Node 中文路径启动已测试。
 
 ### npm
 
@@ -237,7 +271,7 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 4. 默认从 CERNET `https://mirrors.cernet.edu.cn/bmclapi/<maven path>` 下载，支持镜像变量覆盖。
 5. 已有文件同样校验 SHA-1；错误文件会重新下载并原子替换。
 
-当前 Windows 实测：共 88 个所需库；首次下载 60、缓存 28、失败 0；再次运行缓存 88、失败 0。客户端 jar也已从 BMCLAPI成功获取并通过 official SHA-1。
+当前（VPN 环境）Windows 功能实测：共 88 个所需库；首次下载 60、缓存 28、失败 0；再次运行缓存 88、失败 0。客户端 jar也已从 BMCLAPI成功获取并通过 official SHA-1。必须另找无代理干净 Windows 做中国大陆验收。
 
 注意：Gradle 初次构建曾卡在 Microsoft/Mojang 的 client/server jar（`.part` 为 0 字节）；实测通过 BMCLAPI 下载与官方 SHA-1 一致的 client/server 放入 Loom cache 后构建完成。新环境优先先运行 `npm run prefetch:minecraft`，但 Loom 自身 server merge 仍可能需要单独镜像改进，这是后续中国网络工作的一个待办。
 
@@ -261,14 +295,27 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 8. 离线身份访问 Realms/Profile certificates 的 401 是预期噪声，不阻断 `online-mode:false` 普通服务器。
 9. 测试 Java/Node/HeadlessMc 进程均按精确命令行/PID核验后停止；没有遗留 Bot 会话。
 
-下一次完整目标服测试的唯一外部前置：用户/服主提供 **同一版本完整客户端模组包**。不要靠猜测逐个下载 611 项；模组版本、依赖和配置必须与服务器整合包一致。拿到后：
+### 服务器模组包成功进服测试
+
+第二轮测试时间：2026-08-04 01:05–01:07（Asia/Shanghai）。用户提供 `D:\开发\进服必须mod`：24 个 jar，总约 37 MiB。同步器排除包内 `fabric-api-0.152.2+26.2.jar`，保留项目 `0.156.0+26.2`，导入其余 23 个。包含 beautify、Farmers Delight、Waystones、Xaero minimap/worldmap、REI、Inventory Profiles、Simple Voice Chat 及其依赖。
+
+实测证据：
+
+1. Fabric Loader 成功加载整套模组和 bridge，无重复 ID/缺依赖崩溃。
+2. `01:06:58 Connecting to ciallo.kim, 25565`；此前 611 registry entries 错误消失。
+3. Xaero 初始化、服务器 recipes/advancements 同步成功，Node 于 `17:07:02.629Z` 记录 `Fabric 客户端已进入世界`，离线 UUID `caee2f5b-1fe9-3d6c-a9ea-96588c1406b6`。
+4. 服务器提示新账号 `Use /register <password> <password>`，还发放首次加入资源/成就；测试未提供密码，因此没有注册/登录命令，也未发聊天/动作。
+5. Simple Voice Chat 发送 secret request，说明服务器通道/版本适配成功；Headless 无 OpenAL context，Speaker unavailable，当前语音不可用但不影响进服。
+6. 测试后精确停止 HeadlessMC/游戏/Node，无遗留进程。
+
+模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
 .\scripts\prepare-fabric-client.ps1 -AdditionalModsDirectory '<模组包目录>'
-npm run start:all
+npm run sync:mods
 ```
 
-然后验证顺序：注册表同步→joined_world→EasyAuth 登录→只读聊天→look/stop→follow→受击自卫。任何破坏/采集动作在领地策略完成前禁止测试。
+下一步端到端验证顺序：通过 WebUI安全保存 EasyAuth 密码/DeepSeek Key→最小模型 API→注册→重新连接登录→只读聊天→look/stop→follow→受击自卫。任何破坏/采集动作在领地策略完成前禁止测试。
 
 ## 9. 测试和构建手册
 
@@ -297,11 +344,16 @@ Set-Location fabric-bridge
 - Experience 写入/检索。
 - Policy 财产拒绝、未知归属拒绝、未受击 PVP 拒绝、受击者/窗口自卫。
 - Logger 递归秘密与 `/login` 脱敏。
+- DeepSeek 思考/max 映射与 OpenAI Responses 请求使用本机 mock API 验证，不消耗用户额度。
 - Fabric bridge 本机 JSONL hello/state/chat/action/action_result 回环。
 - 后台 Node 启停：中文+空格路径，隐藏窗口，PID 写入/清理。
 - 后台 HeadlessMc 父进程启停。
 - Fabric Gradle build。
 - 国内 Minecraft 依赖预取与真实服务器连接。
+- 服务器 23 个受管理模组同步和完整原生进服。
+- WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；10 项 Node 测试全部通过。
+- `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，36 秒通过。
 
 本文件当前更新后必须再次运行完整测试；接手者不要仅凭“已通过”跳过回归。
 
@@ -316,35 +368,45 @@ Set-Location fabric-bridge
 7. HeadlessMc 会在项目根创建 `HeadlessMC/<uuid>` 临时 native/lib 目录，已加入 `.gitignore`。
 8. 仅装 Fabric API 并不能进入 Fabric 模组服；注册表同步要求客户端具备注册相同内容的模组。
 9. 不要把“online-mode:false”误读成无 EasyAuth；离线 Mojang 认证后仍需服内 `/login`。
+10. 用户模组包含 Fabric API 0.152.2，项目固定 0.156.0；必须排除前者，不能两个一起复制。
+11. 首次离线名会收到 `/register` 而不是 `/login`；EasyAuth 必须提示优先，盲目先 login 会错过注册。
+12. Java `-version` 写 stderr，PowerShell `$ErrorActionPreference=Stop` 会把正常版本输出当 NativeCommandError；环境探测时临时 Continue。
+13. `node -p` 经 PowerShell/函数参数转义容易丢引号；安装器改用 `node --version` 解析主版本。
+14. 用户电脑全局美国 VPN；不要再把当前下载结果写成中国大陆无代理测试。
 
 ## 11. 需求追踪
 
 | ID | 需求 | 状态 |
 | --- | --- | --- |
-| R1 | DeepSeek/豆包/GPT，可调推理 | 适配器已实现；真实 Key/API 回归待做 |
-| R2 | 人设、聊天命令与回复 | MVP 已实现；目标服入服后验证 |
+| R1 | DeepSeek/豆包/GPT，可调推理 | 适配器/WebUI已实现；真实 Key最小回归待做 |
+| R2 | 人设、聊天命令与回复 | MVP/目标服进世界已实现；认证后聊天待验证 |
 | R3 | 单一可迁移记忆文件 | 已实现并测试 |
 | R4 | 不同玩家独立记忆/回复 | UUID 隔离已实现并测试 |
 | R5 | 队友动作、主动聊天、自主发展 | 基础队友动作/主动聊天已实现；完整发展未实现 |
 | R6 | 独立经验文件、避免重复错误 | 存储/检索基础已实现；自动复盘闭环未实现 |
-| R7 | 26.2/Fabric 0.19.3 模组服、本地/服务器 | Windows Headless 链路已实测；等待完整客户端模组包入服 |
-| R8 | EasyAuth | 安全发送/脱敏已实现；服内登录待验证 |
+| R7 | 26.2/Fabric 0.19.3 模组服、本地/服务器 | 23 外部 mod + bridge 真实进入世界 |
+| R8 | EasyAuth | login/register 提示优先、回退和脱敏已实现；密码未注入，待验证 |
 | R9 | 名称、皮肤、披风 | 离线名称已实现；皮肤/披风/MS 登录未实现 |
 | R10 | 搜索/本地化开源方案 | 持续执行；所有固定来源/哈希已记录 |
-| R11 | 语音接口/Simple Voice Chat | 未实现，可选后续 |
+| R11 | 语音接口/Simple Voice Chat | mod/服务器 secret 握手成功；Headless OpenAL不可用，收发未实现 |
 | R12 | 行为规则、荒野、自卫 | 独立规则和自卫已实现；荒野选址未实现 |
 | R13 | 模块化 | 已按 adapter/provider/agent/policy/storage/runtime 分层 |
+| R14 | 图形总控页 | 本机 WebUI 已实现全部设置、状态、解释、启停、模组和日志 |
+| R15 | 后续服务器 mod 更新 | 清单式同步、启动自动同步、WebUI按钮已实现 |
+| R16 | 纯净 Windows 一键部署 | cmd + winget/手动回退脚本已实现，现有环境全流程通过 |
+| R17 | 人类 README 文件/参数原理 | 已增加逐文件和逐 JSON 路径说明 |
+| R18 | 中国网络测试口径 | 已纠正 VPN 口径；无代理干净机验收仍待做 |
 
 ## 12. 推荐下一阶段（按顺序）
 
-1. 获取目标服完整 26.2 客户端整合包，完成无破坏端到端入服/EasyAuth/聊天/基础动作测试。
-2. 给 Fabric bridge 增加方块碰撞/危险感知和可靠路径规划；优先 follow/come 的可中断寻路，不先做挖掘。
-3. 实现工具化任务状态机：采集→制作→补给→恢复，所有世界改动前经过 ownership/settlement policy。
-4. 实现荒野选址：检测玩家建筑/容器/农田/红石/领地模组，未知时远离并拒绝破坏。
-5. 完成经验闭环：动作结果与任务结果归因、失败摘要、相似经验检索、复验计数。
-6. 用用户提供的测试 Key 分别验证 DeepSeek、豆包 Seed 2.1 Pro、OpenAI，记录精确 model ID、参数兼容与限流处理；不要凭网页名字猜豆包端点 ID。
-7. 增加 Linux systemd 服务和国内干净环境安装回归。
-8. 实现 Microsoft/皮肤/披风；正版披风只能使用账号已有披风。最后再评估 Simple Voice Chat。
+1. 在总控台由用户安全保存 EasyAuth 密码和 DeepSeek Key；只做一次最小模型调用，再完成注册/登录/聊天/基础动作低风险测试。Key 已在聊天暴露，测试后提醒轮换。
+2. 在一台无 VPN、无 Node/Java/Minecraft 的中国大陆 Windows 验证双击部署器；记录 winget/npm/BMCL/Gradle/Headless每段结果和回退。
+3. 给 Fabric bridge 增加方块碰撞/危险感知和可靠路径规划；优先 follow/come 的可中断寻路，不先做挖掘。
+4. 实现工具化任务状态机：采集→制作→补给→恢复，所有世界改动前经过 ownership/settlement policy。
+5. 实现荒野选址：检测玩家建筑/容器/农田/红石/领地模组，未知时远离并拒绝破坏。
+6. 完成经验闭环：动作结果与任务结果归因、失败摘要、相似经验检索、复验计数。
+7. 验证豆包/OpenAI，记录精确 model ID/限流；不要猜方舟端点 ID。
+8. 增加 Linux systemd；实现 Microsoft/皮肤/披风；最后研究虚拟音频或 Voice Chat API。
 
 ## 13. 每次 Agent 完成前检查
 
