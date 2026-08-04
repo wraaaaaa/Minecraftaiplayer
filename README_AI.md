@@ -102,7 +102,9 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - `start-headless-client.ps1` 的已有 PID 检查必须发生在 mod 同步之前。否则重复双击 Start-Bot 会尝试删除被运行中 Java 锁定的 jar，失败后组合脚本还会回滚停止 Node。已调整为幂等早退；这是 2026-08-04 根目录入口真实测试发现的回归。
 - 组合启动只在“本轮新启动了 Node”且客户端失败时回滚 Node；若 Node 原本已运行（例如 LAN 尚未开放），不能误停现有控制器。
 - 项目目录被复制/移动后，旧 WebUI 可能仍占用 3210，而复制来的 PID JSON 只凭“同一个 node/java 可执行文件”会误认旧进程属于新目录。所有后台 PID 记录现加入 `projectRoot`/入口标记，启停脚本核对进程命令行；WebUI 启动还核对端口所有者，禁止静默打开另一份项目。秘密和实际配置不会自动跨目录迁移。
+- Windows PowerShell 5 的 `Set-Content -Encoding UTF8` 会给 PID JSON 写 BOM。原 WebUI `JSON.parse(readFile(...))` 因首字符 U+FEFF 抛错，`processStatus` 捕获后错误显示“已停止”，即使 PID 仍活着。统一 `parseJsonDocument` 先剥离 BOM，配置读取也复用；`test/json.test.ts` 固定回归。
 - EasyAuth 的用户名规则是 `^[a-zA-Z0-9_]{3,16}$`。2026-08-04 搬迁诊断中，只读探针确认带 `-` 的名称被 `text.easyauth.disallowedUsername` 拒绝；配置后端、浏览器和测试现统一提前拦截。
+- 死亡自动复活由 Fabric 客户端负责，不能依赖 LLM 看到死亡画面。`MinecraftAiBridgeClient.handleDeath` 检测 `isDeadOrDying/health<=0`，清空移动，默认 3 秒后调用与 26.2 原版 `DeathScreen` 相同的 `LocalPlayer.respawn()` 和 `client.gui.setScreen(null)`；未成功时每 100 tick 重试。`death`/`respawn_requested`/`respawned` 经桥写日志与记忆。`server.autoRespawn`、`respawnDelayMs` 均可在 WebUI 配置，旧 JSON 缺字段时默认 true/3000。
 - 独立 `PARAMETERS.md` 已覆盖秘密、服务器、LAN、EasyAuth、模型、推理、人设、提示词、记忆、经验、皮肤、模组、日志、PID 和 Git 位置。
 
 ### 尚未完成
@@ -346,6 +348,8 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 旧目录实际设置、`.env` 秘密和本地皮肤通过 WebUI API 迁移到新目录，未在终端输出值；带 `-` 的 Bot 名称按 EasyAuth 规则替换为 `_`。只读探针此前收到 `text.easyauth.disallowedUsername`，修正后真实 Fabric Bot 在新目录进入世界，EasyAuth 先返回认证成功再返回已经认证，状态 `in_world`、生命 20、饥饿 20。模型最小请求真实使用 `deepseek-v4-flash`、`high`，约 1254 ms 成功；运行中重复 start API 约 1488 ms 幂等成功。首次 start HTTP 调用等待较长但后台进程实际正常启动，终止调用端后没有遗留 WebUI 子 PowerShell，重复调用正常，因此未判定为服务端死锁。
 
+第五轮死亡恢复回归时间：2026-08-04 09:20–09:29（Asia/Shanghai）。用户观察到 Bot 被 Phantom 击杀后 `runtime-status` 长期 `health=0`；源码确认此前没有死亡分支。使用本机精确 26.2 deobf JAR 的 `javap` 验证原版 `DeathScreen` 调用 `LocalPlayer.respawn()` 后 `client.gui.setScreen(null)`。部署新桥并重连仍处于死亡状态的服务器会话后，01:29:49Z 收到 `death`，01:29:52Z 发送 `respawn_requested` 并收到 `respawned health=20`；最终 `in_world`、生命 20、饥饿 20，证明不是仅靠断线重连恢复。
+
 模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
@@ -390,7 +394,7 @@ Set-Location fabric-bridge
 - 国内 Minecraft 依赖预取与真实服务器连接。
 - 服务器 23 个受管理模组同步和完整原生进服。
 - WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
-- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；18 项 Node 测试全部通过，包含 EasyAuth 用户名规则正反例。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；20 项 Node 测试全部通过，包含 EasyAuth 用户名、自动复活旧配置兼容和 PowerShell BOM JSON。
 - `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，约 85 秒通过。
 - LAN 发现通过真实本机 UDP 组播包和 WebUI 扫描接口验证；实际玩家开放 LAN 世界仍待现场验收。
 - 皮肤 PNG 校验/导入/读取、CustomSkinLoader 安装及多人客户端包生成已验证；临时皮肤与 zip 均留在 Git 忽略的 `.runtime/test-artifacts`，正式配置恢复为禁用状态。
@@ -439,11 +443,11 @@ Set-Location fabric-bridge
 | R19 | 局域网同机/同网游玩 | UDP 组播自动发现、离线强制、WebUI 扫描和解析测试已实现；需用户实际开放 LAN 世界做现场验收 |
 | R20 | 根目录便捷入口 | Open-WebUI/Start-Bot/Stop-Bot 三个 cmd 已实现 |
 | R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
-| R22 | Bug/无效字符/秘密终检 | 已完成：18 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；四个秘密变量均未保存，运行产物被忽略 |
+| R22 | Bug/无效字符/秘密终检 | 已完成：20 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
 
 ## 12. 推荐下一阶段（按顺序）
 
-1. 在总控台由用户安全保存 EasyAuth 密码和 DeepSeek Key；只做一次最小模型调用，再完成注册/登录/聊天/基础动作低风险测试。Key 已在聊天暴露，测试后提醒轮换。
+1. EasyAuth 与 DeepSeek 最小请求已通过；下一步由真人在服内发送一次明确低风险指令，验证玩家聊天→模型决策→基础动作→回复→记忆的真实端到端链路。Key 曾在聊天暴露，测试后提醒轮换。
 2. 在一台无 VPN、无 Node/Java/Minecraft 的中国大陆 Windows 验证双击部署器；记录 winget/npm/BMCL/Gradle/Headless每段结果和回退。
 3. 给 Fabric bridge 增加方块碰撞/危险感知和可靠路径规划；优先 follow/come 的可中断寻路，不先做挖掘。
 4. 实现工具化任务状态机：采集→制作→补给→恢复，所有世界改动前经过 ownership/settlement policy。

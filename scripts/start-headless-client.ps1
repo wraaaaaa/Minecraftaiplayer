@@ -110,6 +110,8 @@ $env:MCAI_SERVER_HOST = $connectionHost
 $env:MCAI_SERVER_PORT = [string]$connectionPort
 $env:MCAI_EASYAUTH_ENABLED = [string]$config.easyAuth.enabled
 $env:MCAI_EASYAUTH_REGISTER_IF_NEEDED = [string]$config.easyAuth.registerIfNeeded
+$env:MCAI_AUTO_RESPAWN_ENABLED = if ($null -eq $config.server.autoRespawn) { 'true' } else { ([bool]$config.server.autoRespawn).ToString().ToLowerInvariant() }
+$env:MCAI_RESPAWN_DELAY_MS = if ($null -eq $config.server.respawnDelayMs) { '3000' } else { [string][int]$config.server.respawnDelayMs }
 $offline = $config.server.auth -eq 'offline'
 if (-not $offline) {
     throw 'Microsoft authentication is not implemented for the headless Fabric launcher yet. Use auth=offline for this server.'

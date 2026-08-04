@@ -30,6 +30,8 @@ OPENAI_API_KEY=OpenAI密钥
 | `auth` | `offline` / `microsoft` | 当前原生无界面启动已实现 `offline`；LAN 模式强制离线。Microsoft 自动登录仍未实现。 |
 | `connectTimeoutMs` | `30000` | 等待连接超时。 |
 | `reconnectDelayMs` | `10000` | 断线后再次连接的等待。 |
+| `autoRespawn` | `true` | 死亡后由原生 Fabric 客户端自动向服务器请求复活。 |
+| `respawnDelayMs` | `3000` | 死亡后等待多久再复活，范围 0-60000；请求失败时每 5 秒重试。 |
 | `bridgeHost` / `bridgePort` | `127.0.0.1` / `8765` | AI 控制器与 Fabric 客户端的本机桥；地址必须保持回环地址。 |
 | `actionTimeoutMs` | `10000` | 单个游戏动作等待结果的最长时间。 |
 

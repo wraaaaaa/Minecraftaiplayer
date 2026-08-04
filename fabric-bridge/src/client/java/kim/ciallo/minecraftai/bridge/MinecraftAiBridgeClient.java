@@ -27,6 +27,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private int lastConnectAttempt = -600;
     private boolean easyAuthSent;
     private boolean easyAuthPromptSeen;
+    private boolean dead;
+    private int deathTick;
+    private int lastRespawnAttempt = -100;
     private int joinedTick;
     private UUID activeSession;
     private MovementTarget movement;
@@ -60,6 +63,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             activeSession = null;
             easyAuthSent = false;
             easyAuthPromptSeen = false;
+            dead = false;
             movement = null;
             autoConnect(client);
             return;
@@ -74,6 +78,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             event.addProperty("uuid", player.getUUID().toString());
             bridge.send(event);
         }
+        if (handleDeath(client, player)) return;
         if (!easyAuthSent && !easyAuthPromptSeen && tick - joinedTick >= 100 && tick % 20 == 0) sendEasyAuth(player);
         processActions(client, player);
         updateMovement(client, player);
@@ -100,6 +105,46 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private static String environment(String name, String fallback) {
         String value = System.getenv(name);
         return value == null || value.isBlank() ? fallback : value.trim();
+    }
+
+    private boolean handleDeath(Minecraft client, LocalPlayer player) {
+        boolean currentlyDead = player.isDeadOrDying() || player.getHealth() <= 0;
+        if (!currentlyDead) {
+            if (dead) {
+                dead = false;
+                JsonObject event = baseMessage("respawned");
+                event.addProperty("health", player.getHealth());
+                bridge.send(event);
+            }
+            return false;
+        }
+
+        if (!dead) {
+            dead = true;
+            deathTick = tick;
+            movement = null;
+            clearMovement(client);
+            JsonObject event = baseMessage("death");
+            event.addProperty("health", player.getHealth());
+            bridge.send(event);
+        }
+
+        if (tick % 20 == 0) bridge.send(buildState(client, player));
+        if (!Boolean.parseBoolean(environment("MCAI_AUTO_RESPAWN_ENABLED", "true"))) return true;
+        int delayTicks;
+        try {
+            delayTicks = Math.max(0, Math.min(1200, Integer.parseInt(environment("MCAI_RESPAWN_DELAY_MS", "3000")) / 50));
+        } catch (NumberFormatException ignored) {
+            delayTicks = 60;
+        }
+        if (tick - deathTick < delayTicks || tick - lastRespawnAttempt < 100) return true;
+        lastRespawnAttempt = tick;
+        player.respawn();
+        client.gui.setScreen(null);
+        JsonObject event = baseMessage("respawn_requested");
+        event.addProperty("delayTicks", delayTicks);
+        bridge.send(event);
+        return true;
     }
 
     private void sendEasyAuth(LocalPlayer player) {

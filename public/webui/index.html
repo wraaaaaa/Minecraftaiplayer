@@ -73,6 +73,8 @@
           <label>连接等待（毫秒）<input id="connectTimeout" type="number" min="1000"></label>
           <label>局域网发现等待（毫秒）<input id="lanDiscoveryTimeout" type="number" min="250" max="60000"></label>
           <label>断线重连间隔（毫秒）<input id="reconnectDelay" type="number" min="1000"></label>
+          <label class="switch"><input id="autoRespawn" type="checkbox"><span></span>死亡后自动复活</label>
+          <label>复活等待（毫秒）<input id="respawnDelay" type="number" min="0" max="60000"></label>
           <label>动作超时（毫秒）<input id="actionTimeout" type="number" min="1000"></label>
           <label>本机桥地址<input id="bridgeHost" type="text"></label>
           <label>本机桥端口<input id="bridgePort" type="number" min="1024" max="65535"></label>

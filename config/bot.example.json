@@ -10,6 +10,8 @@
     "auth": "offline",
     "connectTimeoutMs": 30000,
     "reconnectDelayMs": 10000,
+    "autoRespawn": true,
+    "respawnDelayMs": 3000,
     "bridgeHost": "127.0.0.1",
     "bridgePort": 8765,
     "actionTimeoutMs": 10000

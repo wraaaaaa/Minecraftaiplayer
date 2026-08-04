@@ -191,6 +191,17 @@ export class FabricBridgeClient implements ActionExecutor {
       case 'player_chat': this.#handlePlayerChat(message); break
       case 'game_message': this.#logger.debug('游戏系统消息', { message: message.message }); break
       case 'attacked_by_player': this.#handleAttack(message); break
+      case 'death':
+        this.#logger.warn('Bot 已死亡，等待客户端自动复活')
+        void this.#memory.recordGameEvent('Bot 已死亡，等待自动复活', { health: message.health ?? 0 }).catch((error) => this.#logger.warn('记录死亡事件失败', error))
+        break
+      case 'respawn_requested':
+        this.#logger.info('客户端已向服务器请求自动复活')
+        break
+      case 'respawned':
+        this.#logger.info('Bot 已自动复活', { health: message.health })
+        void this.#memory.recordGameEvent('Bot 已自动复活', { health: message.health ?? 20 }).catch((error) => this.#logger.warn('记录复活事件失败', error))
+        break
       case 'action_result': this.#resolveAction(message); break
     }
   }

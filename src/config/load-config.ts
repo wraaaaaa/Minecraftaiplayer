@@ -1,6 +1,7 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import type { BehaviorRules, BotConfig, Persona, PromptTemplates, ReasoningEffort } from './types.js'
+import { parseJsonDocument } from '../core/json.js'
 
 const VALID_EFFORTS = new Set<ReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
 
@@ -14,7 +15,7 @@ async function exists(file: string): Promise<boolean> {
 }
 
 async function readJson<T>(file: string): Promise<T> {
-  return JSON.parse(await readFile(file, 'utf8')) as T
+  return parseJsonDocument<T>(await readFile(file, 'utf8'))
 }
 
 export async function loadEnvFile(file = path.resolve('.env')): Promise<void> {
@@ -52,6 +53,10 @@ export function validateConfig(config: BotConfig): void {
   requireString(config.server?.username, 'server.username')
   if (!/^[A-Za-z0-9_]{3,16}$/u.test(config.server.username)) {
     throw new Error('server.username 必须是 3-16 位英文字母、数字或下划线；EasyAuth 不接受空格、连字符或中文')
+  }
+  if (config.server.autoRespawn !== undefined && typeof config.server.autoRespawn !== 'boolean') throw new Error('server.autoRespawn 必须是布尔值')
+  if (config.server.respawnDelayMs !== undefined && (!Number.isInteger(config.server.respawnDelayMs) || config.server.respawnDelayMs < 0 || config.server.respawnDelayMs > 60000)) {
+    throw new Error('server.respawnDelayMs 必须是 0-60000 的整数')
   }
   requireString(config.server?.bridgeHost, 'server.bridgeHost')
   requirePositiveInteger(config.server?.bridgePort, 'server.bridgePort')

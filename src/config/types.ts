@@ -12,6 +12,8 @@ export interface BotConfig {
     auth: 'offline' | 'microsoft'
     connectTimeoutMs: number
     reconnectDelayMs: number
+    autoRespawn?: boolean
+    respawnDelayMs?: number
     bridgeHost: string
     bridgePort: number
     actionTimeoutMs: number

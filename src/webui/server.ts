@@ -6,6 +6,7 @@ import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
 import type { BehaviorRules, BotConfig, ModsConfig, Persona, PromptTemplates, SkinConfig } from '../config/types.js'
 import { Logger } from '../core/logger.js'
+import { parseJsonDocument } from '../core/json.js'
 import { createLlmProvider } from '../llm/provider-factory.js'
 import type { RuntimeStatus } from '../runtime/status-store.js'
 import { discoverLanServers } from '../network/lan-discovery.js'
@@ -52,7 +53,7 @@ async function exists(file: string): Promise<boolean> {
 async function readJson<T>(primary: string, fallback?: string): Promise<T> {
   const selected = await exists(primary) ? primary : fallback
   if (!selected) throw new Error(`文件不存在：${primary}`)
-  return JSON.parse(await readFile(selected, 'utf8')) as T
+  return parseJsonDocument<T>(await readFile(selected, 'utf8'))
 }
 
 async function writeJson(file: string, value: unknown): Promise<void> {
