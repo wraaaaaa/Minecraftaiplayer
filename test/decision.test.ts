@@ -13,3 +13,18 @@ test('未知或缺参动作降级为 none', () => {
   assert.deepEqual(parseAgentDecision('{"reply":"好的","action":{"type":"follow_player"}}').action, { type: 'none' })
   assert.deepEqual(parseAgentDecision('{"reply":"好的","action":{"type":"teleport"}}').action, { type: 'none' })
 })
+
+test('把玩家语义的破坏和挖掘动作归一化为受保护采集', () => {
+  assert.deepEqual(
+    parseAgentDecision('{"reply":"我去挖石头。","action":{"type":"break_block","block":"minecraft:stone","count":3,"ownership":"natural"}}').action,
+    { type: 'gather_resource', resource: 'minecraft:stone', count: 3 }
+  )
+  assert.deepEqual(
+    parseAgentDecision('{"reply":"我来采。","action":{"type":"mine_block","resource":"iron","count":2}}').action,
+    { type: 'gather_resource', resource: 'iron', count: 2 }
+  )
+  assert.equal(
+    parseAgentDecision('{"reply":"我来挖。","action":{"type":"break_natural_block"}}').validationError,
+    'break_natural_block 缺少 resource 或 block'
+  )
+})

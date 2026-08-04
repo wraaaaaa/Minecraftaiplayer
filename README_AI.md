@@ -61,16 +61,18 @@ npm test
 - 当前工作树已集成任务队列、多人仲裁、语境寻址、密钥防泄露、WorldState schema v2、生存控制器、基础任务控制器和住所控制器。
 - 后续提交仍必须重新运行验证，不能把本轮结果永久外推到未来工作树。
 
-### 2.2 本轮验证快照（2026-08-04，Asia/Shanghai）
+### 2.2 本轮验证快照（2026-08-05，Asia/Shanghai）
 
-- Node/TypeScript：最终 full `npm test` 为 56 tests、56 pass、0 fail；`tsc --noEmit` 与生产 build 均成功。
-- Fabric：最终 `clean build` 成功，不只是单文件编译。
+- Node/TypeScript：full `npm test` 为 58 tests、58 pass、0 fail；其中包含破坏方块别名与旧提示词兼容测试。`tsc --noEmit` 与生产 build 均成功。
+- Fabric：进食完成判定修改后已完成一次 `clean build`，成功，不只是单文件编译。
+- 审计：暂存新增测试后再次扫描 110 个跟踪文件成功，`--history` 全 Git 对象扫描也成功；均为 0 个秘密、编码、控制/零宽字符或乱码问题。
+- 真实目标服：新 jar 已复制到 `.runtime` 且与构建产物 SHA-256 一致；后台重启后重新连接本机桥并进入 `你的域名.com`，WorldState schema v2 正常。开发区仍关闭，未执行破坏；显式进食修复需要玩家下一条“吃一个土豆”指令完成现场后置条件验收。
 - WebUI：完成浏览器回归；发现并修复 checkbox 区域横向溢出。
 - 真实目标服：确认客户端上报 WorldState schema v2；实测生命值约 9.3 且低饱食时触发 `eat_best_food`，进食后饱食恢复到 16。
 - 用户先前已经确认进服和跟随功能正常。
 - 真实服开发区保持关闭，因此 `gather_resource`、`craft_item`、`build_shelter`、`seek_shelter` 尚未完成现场验收。禁止把自动测试或 Gradle build 当成这些世界动作已经通过。
 
-该快照不包含固定提交 SHA。56 是本轮最终工作树的历史验证记录，不是未来提交的固定期望；后续 Agent 必须按当前 HEAD 重新查询和运行测试，测试数量随代码变化是正常现象。
+该快照不包含固定提交 SHA。测试数量不是固定期望；后续 Agent 必须按当前 HEAD 重新查询和运行测试，测试数量随代码变化是正常现象。
 
 ### 2.3 功能状态矩阵
 
@@ -423,10 +425,11 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - `use_item`
 - `collect_own_drops`
 - `gather_resource`
+- `break_block`（仅模型兼容入口，Node 会转换为 `gather_resource`）
 - `craft_item`
 - `seek_shelter`、`build_shelter`、`wait_safe`
 
-`attack_player` 只给本地自卫链路使用，默认模型合约不公开它。`break_block` 会被解析器拒绝并要求改用 `gather_resource`。`open_container` 虽有内部类型和策略分支，但 Fabric 执行器没有实现，也未对模型公开。
+`attack_player` 只给本地自卫链路使用，默认模型合约不公开它。`break_block`、`mine_block`、`break_natural_block` 在 `parseAgentDecision` 中只读取 `block/resource/blockId` 和 `count`，统一归一化为 `gather_resource`；模型给出的坐标和 `ownership` 都不会进入执行动作。`buildSystemPrompt` 会在自定义 `actionContract` 之后追加同样的兼容规则，因此升级用户即使保留忽略的旧版 `config/prompts.json`，模型也不会再以“动作列表没有破坏方块”为由拒绝。授权仍由 capability、policy 和 Fabric 开发区验证完成。`open_container` 虽有内部类型和策略分支，但 Fabric 执行器没有实现，也未对模型公开。
 
 ## 10. 本地控制器技术细节
 
@@ -452,6 +455,7 @@ Primitive 与 Shelter 互斥；显式生存动作也不与它们并发。自动�
 - 只接受同时具有 FOOD 和 CONSUMABLE 组件、当前可食用且没有消费效果回调的确定性安全食物。
 - 优先快捷栏；背包里有安全食物时通过正常容器 SWAP 移到快捷栏。
 - 只有观察到服务端同步后的物品数量减少才把显式动作判为成功。
+- 完成检查必须先于 `player.isUsingItem()`：持续按住使用键时，客户端可能在吃掉一份后立即开始使用同一格的下一份食物，导致 `isUsingItem()` 始终为真。控制器现在保存初始物品种类和数量；观察到空栈、物品种类改变（例如汤变成碗）或数量减少后，先递增 `completedFoodConsumptions`、释放使用键，再让显式动作返回成功。
 - 3.25 格内有立即威胁时会中断进食。
 
 敌对生物：
@@ -493,6 +497,7 @@ Primitive 与 Shelter 互斥；显式生存动作也不与它们并发。自动�
 - 通过正常 start/continue destroy；只有观察到原方块状态改变才计数。
 - 新出现的附近掉落登记为 Bot 自己产生的 provenance。
 - Primitive 只负责采下并登记掉落；AgentController 在采集成功后自动执行一次 `collect_own_drops`，把“资源进入背包”作为玩家任务和空闲自发展采集的整体后置条件。
+- 玩家语义的 `break_block` 并不是第二套破坏执行器；Node 在策略检查前就把它转换为本段同一个 `gather_resource`。因此不存在通过模型声明 `ownership:natural` 或伪造坐标绕过区域验证的路径。
 
 `collect_own_drops`：
 
@@ -959,6 +964,20 @@ git push origin main
 5. 若确需迁移本地业务数据，停机后逐文件备份并校验目标；不要复制 PID、日志、bridge token 或整个 `.runtime`。
 
 ## 21. 已知技术债和下一阶段顺序
+
+### 21.1 开源 Minecraft Bot 方案评估（2026-08-05）
+
+本轮只做架构与许可证评估，没有直接复制第三方源码，也没有把不兼容 jar 放入运行环境。后续引入前必须固定上游提交、保留许可证/NOTICE、审查供应链与远程代码执行面，并为中国网络准备可校验的镜像或仓库内固定来源。
+
+| 项目 | 可借鉴内容 | 当前不能直接接入的原因 | 建议接入方式 |
+| --- | --- | --- | --- |
+| [Baritone](https://github.com/cabaletta/baritone) | Fabric 原生 Java 寻路、`goto`/`mine` 目标、复杂地形与 A* | 上游主页当前列出的 Fabric 快速版本止于 1.21.8，未给出本项目 Minecraft 26.2/Fabric Loader 0.19.3 的可直接使用构建；LGPL-3.0 还要求明确合规边界 | 第一优先候选。先做独立 `PathPlannerAdapter`，只调用公开 `baritone.api`，在隔离 26.2 分支完成映射迁移、模组握手与许可证审查后再替换直线移动；不要先把命令聊天透传给模型 |
+| [mineflayer-collectblock](https://github.com/PrismarineJS/mineflayer-collectblock) | `寻路→最佳工具→挖掘→收掉落` 的高层采集阶段和队列设计 | 依赖 Mineflayer、pathfinder、tool；目标模组服正式路线必须是真实 Fabric 客户端，而且 Mineflayer 上游公开支持范围与 26.2 不一致 | 借鉴阶段机与错误分类，继续在 `PrimitiveTaskController` 以正常客户端 API 重写；当前 `GatherResourceTask` 已覆盖其核心顺序并增加开发区/provenance/服务端后置条件 |
+| [Voyager](https://github.com/MineDojo/Voyager) | 自动课程、可检索技能库、环境反馈/执行错误/自验证循环、任务分解 | 示例测试栈是 Fabric 1.19、GPT-4、额外 Python/Mineflayer 环境，不能作为 26.2 模组客户端；其任意代码技能不符合本项目服务器安全边界 | 借鉴持久任务图与“技能模板+前置/后置条件+经验修正”，技能必须来自本地审核白名单，不允许模型直接生成并执行宿主代码 |
+| [Mindcraft](https://github.com/mindcraft-bots/mindcraft) | 多模型配置、Mineflayer 技能组合、多人协作思路 | 上游说明当前支持到 1.21.11，并明确警告启用模型写/执行代码会有提示注入风险；仍不是 26.2 Fabric 模组客户端 | 只借鉴模型/技能调度结构。禁止移植 `allow_insecure_coding` 类能力，模型输出继续限制为当前 JSON 动作契约 |
+| [Mineflayer](https://github.com/PrismarineJS/mineflayer) | 成熟的方块/实体/背包/合成 API，以及 pathfinder、auto-eat、tool、PVP 等插件生态 | 上游当前公开支持到 1.21.11；无真实 Fabric 模组容器与服务器同模组握手能力 | 保留只读协议探针和测试参考，不替换正式 `fabric_bridge`；可将插件的行为拆成 Java 端可验证原语 |
+
+选择原则：路径规划优先研究 Baritone；采集状态机参考 collectblock；长期任务/经验参考 Voyager；模型技能编排参考 Mindcraft。任何方案都必须经过 `AgentAction → capability → policy → Fabric 后置条件`，不能让第三方库绕开财产保护、开发区、玩家距离、停止抢占和任务恢复。可选依赖默认关闭，安装失败不能阻断现有中国网络下的核心启动链。
 
 按优先级继续：
 

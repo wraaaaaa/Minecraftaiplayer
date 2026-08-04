@@ -20,6 +20,7 @@ import net.minecraft.world.entity.monster.piglin.AbstractPiglin;
 import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
@@ -82,6 +83,7 @@ public final class SurvivalController {
     private int eatingSlot = -1;
     private long eatingStartedTick;
     private int eatingInitialCount;
+    private Item eatingInitialItem;
     private long completedFoodConsumptions;
     private long successfulAttacks;
     private Snapshot snapshot = new Snapshot(
@@ -129,6 +131,7 @@ public final class SurvivalController {
         if (client == null || player == null || client.level == null || client.gameMode == null) {
             releaseControls(client);
             eatingSlot = -1;
+            eatingInitialItem = null;
             snapshot = new Snapshot(Mode.DISCONNECTED, false, List.of("not_in_world"), null, "not_in_world");
             return;
         }
@@ -376,6 +379,7 @@ public final class SurvivalController {
         eatingSlot = choice.slot();
         eatingStartedTick = localTick;
         eatingInitialCount = selected.getCount();
+        eatingInitialItem = selected.getItem();
         client.options.keyUse.setDown(true);
         return true;
     }
@@ -387,8 +391,18 @@ public final class SurvivalController {
         }
 
         ItemStack selected = player.getInventory().getSelectedItem();
+        // A held use key can immediately begin using the next item in the same stack. Observe the
+        // server-synchronised stack mutation before isUsingItem(), otherwise a completed meal can
+        // remain reported as "consuming_safe_food" until the explicit action times out.
+        if (selected.isEmpty()
+            || selected.getItem() != eatingInitialItem
+            || selected.getCount() < eatingInitialCount) {
+            completedFoodConsumptions++;
+            cancelEating(client, player);
+            return false;
+        }
+
         if (selected.isEmpty() || safeFoodProperties(player, selected) == null) {
-            if (selected.isEmpty() || selected.getCount() < eatingInitialCount) completedFoodConsumptions++;
             cancelEating(client, player);
             return false;
         }
@@ -404,8 +418,8 @@ public final class SurvivalController {
         }
 
         client.options.keyUse.setDown(false);
-        if (selected.getCount() < eatingInitialCount) completedFoodConsumptions++;
         eatingSlot = -1;
+        eatingInitialItem = null;
         return false;
     }
 
@@ -415,6 +429,7 @@ public final class SurvivalController {
             client.gameMode.releaseUsingItem(player);
         }
         eatingSlot = -1;
+        eatingInitialItem = null;
     }
 
     private boolean attackThreat(Minecraft client, LocalPlayer player, LivingEntity threat) {

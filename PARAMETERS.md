@@ -141,7 +141,7 @@ WebUI 可查看玩家档案、最近事件、经验摘要，并直接导出两�
 
 - 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`wander`、聊天与 `stop`。移动是轻量键位控制，不保证复杂地形绕路。
 - 生存/战斗：`eat_best_food`、`equip_best`、`prepare_for`、`attack_hostile`，以及仅在程序记录的短时自卫窗口内允许的 `attack_player`。不会盲目攻击中立或高风险目标。
-- 物品/生产：`use_item`、`gather_resource`、`collect_own_drops`、`craft_item`。采集需要开发区和玩家距离，合成只支持已解锁的玩家 2×2 配方；不支持任意直接破坏、玩家/未知归属容器、工作台 3×3、熔炼或自动多阶段资源链。
+- 物品/生产：`use_item`、`gather_resource`、模型兼容入口 `break_block`、`collect_own_drops`、`craft_item`。`break_block` 使用 `block/count`，进入执行器前必定转换为 `gather_resource(resource/count)`，不能携带坐标或自行声明归属。采集需要 `autonomy.autoGather:true`、已启用的 `developmentZone` 和玩家安全距离；合成只支持已解锁的玩家 2×2 配方。不支持任意坐标直接破坏、玩家/未知归属容器、工作台 3×3、熔炼或自动多阶段资源链。
 - 安全/住所：`seek_shelter`、`build_shelter`、`wait_safe`。寻找住所会依次尝试同维度已记录住所、主世界未占用床附近的安全位置、实测安全点；找到床不会自动睡觉。
 
 固定住所外壳为 3×3、三格高，使用现有 3×3 稳定地面。背包必须预先具备：一个 `DoorBlock` 且可手动开关、一支普通 `minecraft:torch`、至少 23 个同一种安全实心满方块，并保持普通背包界面和空鼠标游标。整个施工目标必须在批准开发区内；候选空间需可替换、无方块实体和占位实体，门位不得受红石供电，8 格内不得有敌对威胁，其他玩家必须在 `wildernessMinPlayerDistance` 之外。门、火把和外壳全部走正常多人放置，并在服务端同步状态稳定后才计为完成；住所最终还要验证外壳、门关闭、内部光照和安全落脚点，成功后才写 `autonomy-state.json`。材料不足、移动卡住、保护插件拒绝、玩家靠近、断线或持久化失败都会明确返回失败。

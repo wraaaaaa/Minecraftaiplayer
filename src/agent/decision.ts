@@ -50,8 +50,17 @@ function normalizeAction(value: unknown): { action: AgentAction; error?: string 
       return { action: { type, count, radius, ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {}) } }
     }
     case 'gather_resource':
-      if (typeof action.resource !== 'string' || !action.resource.trim()) return { action: { type: 'none' }, error: 'gather_resource 缺少 resource' }
-      return { action: { type, resource: action.resource.trim().slice(0, 80), count: integer(action.count, 1, 64, 1) } }
+    case 'break_block':
+    case 'mine_block':
+    case 'break_natural_block': {
+      const resource = [action.resource, action.block, action.blockId]
+        .find(candidate => typeof candidate === 'string' && candidate.trim())
+      if (typeof resource !== 'string') return { action: { type: 'none' }, error: `${type} 缺少 resource 或 block` }
+      // Every model-facing mining alias is deliberately normalised to the same guarded primitive.
+      // The model cannot provide ownership evidence or a coordinate; Fabric selects and verifies
+      // the matching natural block inside the administrator-approved development zone.
+      return { action: { type: 'gather_resource', resource: resource.trim().slice(0, 80), count: integer(action.count, 1, 64, 1) } }
+    }
     case 'craft_item':
       if (typeof action.itemId !== 'string' || !action.itemId.trim()) return { action: { type: 'none' }, error: 'craft_item 缺少 itemId' }
       return { action: { type, itemId: action.itemId.trim(), count: integer(action.count, 1, 64, 1) } }
@@ -60,8 +69,6 @@ function normalizeAction(value: unknown): { action: AgentAction; error?: string 
     case 'seek_shelter': return { action: { type: 'seek_shelter' } }
     case 'build_shelter': return { action: { type: 'build_shelter' } }
     case 'wait_safe': return { action: { type: 'wait_safe' } }
-    case 'break_block':
-      return { action: { type: 'none' }, error: '模型不能直接声明方块归属；请使用 gather_resource，由 Fabric 安全层选择并验证目标' }
     case 'open_container':
       if (!['player', 'unknown'].includes(String(action.ownership))) return { action: { type: 'none' }, error: 'open_container 缺少可验证归属' }
       return { action: { type: 'open_container', ownership: action.ownership as 'player' | 'unknown' } }
