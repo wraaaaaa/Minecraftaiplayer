@@ -105,6 +105,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - Windows PowerShell 5 的 `Set-Content -Encoding UTF8` 会给 PID JSON 写 BOM。原 WebUI `JSON.parse(readFile(...))` 因首字符 U+FEFF 抛错，`processStatus` 捕获后错误显示“已停止”，即使 PID 仍活着。统一 `parseJsonDocument` 先剥离 BOM，配置读取也复用；`test/json.test.ts` 固定回归。
 - EasyAuth 的用户名规则是 `^[a-zA-Z0-9_]{3,16}$`。2026-08-04 搬迁诊断中，只读探针确认带 `-` 的名称被 `text.easyauth.disallowedUsername` 拒绝；配置后端、浏览器和测试现统一提前拦截。
 - 死亡自动复活由 Fabric 客户端负责，不能依赖 LLM 看到死亡画面。`MinecraftAiBridgeClient.handleDeath` 检测 `isDeadOrDying/health<=0`，清空移动，默认 3 秒后调用与 26.2 原版 `DeathScreen` 相同的 `LocalPlayer.respawn()` 和 `client.gui.setScreen(null)`；未成功时每 100 tick 重试。`death`/`respawn_requested`/`respawned` 经桥写日志与记忆。`server.autoRespawn`、`respawnDelayMs` 均可在 WebUI 配置，旧 JSON 缺字段时默认 true/3000。
+- 服务器称号/聊天插件把玩家消息通过 `ClientReceiveMessageEvents.GAME` 发送为 `<[称号]玩家名> 内容`，而不是签名 `CHAT`；此前 Node 只 debug 记录 `game_message`，AI 永远收不到。`chat-parser.ts` 现在只接受尖括号格式，循环剥离方括号前缀，最终名称必须匹配 Minecraft 规则；再复用 `#handlePlayerChat`。同玩家同正文 1500 ms 去重，防止 GAME/CHAT 双通道重复回复。不要放宽成任意系统文本解析。
 - 独立 `PARAMETERS.md` 已覆盖秘密、服务器、LAN、EasyAuth、模型、推理、人设、提示词、记忆、经验、皮肤、模组、日志、PID 和 Git 位置。
 
 ### 尚未完成
@@ -350,6 +351,8 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 第五轮死亡恢复回归时间：2026-08-04 09:20–09:29（Asia/Shanghai）。用户观察到 Bot 被 Phantom 击杀后 `runtime-status` 长期 `health=0`；源码确认此前没有死亡分支。使用本机精确 26.2 deobf JAR 的 `javap` 验证原版 `DeathScreen` 调用 `LocalPlayer.respawn()` 后 `client.gui.setScreen(null)`。部署新桥并重连仍处于死亡状态的服务器会话后，01:29:49Z 收到 `death`，01:29:52Z 发送 `respawn_requested` 并收到 `respawned health=20`；最终 `in_world`、生命 20、饥饿 20，证明不是仅靠断线重连恢复。
 
+第六轮聊天诊断时间：2026-08-04 09:32–09:49（Asia/Shanghai）。游戏日志持续出现 `<[称号]玩家名> 内容`，最近 20 条聊天中 8 条为该格式，8 条包含当前 Bot 名；配置 `requireMention:false`，但 Node 日志没有 `已处理玩家消息/失败`。根因是这些内容走 Fabric `GAME` 而非签名 `CHAT`。新增 `parseDecoratedPlayerChat`、GAME 回退和 1500 ms 去重；Node/本机桥集成测试验证称号剥离、mention 清理和重复抑制。热重启控制器后 55 秒没有新服内发言，故真实 DeepSeek 回复尚待用户再发一条，不得标记为现场通过。
+
 模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
@@ -394,7 +397,7 @@ Set-Location fabric-bridge
 - 国内 Minecraft 依赖预取与真实服务器连接。
 - 服务器 23 个受管理模组同步和完整原生进服。
 - WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
-- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；20 项 Node 测试全部通过，包含 EasyAuth 用户名、自动复活旧配置兼容和 PowerShell BOM JSON。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；23 项 Node 测试全部通过，包含 EasyAuth 用户名、自动复活、PowerShell BOM JSON、插件聊天解析与去重。
 - `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，约 85 秒通过。
 - LAN 发现通过真实本机 UDP 组播包和 WebUI 扫描接口验证；实际玩家开放 LAN 世界仍待现场验收。
 - 皮肤 PNG 校验/导入/读取、CustomSkinLoader 安装及多人客户端包生成已验证；临时皮肤与 zip 均留在 Git 忽略的 `.runtime/test-artifacts`，正式配置恢复为禁用状态。
@@ -443,7 +446,7 @@ Set-Location fabric-bridge
 | R19 | 局域网同机/同网游玩 | UDP 组播自动发现、离线强制、WebUI 扫描和解析测试已实现；需用户实际开放 LAN 世界做现场验收 |
 | R20 | 根目录便捷入口 | Open-WebUI/Start-Bot/Stop-Bot 三个 cmd 已实现 |
 | R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
-| R22 | Bug/无效字符/秘密终检 | 已完成：20 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
+| R22 | Bug/无效字符/秘密终检 | 已完成：23 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
 
 ## 12. 推荐下一阶段（按顺序）
 

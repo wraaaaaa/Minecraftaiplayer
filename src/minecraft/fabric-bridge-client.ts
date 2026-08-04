@@ -7,6 +7,7 @@ import type { BotConfig, Persona } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
 import type { MemoryStore, PlayerIdentity } from '../memory/memory-store.js'
 import type { RuntimeStatus } from '../runtime/status-store.js'
+import { parseDecoratedPlayerChat } from './chat-parser.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
@@ -54,6 +55,7 @@ export class FabricBridgeClient implements ActionExecutor {
   #endResolve: ((reason: string) => void) | undefined
   #connected = false
   #closing = false
+  readonly #recentPlayerChats = new Map<string, number>()
 
   constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine; statusHandler: (phase: RuntimeStatus['phase'], world: WorldState) => Promise<void> }) {
     this.#config = options.config
@@ -189,7 +191,12 @@ export class FabricBridgeClient implements ActionExecutor {
         break
       case 'state': this.#updateState(message); break
       case 'player_chat': this.#handlePlayerChat(message); break
-      case 'game_message': this.#logger.debug('游戏系统消息', { message: message.message }); break
+      case 'game_message': {
+        this.#logger.debug('游戏系统消息', { message: message.message })
+        const parsed = typeof message.message === 'string' ? parseDecoratedPlayerChat(message.message) : null
+        if (parsed) this.#handlePlayerChat({ type: 'player_chat', name: parsed.name, message: parsed.message })
+        break
+      }
       case 'attacked_by_player': this.#handleAttack(message); break
       case 'death':
         this.#logger.warn('Bot 已死亡，等待客户端自动复活')
@@ -226,6 +233,14 @@ export class FabricBridgeClient implements ActionExecutor {
   #handlePlayerChat(message: BridgeMessage): void {
     if (!message.name || !message.message || !this.#messageHandler) return
     if (message.name.toLowerCase() === this.#config.server.username.toLowerCase()) return
+    const now = Date.now()
+    const signature = `${message.name.toLowerCase()}\u0000${message.message}`
+    const previous = this.#recentPlayerChats.get(signature)
+    if (previous !== undefined && now - previous < 1500) return
+    this.#recentPlayerChats.set(signature, now)
+    if (this.#recentPlayerChats.size > 100) {
+      for (const [key, seenAt] of this.#recentPlayerChats) if (now - seenAt >= 1500) this.#recentPlayerChats.delete(key)
+    }
     const identity: PlayerIdentity = { name: message.name, ...(message.uuid ? { uuid: message.uuid } : {}) }
     if (!this.#isAddressed(message.message)) {
       void this.#memory.recordPlayerMessage(identity, message.message).catch((error) => this.#logger.warn('记录旁听聊天失败', error))
