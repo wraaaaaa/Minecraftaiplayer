@@ -15,7 +15,7 @@ import { PolicyEngine } from '../src/policy/policy-engine.js'
 const config: BotConfig = {
   server: { adapter: 'fabric_bridge', connectionMode: 'direct', host: 'localhost', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline', connectTimeoutMs: 30000, reconnectDelayMs: 10000, bridgeHost: '127.0.0.1', bridgePort: 8765, actionTimeoutMs: 10000 },
   easyAuth: { enabled: false, registerIfNeeded: false, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 0 },
-  model: { provider: 'deepseek', model: 'mock', apiKeyEnv: 'TEST_KEY', baseUrl: 'http://127.0.0.1', reasoningEffort: 'low', timeoutMs: 5000 },
+  model: { provider: 'deepseek', model: 'mock', apiKeyEnv: 'TEST_KEY', baseUrl: 'http://127.0.0.1', reasoningEffort: 'low', timeoutMs: 5000, maxOutputTokens: 4096 },
   chat: { requireMention: true, replyPrefix: '', cooldownMs: 0, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
   storage: { memoryFile: 'data/memory.json', experienceFile: 'data/experience.json', maxEvents: 100 },
   policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json', promptsFile: 'config/prompts.json', logging: { file: 'logs/bot.log', level: 'error', console: false }
@@ -41,5 +41,19 @@ test('玩家消息经过模型、策略、真实动作接口并写入专属记�
   const alice = saved.players['uuid:alice-uuid']
   assert.ok(alice?.facts.includes('Alice 喜欢结伴探索'))
   assert.deepEqual(saved.events.map(event => event.type), ['player_message', 'fact', 'bot_reply'])
+  await logger.flush()
+})
+
+test('模型超时时在游戏内返回明确提示', async () => {
+  const suffix = `${process.pid}-${Date.now()}-timeout`
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const provider: LlmProvider = { complete: async () => { throw new DOMException('The operation was aborted due to timeout', 'TimeoutError') } }
+  const chats: string[] = []
+  const executor = { execute: async () => ({ ok: true, detail: 'executed' }), chat: async (message: string) => { chats.push(message) } }
+  const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger })
+  await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice-timeout' }, '你好', world)
+  assert.deepEqual(chats, ['我这次思考超时了，请再说一次。'])
   await logger.flush()
 })

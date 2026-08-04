@@ -70,7 +70,9 @@ export class AgentController {
       this.#logger.info('已处理玩家消息', { player: identity.name, model: response.model, requestedEffort: response.requestedEffort, effectiveEffort: response.effectiveEffort, action: decision.action.type, actionOk: actionResult.ok })
     } catch (error) {
       this.#logger.error('处理玩家消息失败', { player: identity.name, error })
-      await this.#executor.chat(`${this.#config.chat.replyPrefix}我刚才处理失败了，稍后再试。`)
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
+      const fallback = timedOut ? '我这次思考超时了，请再说一次。' : '我刚才处理失败了，稍后再试。'
+      await this.#executor.chat(`${this.#config.chat.replyPrefix}${fallback}`)
     }
   }
 

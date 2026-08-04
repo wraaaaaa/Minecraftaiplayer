@@ -94,7 +94,8 @@
           <label>模型或端点 ID<input id="modelName" type="text" placeholder="例如 gpt-5.6-sol；也可填任意账号可用 ID"></label>
           <label>推理强度<select id="reasoningEffort"><option>none</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
           <label class="span-two">API Base URL<input id="modelBaseUrl" type="url"></label>
-          <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000"></label>
+          <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000" max="600000"><small>高推理建议 120000；超时会在游戏内明确提示。</small></label>
+          <label>最大输出 Token<input id="maxOutputTokens" type="number" min="128" max="131072"><small>游戏决策建议 4096，防止模型长时间思考而卡住。</small></label>
           <label>密钥变量名<input id="apiKeyEnv" type="text"></label>
           <label>DeepSeek API Key<input id="deepseekKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
           <label>火山方舟 API Key<input id="arkKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>

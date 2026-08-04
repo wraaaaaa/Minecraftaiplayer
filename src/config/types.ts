@@ -31,6 +31,7 @@ export interface BotConfig {
     baseUrl: string
     reasoningEffort: ReasoningEffort
     timeoutMs: number
+    maxOutputTokens?: number
   }
   chat: {
     requireMention: boolean

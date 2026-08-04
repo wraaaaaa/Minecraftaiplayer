@@ -145,7 +145,8 @@ Copy-Item config\persona.example.json config\persona.json
     "apiKeyEnv": "DEEPSEEK_API_KEY",
     "baseUrl": "https://api.deepseek.com",
     "reasoningEffort": "high",
-    "timeoutMs": 60000
+    "timeoutMs": 120000,
+    "maxOutputTokens": 4096
   }
 }
 ```
@@ -382,7 +383,8 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `model.apiKeyEnv` | `DEEPSEEK_API_KEY` | 当前供应商密钥变量名 |
 | `model.baseUrl` | `https://api.deepseek.com` | API 根地址，可换兼容网关 |
 | `model.reasoningEffort` | `high` | `none/low/medium/high/xhigh/max` |
-| `model.timeoutMs` | `60000` | 单次模型请求超时 |
+| `model.timeoutMs` | `120000` | 单次模型请求超时；高推理建议至少 120 秒 |
+| `model.maxOutputTokens` | `4096` | 单次最大生成量；同时约束推理内容，避免游戏决策长时间卡住 |
 | `chat.requireMention` | `true` | 是否只有提到 Bot/`!` 开头才回复 |
 | `chat.replyPrefix` | 空 | 每次游戏回复前缀 |
 | `chat.cooldownMs` | `2500` | 防止连续回复刷屏 |
@@ -451,9 +453,13 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 确认 WebUI 的“死亡后自动复活”已开启，默认等待 3000 毫秒。Fabric 桥会停止残留移动、调用与原版死亡界面相同的复活接口并清除界面；服务器暂未响应时每 5 秒重试。死亡和复活结果同时写入 Bot 日志与记忆文件。旧配置没有这两个字段时仍默认开启并等待 3 秒。
 
+**Bot 回复“我刚才处理失败了，稍后再试”**
+
+先在 WebUI 点击“测试模型接口”。若最小测试成功而真人消息仍失败，查看 Bot 日志是否为 `TimeoutError`。V4 思考模式可能生成很长的推理内容；按照 [DeepSeek JSON Output 官方说明](https://api-docs.deepseek.com/guides/json_mode/)应合理设置输出上限。本项目默认把最大输出限制为 4096 Token，并把超时设为 120000 毫秒。可在“大模型”页面继续降低推理强度或调整这两个值。新版本遇到超时会明确回复“我这次思考超时了，请再说一次”。
+
 ## 测试状态
 
-截至 2026-08-04，本轮代码已通过 23 项 Node 自动测试、TypeScript 类型检查、生产构建、PowerShell/浏览器脚本语法检查、JSON 解析、UTF-8/异常控制字符扫描与 Git 空白检查；新增测试覆盖 EasyAuth 名称、自动复活配置、PowerShell BOM JSON、插件称号聊天解析与双通道去重。一键安装脚本使用本机已有环境完整执行通过，用时约 85 秒；该结果不能替代无 VPN 的中国大陆纯净 Windows 验收。
+截至 2026-08-04，本轮代码已通过 24 项 Node 自动测试、TypeScript 类型检查、生产构建、PowerShell/浏览器脚本语法检查、JSON 解析、UTF-8/异常控制字符扫描与 Git 空白检查；新增测试覆盖 EasyAuth 名称、自动复活配置、PowerShell BOM JSON、插件称号聊天解析、双通道去重、模型输出预算和超时提示。一键安装脚本使用本机已有环境完整执行通过，用时约 85 秒；该结果不能替代无 VPN 的中国大陆纯净 Windows 验收。
 
 真实目标服测试已让 Fabric 26.2 无界面客户端进入 `你的域名.com:25565` 世界，状态接口返回坐标、20 点生命和 20 点饥饿值；CustomSkinLoader 15.0.1 也在真实客户端成功加载。第一轮未提供秘密；搬迁回归中已经使用本机忽略文件完成 EasyAuth 自动认证和一次 DeepSeek 最小请求。由真人聊天触发模型决策并执行游戏动作仍待单独验收。
 
@@ -464,6 +470,8 @@ LAN 发现已通过真实 UDP 组播收发与 WebUI 扫描接口测试；仍需�
 同日 09:20–09:29 完成真实死亡恢复测试：Bot 被幻翼击杀后健康值持续为 0；部署新版桥并重新连接死亡会话后，日志依次记录“Bot 已死亡”“客户端已向服务器请求自动复活”“Bot 已自动复活”，间隔约 3 秒，随后状态恢复为 `in_world`、生命 20、饥饿 20。
 
 09:32–09:47 的聊天诊断确认服务器将带称号玩家聊天放进 GAME 系统消息通道；当时游戏日志有多条 `<[称号]玩家名> 内容`，但控制器没有任何玩家消息事件，即使 `requireMention:false` 且消息包含当前 Bot 名称。新增解析与双通道去重已通过自动和本机桥集成测试；热部署后的 55 秒观察期没有新的真人发言，因此真实模型回复仍需玩家再发送一条消息确认。
+
+09:58–10:14 的真人消息已证明称号聊天解析和游戏内兜底回复链路生效，但两次完整 DeepSeek 请求都在原 60000 毫秒上限触发 `TimeoutError`。同模型最小请求约 3.1 秒成功；使用完整项目提示词并设置 `max_tokens:4096` 的诊断请求约 5.7 秒正常结束，返回短 JSON。由此加入可配置输出预算、120 秒默认超时及专用超时提示；部署后仍需真人再发一条消息完成最终现场确认。
 
 ## 开发与验证
 

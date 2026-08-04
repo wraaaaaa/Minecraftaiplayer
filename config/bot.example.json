@@ -28,7 +28,8 @@
     "apiKeyEnv": "DEEPSEEK_API_KEY",
     "baseUrl": "https://api.deepseek.com",
     "reasoningEffort": "high",
-    "timeoutMs": 60000
+    "timeoutMs": 120000,
+    "maxOutputTokens": 4096
   },
   "chat": {
     "requireMention": true,

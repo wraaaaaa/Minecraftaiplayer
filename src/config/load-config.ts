@@ -67,6 +67,12 @@ export function validateConfig(config: BotConfig): void {
   requireString(config.model?.apiKeyEnv, 'model.apiKeyEnv')
   requireString(config.model?.baseUrl, 'model.baseUrl')
   if (!VALID_EFFORTS.has(config.model.reasoningEffort)) throw new Error('model.reasoningEffort 无效')
+  if (!Number.isInteger(config.model.timeoutMs) || config.model.timeoutMs < 1000 || config.model.timeoutMs > 600_000) {
+    throw new Error('model.timeoutMs 必须是 1000-600000 的整数')
+  }
+  if (config.model.maxOutputTokens !== undefined && (!Number.isInteger(config.model.maxOutputTokens) || config.model.maxOutputTokens < 128 || config.model.maxOutputTokens > 131_072)) {
+    throw new Error('model.maxOutputTokens 必须是 128-131072 的整数')
+  }
   requireString(config.storage?.memoryFile, 'storage.memoryFile')
   requireString(config.storage?.experienceFile, 'storage.experienceFile')
   if (path.resolve(config.storage.memoryFile) === path.resolve(config.storage.experienceFile)) {

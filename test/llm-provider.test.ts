@@ -24,7 +24,7 @@ async function mockApi(responseBody: unknown): Promise<{ baseUrl: string; reques
 }
 
 function config(provider: BotConfig['model']['provider'], baseUrl: string): BotConfig['model'] {
-  return { provider, model: 'test-model', apiKeyEnv: 'TEST_KEY', baseUrl, reasoningEffort: 'xhigh', timeoutMs: 5000 }
+  return { provider, model: 'test-model', apiKeyEnv: 'TEST_KEY', baseUrl, reasoningEffort: 'xhigh', timeoutMs: 5000, maxOutputTokens: 4096 }
 }
 
 test('DeepSeek 请求显式启用思考并把 xhigh 映射为 max', async () => {
@@ -36,6 +36,7 @@ test('DeepSeek 请求显式启用思考并把 xhigh 映射为 max', async () => 
     assert.equal(received.url, '/chat/completions')
     assert.deepEqual(received.body.thinking, { type: 'enabled' })
     assert.equal(received.body.reasoning_effort, 'max')
+    assert.equal(received.body.max_tokens, 4096)
     assert.equal(result.effectiveEffort, 'max')
   } finally { await logger.flush(); await api.close() }
 })
@@ -48,6 +49,7 @@ test('OpenAI 适配器使用 Responses API 和请求的推理强度', async () =
     const received = await api.request
     assert.equal(received.url, '/responses')
     assert.deepEqual(received.body.reasoning, { effort: 'xhigh' })
+    assert.equal(received.body.max_output_tokens, 4096)
     assert.equal(result.effectiveEffort, 'xhigh')
   } finally { await logger.flush(); await api.close() }
 })

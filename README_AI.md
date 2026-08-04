@@ -106,6 +106,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - EasyAuth 的用户名规则是 `^[a-zA-Z0-9_]{3,16}$`。2026-08-04 搬迁诊断中，只读探针确认带 `-` 的名称被 `text.easyauth.disallowedUsername` 拒绝；配置后端、浏览器和测试现统一提前拦截。
 - 死亡自动复活由 Fabric 客户端负责，不能依赖 LLM 看到死亡画面。`MinecraftAiBridgeClient.handleDeath` 检测 `isDeadOrDying/health<=0`，清空移动，默认 3 秒后调用与 26.2 原版 `DeathScreen` 相同的 `LocalPlayer.respawn()` 和 `client.gui.setScreen(null)`；未成功时每 100 tick 重试。`death`/`respawn_requested`/`respawned` 经桥写日志与记忆。`server.autoRespawn`、`respawnDelayMs` 均可在 WebUI 配置，旧 JSON 缺字段时默认 true/3000。
 - 服务器称号/聊天插件把玩家消息通过 `ClientReceiveMessageEvents.GAME` 发送为 `<[称号]玩家名> 内容`，而不是签名 `CHAT`；此前 Node 只 debug 记录 `game_message`，AI 永远收不到。`chat-parser.ts` 现在只接受尖括号格式，循环剥离方括号前缀，最终名称必须匹配 Minecraft 规则；再复用 `#handlePlayerChat`。同玩家同正文 1500 ms 去重，防止 GAME/CHAT 双通道重复回复。不要放宽成任意系统文本解析。
+- DeepSeek V4 思考模式必须限制生成预算。真实玩家消息曾连续两次在 60000ms 触发 `TimeoutError`，而同模型最小请求约 3.1 秒成功；完整项目提示词加 `max_tokens:4096` 后约 5.7 秒以 `stop` 正常返回。`model.maxOutputTokens` 默认 4096：Chat Completions 映射到 `max_tokens`，OpenAI Responses 映射到 `max_output_tokens`；`timeoutMs` 默认 120000。Agent 对 `TimeoutError` 使用专用游戏内提示，其他错误继续使用通用兜底。
 - 独立 `PARAMETERS.md` 已覆盖秘密、服务器、LAN、EasyAuth、模型、推理、人设、提示词、记忆、经验、皮肤、模组、日志、PID 和 Git 位置。
 
 ### 尚未完成
@@ -117,7 +118,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - Microsoft 正版认证自动化与正版披风设置；离线 PNG 皮肤/客户端包已实现，公共皮肤站上传需用户自己的站点账号。
 - Simple Voice Chat 已兼容加载、加入服务器并发起 secret 请求，但 headless OpenAL 不可用，当前日志为 Speaker unavailable，未实现语音收发。
 - Linux systemd/无界面启动脚本；核心可移植，现有运维脚本是 PowerShell/Windows。
-- 用户在聊天中提供了一个余额有限的 DeepSeek Key。**不得在任何文件、命令记录、工具输出或本文复述其值**；当前尚未安全注入工作区，因此真实模型调用仍待通过 WebUI秘密表单做一次最小测试。因 Key 已出现在聊天，最终提醒用户轮换。
+- 用户在聊天中提供了一个余额有限的 DeepSeek Key，现由用户通过 WebUI 保存到 Git 忽略的 `.env` 并已完成真实模型测试。**不得在任何提交、命令记录、工具输出或本文复述其值**；因 Key 已出现在聊天，最终仍需提醒用户轮换。
 
 ## 4. 文件地图
 
@@ -353,6 +354,8 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 第六轮聊天诊断时间：2026-08-04 09:32–09:49（Asia/Shanghai）。游戏日志持续出现 `<[称号]玩家名> 内容`，最近 20 条聊天中 8 条为该格式，8 条包含当前 Bot 名；配置 `requireMention:false`，但 Node 日志没有 `已处理玩家消息/失败`。根因是这些内容走 Fabric `GAME` 而非签名 `CHAT`。新增 `parseDecoratedPlayerChat`、GAME 回退和 1500 ms 去重；Node/本机桥集成测试验证称号剥离、mention 清理和重复抑制。热重启控制器后 55 秒没有新服内发言，故真实 DeepSeek 回复尚待用户再发一条，不得标记为现场通过。
 
+第七轮模型超时诊断时间：2026-08-04 09:58–10:14（Asia/Shanghai）。控制器正确识别真人玩家，连续两次发出通用失败兜底；对应日志均为 Node `TimeoutError: The operation was aborted due to timeout`，恰好命中配置 60000ms，因此聊天路由已修复，失败点在模型等待。相同 `deepseek-v4-flash/high` 最小请求约 3130ms 成功。随后以完整项目 system prompt、约 452 prompt tokens 和 4096 输出预算诊断：约 5748ms、`finish_reason=stop`、567 completion tokens，其中最终 JSON 仅 105 字符。按 DeepSeek 官方 JSON Output 文档加入明确输出预算，并把默认超时提高到 120000ms；不得记录诊断内容、玩家原话或密钥。
+
 模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
@@ -389,7 +392,7 @@ Set-Location fabric-bridge
 - Experience 写入/检索。
 - Policy 财产拒绝、未知归属拒绝、未受击 PVP 拒绝、受击者/窗口自卫。
 - Logger 递归秘密与 `/login` 脱敏。
-- DeepSeek 思考/max 映射与 OpenAI Responses 请求使用本机 mock API 验证，不消耗用户额度。
+- DeepSeek 思考/max 映射、Chat Completions `max_tokens` 与 OpenAI Responses `max_output_tokens` 使用本机 mock API 验证，不消耗用户额度。
 - Fabric bridge 本机 JSONL hello/state/chat/action/action_result 回环。
 - 后台 Node 启停：中文+空格路径，隐藏窗口，PID 写入/清理。
 - 后台 HeadlessMc 父进程启停。
@@ -397,7 +400,7 @@ Set-Location fabric-bridge
 - 国内 Minecraft 依赖预取与真实服务器连接。
 - 服务器 23 个受管理模组同步和完整原生进服。
 - WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
-- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；23 项 Node 测试全部通过，包含 EasyAuth 用户名、自动复活、PowerShell BOM JSON、插件聊天解析与去重。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；24 项 Node 测试全部通过，包含 EasyAuth 用户名、自动复活、PowerShell BOM JSON、插件聊天解析与去重、模型输出预算与超时提示。
 - `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，约 85 秒通过。
 - LAN 发现通过真实本机 UDP 组播包和 WebUI 扫描接口验证；实际玩家开放 LAN 世界仍待现场验收。
 - 皮肤 PNG 校验/导入/读取、CustomSkinLoader 安装及多人客户端包生成已验证；临时皮肤与 zip 均留在 Git 忽略的 `.runtime/test-artifacts`，正式配置恢复为禁用状态。
@@ -446,11 +449,11 @@ Set-Location fabric-bridge
 | R19 | 局域网同机/同网游玩 | UDP 组播自动发现、离线强制、WebUI 扫描和解析测试已实现；需用户实际开放 LAN 世界做现场验收 |
 | R20 | 根目录便捷入口 | Open-WebUI/Start-Bot/Stop-Bot 三个 cmd 已实现 |
 | R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
-| R22 | Bug/无效字符/秘密终检 | 已完成：23 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
+| R22 | Bug/无效字符/秘密终检 | 已完成：24 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
 
 ## 12. 推荐下一阶段（按顺序）
 
-1. EasyAuth 与 DeepSeek 最小请求已通过；下一步由真人在服内发送一次明确低风险指令，验证玩家聊天→模型决策→基础动作→回复→记忆的真实端到端链路。Key 曾在聊天暴露，测试后提醒轮换。
+1. EasyAuth、DeepSeek 最小请求和真人消息接收已通过；模型超时修复部署后，由真人再发一次明确低风险指令，验证模型决策→基础动作→回复→记忆。Key 曾在聊天暴露，测试后提醒轮换。
 2. 在一台无 VPN、无 Node/Java/Minecraft 的中国大陆 Windows 验证双击部署器；记录 winget/npm/BMCL/Gradle/Headless每段结果和回退。
 3. 给 Fabric bridge 增加方块碰撞/危险感知和可靠路径规划；优先 follow/come 的可中断寻路，不先做挖掘。
 4. 实现工具化任务状态机：采集→制作→补给→恢复，所有世界改动前经过 ownership/settlement policy。
