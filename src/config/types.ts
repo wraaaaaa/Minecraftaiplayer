@@ -44,7 +44,36 @@ export interface BotConfig {
   storage: {
     memoryFile: string
     experienceFile: string
+    taskFile?: string
+    autonomyFile?: string
     maxEvents: number
+  }
+  autonomy?: {
+    enabled: boolean
+    ownerName: string
+    commandArbitrationMs: number
+    contextualAddressing: boolean
+    directAddressDistance: number
+    conversationWindowMs: number
+    lowHealthThreshold: number
+    criticalHealthThreshold: number
+    eatBelowFood: number
+    hostileScanRadius: number
+    wildernessMinPlayerDistance: number
+    safeIdleEnabled: boolean
+    autoGather: boolean
+    autoCraft: boolean
+    autoBuildShelter: boolean
+    developmentZone?: {
+      enabled: boolean
+      dimension: string
+      minX: number
+      minY: number
+      minZ: number
+      maxX: number
+      maxY: number
+      maxZ: number
+    }
   }
   policyFile: string
   personaFile: string
@@ -54,6 +83,56 @@ export interface BotConfig {
     level: 'debug' | 'info' | 'warn' | 'error'
     console: boolean
   }
+}
+
+export interface AutonomyConfig {
+  enabled: boolean
+  ownerName: string
+  commandArbitrationMs: number
+  contextualAddressing: boolean
+  directAddressDistance: number
+  conversationWindowMs: number
+  lowHealthThreshold: number
+  criticalHealthThreshold: number
+  eatBelowFood: number
+  hostileScanRadius: number
+  wildernessMinPlayerDistance: number
+  safeIdleEnabled: boolean
+  autoGather: boolean
+  autoCraft: boolean
+  autoBuildShelter: boolean
+  developmentZone?: {
+    enabled: boolean
+    dimension: string
+    minX: number
+    minY: number
+    minZ: number
+    maxX: number
+    maxY: number
+    maxZ: number
+  }
+}
+
+export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
+  enabled: true,
+  ownerName: 'wraaaaaa',
+  commandArbitrationMs: 350,
+  contextualAddressing: true,
+  directAddressDistance: 8,
+  conversationWindowMs: 60_000,
+  lowHealthThreshold: 10,
+  criticalHealthThreshold: 6,
+  eatBelowFood: 16,
+  hostileScanRadius: 12,
+  wildernessMinPlayerDistance: 48,
+  safeIdleEnabled: true,
+  autoGather: true,
+  autoCraft: true,
+  autoBuildShelter: true
+})
+
+export function autonomyConfig(config: BotConfig): AutonomyConfig {
+  return { ...DEFAULT_AUTONOMY_CONFIG, ...config.autonomy }
 }
 
 export interface PromptTemplates {

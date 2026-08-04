@@ -13,8 +13,10 @@ import net.minecraft.client.multiplayer.ServerData;
 import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.item.ItemStack;
 
 import java.util.Locale;
@@ -32,11 +34,24 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private int lastRespawnAttempt = -100;
     private int joinedTick;
     private UUID activeSession;
+    private boolean bridgeWasConnected;
     private MovementTarget movement;
+    private PendingSurvivalAction pendingSurvivalAction;
+    private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
+    private final SurvivalController survival = new SurvivalController(
+        (float) environmentNumber("MCAI_LOW_HEALTH_THRESHOLD", 10.0D),
+        (int) environmentNumber("MCAI_EAT_BELOW_FOOD", 16.0D),
+        environmentNumber("MCAI_HOSTILE_SCAN_RADIUS", 12.0D),
+        10_000L
+    );
+    private final WorldStateEncoder worldStateEncoder = new WorldStateEncoder();
+    private final PrimitiveTaskController primitives = new PrimitiveTaskController();
+    private final ShelterController shelter = new ShelterController();
 
     @Override
     public void onInitializeClient() {
         instance = this;
+        configureApprovedZone();
         bridge.start();
         ClientTickEvents.END_CLIENT_TICK.register(this::onTick);
         ClientReceiveMessageEvents.CHAT.register((message, signedMessage, sender, boundType, timestamp) -> {
@@ -58,6 +73,20 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private void onTick(Minecraft client) {
         tick++;
+        boolean bridgeConnected = bridge.isConnected();
+        if (bridgeWasConnected && !bridgeConnected) {
+            movement = null;
+            clearMovement(client);
+            cancelPendingSurvivalAction("bridge_disconnected");
+            primitives.cancel(client, "bridge_disconnected");
+            shelter.cancel(client, "bridge_disconnected");
+            while (bridge.poll() != null) {
+                // Discard commands from the dead controller session; they must never replay.
+            }
+            drainPrimitiveResults();
+            drainShelterResults();
+        }
+        bridgeWasConnected = bridgeConnected;
         LocalPlayer player = client.player;
         if (player == null || client.level == null) {
             activeSession = null;
@@ -65,6 +94,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             easyAuthPromptSeen = false;
             dead = false;
             movement = null;
+            cancelPendingSurvivalAction("world_disconnected");
+            primitives.cancel(client, "world_disconnected");
+            shelter.cancel(client, "world_disconnected");
+            survival.reset(client);
             autoConnect(client);
             return;
         }
@@ -81,7 +114,27 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (handleDeath(client, player)) return;
         if (!easyAuthSent && !easyAuthPromptSeen && tick - joinedTick >= 100 && tick % 20 == 0) sendEasyAuth(player);
         processActions(client, player);
-        updateMovement(client, player);
+        boolean survivalControlsEnabled = autonomyEnabled || pendingSurvivalAction != null;
+        if (survivalControlsEnabled) {
+            survival.tick(client);
+            resolvePendingSurvivalAction();
+        } else {
+            SurvivalController.releaseControls(client);
+        }
+        if (survivalControlsEnabled
+            && (survival.mode() == SurvivalController.Mode.EATING || survival.mode() == SurvivalController.Mode.COMBAT)) {
+            clearMovement(client);
+        } else {
+            if (!primitives.activeType().isEmpty()) {
+                primitives.tick(client);
+            } else if (!shelter.activeType().isEmpty()) {
+                shelter.tick(client);
+            } else {
+                updateMovement(client, player);
+            }
+        }
+        drainPrimitiveResults();
+        drainShelterResults();
         if (tick % 20 == 0) bridge.send(buildState(client, player));
     }
 
@@ -107,6 +160,39 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         return value == null || value.isBlank() ? fallback : value.trim();
     }
 
+    private static double environmentNumber(String name, double fallback) {
+        try {
+            String raw = System.getenv(name);
+            return raw == null || raw.isBlank() ? fallback : Double.parseDouble(raw.trim());
+        } catch (NumberFormatException ignored) {
+            return fallback;
+        }
+    }
+
+    private void configureApprovedZone() {
+        double minimumPlayerDistance = environmentNumber("MCAI_WILDERNESS_MIN_PLAYER_DISTANCE", 48.0D);
+        primitives.setMinimumPlayerDistance(minimumPlayerDistance);
+        shelter.setMinimumPlayerDistance(minimumPlayerDistance);
+        if (!Boolean.parseBoolean(environment("MCAI_DEVELOPMENT_ZONE_ENABLED", "false"))) {
+            primitives.clearApprovedZone();
+            shelter.clearApprovedZone();
+            return;
+        }
+        String dimension = environment("MCAI_DEVELOPMENT_ZONE_DIMENSION", "minecraft:overworld");
+        BlockPos minimum = new BlockPos(
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_X", 0),
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_Y", 0),
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_Z", 0)
+        );
+        BlockPos maximum = new BlockPos(
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_X", 0),
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_Y", 0),
+            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_Z", 0)
+        );
+        primitives.setApprovedZone(dimension, minimum, maximum);
+        shelter.setApprovedZone(dimension, minimum, maximum);
+    }
+
     private boolean handleDeath(Minecraft client, LocalPlayer player) {
         boolean currentlyDead = player.isDeadOrDying() || player.getHealth() <= 0;
         if (!currentlyDead) {
@@ -124,6 +210,11 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             deathTick = tick;
             movement = null;
             clearMovement(client);
+            primitives.cancel(client, "bot_died");
+            shelter.cancel(client, "bot_died");
+            cancelPendingSurvivalAction("bot_died");
+            drainPrimitiveResults();
+            drainShelterResults();
             JsonObject event = baseMessage("death");
             event.addProperty("health", player.getHealth());
             bridge.send(event);
@@ -179,18 +270,140 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             if (!"action".equals(string(envelope, "type"))) continue;
             String id = string(envelope, "id");
             JsonObject action = envelope.has("action") && envelope.get("action").isJsonObject() ? envelope.getAsJsonObject("action") : new JsonObject();
+            String actionType = string(action, "type");
+            if (isSurvivalAction(actionType)) {
+                if (!primitives.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: another verified task is active");
+                    continue;
+                }
+                movement = null;
+                clearMovement(client);
+                startSurvivalAction(id, actionType, client, player);
+                continue;
+            }
+            if (isPrimitiveAction(actionType)) {
+                if (pendingSurvivalAction != null || !shelter.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: active task is " + activeTaskType());
+                    continue;
+                }
+                movement = null;
+                clearMovement(client);
+                primitives.start(id, action, client);
+                drainPrimitiveResults();
+                continue;
+            }
+            if (isShelterAction(actionType)) {
+                if (pendingSurvivalAction != null || !primitives.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: active task is " + activeTaskType());
+                    continue;
+                }
+                movement = null;
+                clearMovement(client);
+                shelter.start(id, action, client);
+                drainShelterResults();
+                continue;
+            }
             ActionResult result;
             try {
                 result = execute(client, player, action);
             } catch (Exception error) {
                 result = new ActionResult(false, error.getClass().getSimpleName() + ": " + error.getMessage());
             }
-            JsonObject response = baseMessage("action_result");
-            response.addProperty("id", id);
-            response.addProperty("ok", result.ok());
-            response.addProperty("detail", result.detail());
-            bridge.send(response);
+            sendActionResult(id, result.ok(), result.detail());
         }
+    }
+
+    private static boolean isPrimitiveAction(String type) {
+        return switch (type) {
+            case "equip_best", "prepare_for", "use_item", "collect_own_drops", "gather_resource", "craft_item" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isSurvivalAction(String type) {
+        return "eat_best_food".equals(type) || "attack_hostile".equals(type);
+    }
+
+    private static boolean isShelterAction(String type) {
+        return "seek_shelter".equals(type) || "build_shelter".equals(type);
+    }
+
+    private void drainPrimitiveResults() {
+        for (PrimitiveTaskController.TaskResult result : primitives.drainResults()) {
+            sendActionResult(result.id(), result.ok(), result.detail());
+        }
+    }
+
+    private void drainShelterResults() {
+        for (ShelterController.TaskResult result : shelter.drainResults()) {
+            sendActionResult(result.id(), result.ok(), result.detail());
+        }
+    }
+
+    private void sendActionResult(String id, boolean ok, String detail) {
+        JsonObject response = baseMessage("action_result");
+        response.addProperty("id", id);
+        response.addProperty("ok", ok);
+        response.addProperty("detail", detail);
+        bridge.send(response);
+    }
+
+    private void startSurvivalAction(String id, String type, Minecraft client, LocalPlayer player) {
+        if (pendingSurvivalAction != null) {
+            sendActionResult(id, false, "busy: active survival action is " + pendingSurvivalAction.type());
+            return;
+        }
+        if ("eat_best_food".equals(type)
+            && player.getFoodData().getFoodLevel() >= 20
+            && player.getHealth() > SurvivalController.DEFAULT_EAT_HEALTH_THRESHOLD) {
+            sendActionResult(id, true, "当前生命值和饱食度不需要进食");
+            return;
+        }
+        long baseline = "eat_best_food".equals(type)
+            ? survival.completedFoodConsumptionCount()
+            : survival.successfulAttackCount();
+        pendingSurvivalAction = new PendingSurvivalAction(id, type, tick, baseline);
+        survival.tick(client);
+    }
+
+    private void resolvePendingSurvivalAction() {
+        PendingSurvivalAction pending = pendingSurvivalAction;
+        if (pending == null) return;
+        long observed = "eat_best_food".equals(pending.type())
+            ? survival.completedFoodConsumptionCount()
+            : survival.successfulAttackCount();
+        if (observed > pending.baseline()) {
+            pendingSurvivalAction = null;
+            sendActionResult(
+                pending.id(),
+                true,
+                "eat_best_food".equals(pending.type())
+                    ? "服务端背包状态已确认安全食物被实际食用"
+                    : "已在合法距离和视线内实际发出一次敌对生物攻击"
+            );
+            return;
+        }
+        long elapsed = tick - pending.startedTick();
+        if (elapsed >= 120L
+            || (elapsed >= 20L && "attack_hostile".equals(pending.type())
+                && survival.mode() != SurvivalController.Mode.COMBAT)) {
+            pendingSurvivalAction = null;
+            sendActionResult(pending.id(), false, "未观察到动作完成后置条件："
+                + survival.snapshot().detail() + "; elapsed_ticks=" + elapsed);
+        }
+    }
+
+    private void cancelPendingSurvivalAction(String detail) {
+        PendingSurvivalAction pending = pendingSurvivalAction;
+        if (pending == null) return;
+        pendingSurvivalAction = null;
+        sendActionResult(pending.id(), false, detail);
+    }
+
+    private String activeTaskType() {
+        if (pendingSurvivalAction != null) return pendingSurvivalAction.type();
+        if (!primitives.activeType().isEmpty()) return primitives.activeType();
+        return shelter.activeType();
     }
 
     private ActionResult execute(Minecraft client, LocalPlayer player, JsonObject action) {
@@ -198,6 +411,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "none" -> new ActionResult(true, "无需动作");
             case "stop" -> {
                 movement = null;
+                cancelPendingSurvivalAction("stopped_by_command");
+                primitives.cancel(client, "stopped_by_command");
+                shelter.cancel(client, "stopped_by_command");
                 clearMovement(client);
                 yield new ActionResult(true, "已停止移动");
             }
@@ -233,6 +449,13 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 client.gameMode.attack(player, target);
                 player.swing(InteractionHand.MAIN_HAND);
                 yield new ActionResult(true, "已对 " + targetName + " 执行一次自卫反击");
+            }
+            case "wait_safe" -> {
+                SurvivalController.SafetyAssessment safety = SurvivalController.assessSafety(client);
+                if (!safety.safeToIdle()) yield new ActionResult(false, "当前位置不适合安全挂机：" + String.join(",", safety.reasons()));
+                movement = null;
+                clearMovement(client);
+                yield new ActionResult(true, "已在安全位置停止移动并进入警戒等待");
             }
             default -> new ActionResult(false, "Fabric 适配器不支持动作 " + string(action, "type"));
         };
@@ -292,27 +515,24 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     }
 
     private JsonObject buildState(Minecraft client, LocalPlayer player) {
-        JsonObject event = baseMessage("state");
-        event.addProperty("connected", true);
-        JsonObject position = new JsonObject();
-        position.addProperty("x", player.getX());
-        position.addProperty("y", player.getY());
-        position.addProperty("z", player.getZ());
-        event.add("position", position);
-        event.addProperty("health", player.getHealth());
-        event.addProperty("food", player.getFoodData().getFoodLevel());
-        event.addProperty("dimension", client.level.dimension().identifier().toString());
+        JsonObject event = worldStateEncoder.encode(client, autonomyEnabled || pendingSurvivalAction != null ? survival : null);
+        event.addProperty("type", "state");
+        event.addProperty("activePrimitive", activeTaskType());
         event.addProperty("timeOfDay", client.level.getOverworldClockTime());
 
-        JsonArray inventory = new JsonArray();
-        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
-            if (stack.isEmpty()) continue;
-            JsonObject item = new JsonObject();
-            item.addProperty("name", stack.getHoverName().getString());
-            item.addProperty("count", stack.getCount());
-            inventory.add(item);
+        ShelterController.HomeSnapshot home = shelter.homeSnapshot();
+        if (home != null) {
+            JsonObject homeState = new JsonObject();
+            homeState.addProperty("dimension", home.dimension());
+            homeState.addProperty("x", home.position().getX());
+            homeState.addProperty("y", home.position().getY());
+            homeState.addProperty("z", home.position().getZ());
+            homeState.addProperty("doorX", home.door().getX());
+            homeState.addProperty("doorY", home.door().getY());
+            homeState.addProperty("doorZ", home.door().getZ());
+            homeState.addProperty("persisted", home.persisted());
+            event.add("home", homeState);
         }
-        event.add("inventory", inventory);
 
         JsonArray nearbyPlayers = new JsonArray();
         for (AbstractClientPlayer candidate : client.level.players()) {
@@ -361,6 +581,14 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         current.bridge.send(event);
     }
 
+    public static void reportDamage(DamageSource source) {
+        MinecraftAiBridgeClient current = instance;
+        if (current == null || source == null) return;
+        current.survival.noteThreat(source);
+        if (source.getEntity() instanceof Player attacker) reportPlayerAttack(attacker);
+    }
+
     private record ActionResult(boolean ok, String detail) { }
     private record MovementTarget(String playerName, double x, double y, double z, boolean follow, double stopDistance) { }
+    private record PendingSurvivalAction(String id, String type, int startedTick, long baseline) { }
 }

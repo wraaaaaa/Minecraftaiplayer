@@ -9,6 +9,9 @@ import { FabricBridgeClient } from '../minecraft/fabric-bridge-client.js'
 import { PolicyEngine } from '../policy/policy-engine.js'
 import { AgentController } from '../agent/agent-controller.js'
 import { RuntimeStatusStore } from './status-store.js'
+import { TaskStore } from '../tasks/task-store.js'
+import { SecretGuard } from '../security/secret-guard.js'
+import path from 'node:path'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -18,26 +21,29 @@ export class BotRuntime {
 
   constructor(loaded: LoadedProjectConfig) {
     this.#loaded = loaded
-    this.#logger = new Logger(loaded.config.logging)
+    this.#logger = new Logger({ ...loaded.config.logging, secrets: [loaded.apiKey, loaded.easyAuthPassword ?? '', loaded.config.server.host] })
   }
 
   async run(): Promise<void> {
     const { config, persona, prompts, rules, apiKey, easyAuthPassword } = this.#loaded
     const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
     const experience = new ExperienceStore(config.storage.experienceFile)
+    const tasks = new TaskStore(config.storage.taskFile ?? 'data/tasks.json', config.autonomy?.ownerName ? { ownerName: config.autonomy.ownerName } : {})
+    const secrets = new SecretGuard([apiKey, easyAuthPassword, config.server.host, path.resolve('.')])
     const status = new RuntimeStatusStore()
-    await Promise.all([memory.load(), experience.load(), status.load()])
+    await Promise.all([memory.load(), experience.load(), tasks.load(), status.load()])
     const serverLabel = `${config.server.host}:${config.server.port}`
     await status.report('starting', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
     while (!this.#stopping) {
       const policy = new PolicyEngine(rules)
       const client = config.server.adapter === 'fabric_bridge'
-        ? new FabricBridgeClient({ config, persona, logger: this.#logger, memory, policy, statusHandler: (phase, world) => status.report(phase, config.server.adapter, serverLabel, world) })
-        : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
+        ? new FabricBridgeClient({ config, persona, logger: this.#logger, memory, policy, secrets, statusHandler: (phase, world) => status.report(phase, config.server.adapter, serverLabel, world) })
+        : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, secrets, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
       await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
-      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger })
+      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets })
+      await controller.initialize()
       client.setMessageHandler((identity, message, world) => controller.handlePlayerMessage(identity, message, world))
       client.setProactiveHandler((world) => controller.proactiveTick(world))
       try {

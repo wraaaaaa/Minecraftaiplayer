@@ -4,7 +4,7 @@ import { access, copyFile, mkdir, readFile, writeFile, rename } from 'node:fs/pr
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
-import type { BehaviorRules, BotConfig, ModsConfig, Persona, PromptTemplates, SkinConfig } from '../config/types.js'
+import { DEFAULT_AUTONOMY_CONFIG, type BehaviorRules, type BotConfig, type ModsConfig, type Persona, type PromptTemplates, type SkinConfig } from '../config/types.js'
 import { Logger } from '../core/logger.js'
 import { parseJsonDocument } from '../core/json.js'
 import { createLlmProvider } from '../llm/provider-factory.js'
@@ -13,6 +13,7 @@ import { discoverLanServers } from '../network/lan-discovery.js'
 import { decodePngDataUrl, validateMinecraftSkin } from '../skin/png.js'
 import type { MemoryDocument } from '../memory/memory-store.js'
 import type { ExperienceDocument } from '../experience/experience-store.js'
+import type { TaskDocument } from '../tasks/task-store.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -21,6 +22,11 @@ const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY'] as const
+const DEFAULT_DEVELOPMENT_ZONE = Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
+
+type WebUiBotConfig = BotConfig & {
+  storage: BotConfig['storage'] & { autonomyFile?: string }
+}
 
 const files = {
   config: path.join(projectRoot, 'config', 'bot.json'),
@@ -102,6 +108,13 @@ function validateRules(value: unknown): asserts value is BehaviorRules {
   const candidate = object(value, 'rules')
   if (candidate.version !== 1) throw new Error('rules.version 当前必须为 1')
   if (typeof candidate.selfDefenseWindowMs !== 'number' || candidate.selfDefenseWindowMs < 1000) throw new Error('自卫窗口不能小于 1000ms')
+  for (const key of ['denyBreakingPlayerProperty', 'denyOpeningPlayerContainers', 'denyTakingPlayerItems', 'wildernessDevelopmentOnly', 'allowSelfDefense', 'stopSelfDefenseWhenThreatEnds', 'allowPlayerOrderedPvp', 'allowDestructiveActionsWhenOwnershipUnknown'] as const) {
+    if (typeof candidate[key] !== 'boolean') throw new Error(`rules.${key} 必须是布尔值`)
+  }
+  const proactiveChat = object(candidate.proactiveChat, 'rules.proactiveChat')
+  for (const key of ['enabled', 'avoidSecrets', 'avoidSpam'] as const) {
+    if (typeof proactiveChat[key] !== 'boolean') throw new Error(`rules.proactiveChat.${key} 必须是布尔值`)
+  }
 }
 
 function validateMods(value: unknown): asserts value is ModsConfig {
@@ -132,13 +145,15 @@ function validateSkin(value: unknown): asserts value is SkinConfig {
   for (const key of ['name', 'profileName', 'website']) if (typeof provider[key] !== 'string') throw new Error(`skin.onlineProvider.${key} 必须是字符串`)
 }
 
-function ensureProjectPaths(config: BotConfig): void {
+function ensureProjectPaths(config: WebUiBotConfig): void {
   const checks: Array<[string, string]> = [
     [config.personaFile, path.join(projectRoot, 'config')],
     [config.promptsFile, path.join(projectRoot, 'config')],
     [config.policyFile, path.join(projectRoot, 'config')],
     [config.storage.memoryFile, path.join(projectRoot, 'data')],
     [config.storage.experienceFile, path.join(projectRoot, 'data')],
+    [config.storage.taskFile ?? 'data/tasks.json', path.join(projectRoot, 'data')],
+    [config.storage.autonomyFile ?? 'data/autonomy-state.json', path.join(projectRoot, 'data')],
     [config.logging.file, path.join(projectRoot, 'logs')]
   ]
   for (const [configured, allowedRoot] of checks) {
@@ -165,8 +180,18 @@ async function processStatus(pidFile: string): Promise<{ running: boolean; pid?:
   } catch { return { running: false } }
 }
 
+function redactForWebUi(value: string): string {
+  return value
+    .replace(/\/login\s+\S+/giu, '/login [REDACTED]')
+    .replace(/\/register\s+\S+(?:\s+\S+)?/giu, '/register [REDACTED]')
+    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/giu, 'Bearer [REDACTED]')
+    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, '[REDACTED_JWT]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/giu, 'sk-[REDACTED]')
+    .replace(/\b([A-Za-z0-9_-]*(?:api[_-]?key|password|token)|key)\b(["'\s:=]+)[^\s,"'}]+/giu, '$1$2[REDACTED]')
+}
+
 async function tail(file: string, lineCount = 30): Promise<string[]> {
-  try { return (await readFile(file, 'utf8')).split(/\r?\n/u).filter(Boolean).slice(-lineCount) } catch { return [] }
+  try { return (await readFile(file, 'utf8')).split(/\r?\n/u).filter(Boolean).slice(-lineCount).map(redactForWebUi) } catch { return [] }
 }
 
 async function secretState(): Promise<Record<string, boolean>> {
@@ -178,10 +203,20 @@ async function secretState(): Promise<Record<string, boolean>> {
 }
 
 async function snapshot(): Promise<unknown> {
-  const config = await readJson<BotConfig>(files.config, files.configExample)
+  const storedConfig = await readJson<WebUiBotConfig>(files.config, files.configExample)
+  const config: WebUiBotConfig = {
+    ...storedConfig,
+    storage: { ...storedConfig.storage, taskFile: storedConfig.storage.taskFile ?? 'data/tasks.json', autonomyFile: storedConfig.storage.autonomyFile ?? 'data/autonomy-state.json' },
+    autonomy: {
+      ...DEFAULT_AUTONOMY_CONFIG,
+      ...storedConfig.autonomy,
+      developmentZone: { ...DEFAULT_DEVELOPMENT_ZONE, ...storedConfig.autonomy?.developmentZone }
+    }
+  }
   const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
   const experienceFile = path.resolve(projectRoot, config.storage.experienceFile)
-  const [persona, prompts, skin, rules, mods, manifest, live, memory, experience, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
+  const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
+  const [persona, prompts, skin, rules, mods, manifest, live, memory, experience, tasks, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
     readJson<Persona>(files.persona, files.personaExample),
     readJson<PromptTemplates>(files.prompts, files.promptsExample),
     readJson<SkinConfig>(files.skin, files.skinExample),
@@ -191,9 +226,10 @@ async function snapshot(): Promise<unknown> {
     readJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
     readJson<MemoryDocument>(memoryFile).catch(() => null),
     readJson<ExperienceDocument>(experienceFile).catch(() => null),
+    readJson<TaskDocument>(taskFile).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
-  return { config, persona, prompts, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  return { config, persona, prompts, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
 }
 
 async function runPowerShell(script: string): Promise<string> {
@@ -288,7 +324,7 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     validateSkin(payload.skin)
     validateRules(payload.rules)
     validateMods(payload.mods)
-    ensureProjectPaths(payload.config as BotConfig)
+    ensureProjectPaths(payload.config as WebUiBotConfig)
     ensureSkinPaths(payload.skin as SkinConfig)
     await Promise.all([
       writeJson(files.config, payload.config), writeJson(files.persona, payload.persona), writeJson(files.prompts, payload.prompts), writeJson(files.skin, payload.skin),

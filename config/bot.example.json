@@ -42,7 +42,36 @@
   "storage": {
     "memoryFile": "data/memory.json",
     "experienceFile": "data/experience.json",
+    "taskFile": "data/tasks.json",
+    "autonomyFile": "data/autonomy-state.json",
     "maxEvents": 5000
+  },
+  "autonomy": {
+    "enabled": true,
+    "ownerName": "wraaaaaa",
+    "commandArbitrationMs": 350,
+    "contextualAddressing": true,
+    "directAddressDistance": 8,
+    "conversationWindowMs": 60000,
+    "lowHealthThreshold": 10,
+    "criticalHealthThreshold": 6,
+    "eatBelowFood": 16,
+    "hostileScanRadius": 12,
+    "wildernessMinPlayerDistance": 48,
+    "safeIdleEnabled": true,
+    "autoGather": true,
+    "autoCraft": true,
+    "autoBuildShelter": true,
+    "developmentZone": {
+      "enabled": false,
+      "dimension": "minecraft:overworld",
+      "minX": 0,
+      "minY": 0,
+      "minZ": 0,
+      "maxX": 0,
+      "maxY": 0,
+      "maxZ": 0
+    }
   },
   "policyFile": "config/behavior-rules.json",
   "personaFile": "config/persona.json",

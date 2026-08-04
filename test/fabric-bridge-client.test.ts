@@ -10,6 +10,7 @@ import { Logger } from '../src/core/logger.js'
 import { MemoryStore } from '../src/memory/memory-store.js'
 import { FabricBridgeClient } from '../src/minecraft/fabric-bridge-client.js'
 import { PolicyEngine } from '../src/policy/policy-engine.js'
+import { SecretGuard } from '../src/security/secret-guard.js'
 
 const persona: Persona = { name: '小麦', description: '测试', speakingStyle: '简短', goals: [], boundaries: [] }
 const rules: BehaviorRules = {
@@ -69,7 +70,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
   const logger = new Logger(config.logging)
   const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
   await memory.load()
-  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), statusHandler: async () => {} })
+  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), secrets: new SecretGuard([]), statusHandler: async () => {} })
   const receivedMessages: Array<{ name: string; message: string }> = []
   bridge.setMessageHandler(async (identity, message) => { receivedMessages.push({ name: identity.name, message }) })
 
@@ -79,10 +80,12 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
     socket.setEncoding('utf8')
     socket.write(`${JSON.stringify({ type: 'hello', protocolVersion: 1, adapter: 'fabric-26.2' })}\n`)
     await connecting
-    socket.write(`${JSON.stringify({ type: 'state', connected: true, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventory: [{ name: '石头', count: 3 }], nearbyPlayers: [{ name: 'Alice', distance: 4 }] })}\n`)
+    socket.write(`${JSON.stringify({ type: 'state', connected: true, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventory: [{ name: '石头', count: 3 }], nearbyPlayers: [{ name: 'Alice', distance: 4 }], activePrimitive: 'seek_shelter', home: { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, doorX: 9, doorY: 65, doorZ: 9, persisted: true } })}\n`)
     await delay(20)
     assert.deepEqual(bridge.snapshot().position, { x: 1, y: 64, z: 2 })
     assert.equal(bridge.snapshot().nearbyPlayers[0]?.name, 'Alice')
+    assert.equal(bridge.snapshot().activePrimitive, 'seek_shelter')
+    assert.deepEqual(bridge.snapshot().home, { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, doorX: 9, doorY: 65, doorZ: 9, persisted: true })
 
     socket.write(`${JSON.stringify({ type: 'game_message', message: '<[管理员]Alice> @CialloAI 跟我来' })}\n`)
     await delay(20)

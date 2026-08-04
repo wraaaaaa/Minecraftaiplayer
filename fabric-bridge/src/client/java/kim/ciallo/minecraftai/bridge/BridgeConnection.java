@@ -57,6 +57,8 @@ final class BridgeConnection implements AutoCloseable {
                     hello.addProperty("type", "hello");
                     hello.addProperty("protocolVersion", 1);
                     hello.addProperty("adapter", "fabric-26.2");
+                    String bridgeToken = System.getenv("MCAI_BRIDGE_TOKEN");
+                    if (bridgeToken != null && !bridgeToken.isBlank()) hello.addProperty("token", bridgeToken);
                     write(writer, hello);
                     while (running && !socket.isClosed()) {
                         JsonObject message;

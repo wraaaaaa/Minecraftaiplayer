@@ -36,6 +36,7 @@ if (Test-Path -LiteralPath $pidFile) {
 }
 
 $envFile = Join-Path $projectRoot '.env'
+$envValues = @{}
 if (Test-Path -LiteralPath $envFile) {
     foreach ($rawLine in (Get-Content -LiteralPath $envFile -Encoding UTF8)) {
         $line = $rawLine.Trim()
@@ -47,13 +48,14 @@ if (Test-Path -LiteralPath $envFile) {
         if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
             $value = $value.Substring(1, $value.Length - 2)
         }
-        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
-            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
-        }
+        $envValues[$name] = $value
     }
 }
 $passwordVariable = [string]$config.easyAuth.passwordEnv
 $configuredPassword = [Environment]::GetEnvironmentVariable($passwordVariable, 'Process')
+if ([string]::IsNullOrWhiteSpace($configuredPassword) -and $envValues.ContainsKey($passwordVariable)) {
+    $configuredPassword = [string]$envValues[$passwordVariable]
+}
 if (-not [string]::IsNullOrWhiteSpace($configuredPassword)) {
     $env:MINECRAFT_LOGIN_PASSWORD = $configuredPassword
 }
@@ -108,10 +110,49 @@ if ($config.server.connectionMode -eq 'lan') {
 }
 $env:MCAI_SERVER_HOST = $connectionHost
 $env:MCAI_SERVER_PORT = [string]$connectionPort
+$env:MCAI_BRIDGE_HOST = [string]$config.server.bridgeHost
+$env:MCAI_BRIDGE_PORT = [string]$config.server.bridgePort
 $env:MCAI_EASYAUTH_ENABLED = [string]$config.easyAuth.enabled
 $env:MCAI_EASYAUTH_REGISTER_IF_NEEDED = [string]$config.easyAuth.registerIfNeeded
 $env:MCAI_AUTO_RESPAWN_ENABLED = if ($null -eq $config.server.autoRespawn) { 'true' } else { ([bool]$config.server.autoRespawn).ToString().ToLowerInvariant() }
 $env:MCAI_RESPAWN_DELAY_MS = if ($null -eq $config.server.respawnDelayMs) { '3000' } else { [string][int]$config.server.respawnDelayMs }
+$env:MCAI_AUTONOMY_ENABLED = if ($null -eq $config.autonomy.enabled) { 'true' } else { ([bool]$config.autonomy.enabled).ToString().ToLowerInvariant() }
+$env:MCAI_LOW_HEALTH_THRESHOLD = if ($null -eq $config.autonomy.lowHealthThreshold) { '10' } else { [string][double]$config.autonomy.lowHealthThreshold }
+$env:MCAI_EAT_BELOW_FOOD = if ($null -eq $config.autonomy.eatBelowFood) { '16' } else { [string][int]$config.autonomy.eatBelowFood }
+$env:MCAI_HOSTILE_SCAN_RADIUS = if ($null -eq $config.autonomy.hostileScanRadius) { '12' } else { [string][double]$config.autonomy.hostileScanRadius }
+$env:MCAI_WILDERNESS_MIN_PLAYER_DISTANCE = if ($null -eq $config.autonomy.wildernessMinPlayerDistance) { '48' } else { [string][double]$config.autonomy.wildernessMinPlayerDistance }
+$autonomyStateRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.autonomyFile)) { 'data\autonomy-state.json' } else { [string]$config.storage.autonomyFile }
+$autonomyStatePath = [IO.Path]::GetFullPath((Join-Path $projectRoot $autonomyStateRelative))
+$allowedDataRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'data'))
+if (-not $autonomyStatePath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'storage.autonomyFile must stay inside the project data directory.'
+}
+$env:MCAI_HOME_FILE = $autonomyStatePath
+$env:MCAI_DEVELOPMENT_ZONE_ENABLED = if ($null -eq $config.autonomy.developmentZone.enabled) { 'false' } else { ([bool]$config.autonomy.developmentZone.enabled).ToString().ToLowerInvariant() }
+if ($env:MCAI_DEVELOPMENT_ZONE_ENABLED -eq 'true') {
+    $env:MCAI_DEVELOPMENT_ZONE_DIMENSION = [string]$config.autonomy.developmentZone.dimension
+    $env:MCAI_DEVELOPMENT_ZONE_MIN_X = [string][int]$config.autonomy.developmentZone.minX
+    $env:MCAI_DEVELOPMENT_ZONE_MIN_Y = [string][int]$config.autonomy.developmentZone.minY
+    $env:MCAI_DEVELOPMENT_ZONE_MIN_Z = [string][int]$config.autonomy.developmentZone.minZ
+    $env:MCAI_DEVELOPMENT_ZONE_MAX_X = [string][int]$config.autonomy.developmentZone.maxX
+    $env:MCAI_DEVELOPMENT_ZONE_MAX_Y = [string][int]$config.autonomy.developmentZone.maxY
+    $env:MCAI_DEVELOPMENT_ZONE_MAX_Z = [string][int]$config.autonomy.developmentZone.maxZ
+}
+$bridgeTokenFile = Join-Path $projectRoot 'data\bridge-token.txt'
+if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
+    throw 'Bridge session token is missing. Start the AI controller first or use start-all-background.ps1.'
+}
+$env:MCAI_BRIDGE_TOKEN = (Get-Content -LiteralPath $bridgeTokenFile -Raw -Encoding UTF8).Trim()
+if ([string]::IsNullOrWhiteSpace($env:MCAI_BRIDGE_TOKEN)) { throw 'Bridge session token is empty.' }
+
+# The Minecraft JVM and every third-party client mod inherit this process environment.
+# Remove model credentials before Start-Process; only the Node controller is allowed to hold them.
+$modelSecretNames = @('DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', [string]$config.model.apiKeyEnv) | Select-Object -Unique
+foreach ($secretName in $modelSecretNames) {
+    if (-not [string]::IsNullOrWhiteSpace($secretName)) {
+        [Environment]::SetEnvironmentVariable($secretName, $null, 'Process')
+    }
+}
 $offline = $config.server.auth -eq 'offline'
 if (-not $offline) {
     throw 'Microsoft authentication is not implemented for the headless Fabric launcher yet. Use auth=offline for this server.'

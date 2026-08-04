@@ -1,6 +1,25 @@
 let state
 let dirty = false
 
+const AUTONOMY_DEFAULTS = Object.freeze({
+  enabled: true,
+  ownerName: 'wraaaaaa',
+  commandArbitrationMs: 350,
+  contextualAddressing: true,
+  directAddressDistance: 8,
+  conversationWindowMs: 60000,
+  lowHealthThreshold: 10,
+  criticalHealthThreshold: 6,
+  eatBelowFood: 16,
+  hostileScanRadius: 12,
+  wildernessMinPlayerDistance: 48,
+  safeIdleEnabled: true,
+  autoGather: true,
+  autoCraft: true,
+  autoBuildShelter: true,
+  developmentZone: Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
+})
+
 const $ = id => document.getElementById(id)
 const value = id => $(id).value
 const number = id => Number($(id).value)
@@ -53,6 +72,9 @@ function renderStatus(snapshot) {
   $('worldPosition').textContent = world?.position ? `${world.position.x.toFixed(1)}, ${world.position.y.toFixed(1)}, ${world.position.z.toFixed(1)}` : '—'
   $('worldVitals').textContent = world && (world.health !== undefined || world.food !== undefined) ? `${world.health ?? '—'} HP / ${world.food ?? '—'}` : '—'
   $('worldContext').textContent = world ? `${world.dimension || '—'} / ${world.nearbyPlayers?.length ?? 0} 人` : '—'
+  $('worldAutonomy').textContent = world ? `${world.activePrimitive || '安全等待'} / ${world.home ? '住所已记录' : '无住所'}` : '—'
+  const taskCounts = (snapshot.tasks?.tasks || []).reduce((counts, task) => { counts[task.status] = (counts[task.status] || 0) + 1; return counts }, {})
+  $('taskQueueSummary').textContent = snapshot.tasks ? `执行中 ${taskCounts.running || 0}，排队 ${taskCounts.queued || 0}，完成 ${taskCounts.completed || 0}，失败/拒绝 ${taskCounts.failed || 0}` : '尚无任务记录'
   $('modsSummary').textContent = snapshot.manifest.sourceDirectory ? `来源：${snapshot.manifest.sourceDirectory}` : '尚未设置模组来源'
   $('modList').replaceChildren(...mods.map(mod => {
     const item = document.createElement('div')
@@ -88,7 +110,13 @@ function populate(snapshot) {
   setChecked('easyAuthEnabled', c.easyAuth.enabled); setChecked('registerIfNeeded', c.easyAuth.registerIfNeeded); set('passwordEnv', c.easyAuth.passwordEnv); setNumber('loginDelay', c.easyAuth.loginDelayMs)
   set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
-  set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
+  const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
+  setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
+  setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
+  setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
+  const developmentZone = { ...AUTONOMY_DEFAULTS.developmentZone, ...(autonomy.developmentZone || {}) }
+  setChecked('developmentZoneEnabled', developmentZone.enabled); set('developmentDimension', developmentZone.dimension); setNumber('developmentMinX', developmentZone.minX); setNumber('developmentMinY', developmentZone.minY); setNumber('developmentMinZ', developmentZone.minZ); setNumber('developmentMaxX', developmentZone.maxX); setNumber('developmentMaxY', developmentZone.maxY); setNumber('developmentMaxZ', developmentZone.maxZ)
+  set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); set('taskFile', c.storage.taskFile ?? 'data/tasks.json'); set('autonomyFile', c.storage.autonomyFile ?? 'data/autonomy-state.json'); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
   set('personaName', snapshot.persona.name); set('personaDescription', snapshot.persona.description); set('speakingStyle', snapshot.persona.speakingStyle); set('personaGoals', snapshot.persona.goals.join('\n')); set('personaBoundaries', snapshot.persona.boundaries.join('\n'))
   set('promptIdentity', snapshot.prompts.identity); set('promptCapabilities', snapshot.prompts.capabilityRules.join('\n')); set('promptMemory', snapshot.prompts.memoryRules.join('\n')); set('promptContract', snapshot.prompts.actionContract); set('promptProactive', snapshot.prompts.proactiveInstruction)
   setChecked('skinEnabled', snapshot.skin.enabled); set('skinModel', snapshot.skin.model); set('skinVisibility', snapshot.skin.visibilityMode); set('skinProviderName', snapshot.skin.onlineProvider.name); set('skinProfileName', snapshot.skin.onlineProvider.profileName); set('skinProviderWebsite', snapshot.skin.onlineProvider.website)
@@ -107,7 +135,25 @@ function collect() {
   Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
   Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens') })
   Object.assign(c.chat, { requireMention: checked('requireMention'), replyPrefix: value('replyPrefix'), cooldownMs: number('cooldownMs'), proactiveEnabled: checked('proactiveEnabled'), proactiveIdleMs: number('proactiveIdleMs'), proactiveMinIntervalMs: number('proactiveMinIntervalMs') })
-  Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), maxEvents: number('maxEvents') })
+  const ownerName = value('ownerName').trim()
+  if (!/^[A-Za-z0-9_]{3,16}$/.test(ownerName)) throw new Error('最高优先玩家名只能使用 3-16 位英文字母、数字或下划线')
+  const lowHealthThreshold = number('lowHealthThreshold')
+  const criticalHealthThreshold = number('criticalHealthThreshold')
+  if (criticalHealthThreshold > lowHealthThreshold) throw new Error('危险生命阈值不能高于低生命阈值')
+  const developmentZone = {
+    enabled: checked('developmentZoneEnabled'), dimension: value('developmentDimension').trim(),
+    minX: number('developmentMinX'), minY: number('developmentMinY'), minZ: number('developmentMinZ'),
+    maxX: number('developmentMaxX'), maxY: number('developmentMaxY'), maxZ: number('developmentMaxZ')
+  }
+  if (!developmentZone.dimension) throw new Error('开发区域维度 ID 不能为空')
+  if (developmentZone.minX > developmentZone.maxX || developmentZone.minY > developmentZone.maxY || developmentZone.minZ > developmentZone.maxZ) throw new Error('开发区域的最小坐标不能大于最大坐标')
+  if (developmentZone.maxX - developmentZone.minX > 256 || developmentZone.maxY - developmentZone.minY > 128 || developmentZone.maxZ - developmentZone.minZ > 256) throw new Error('开发区域过大：X/Z 最多 256 格，高度最多 128 格')
+  c.autonomy = {
+    enabled: checked('autonomyEnabled'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
+    lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
+    safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'), developmentZone
+  }
+  Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), taskFile: value('taskFile').trim(), autonomyFile: value('autonomyFile').trim(), maxEvents: number('maxEvents') })
   Object.assign(c.logging, { file: value('logFile').trim(), level: value('logLevel'), console: checked('logConsole') })
   const persona = { name: value('personaName').trim(), description: value('personaDescription').trim(), speakingStyle: value('speakingStyle').trim(), goals: lines('personaGoals'), boundaries: lines('personaBoundaries') }
   const prompts = { identity: value('promptIdentity'), capabilityRules: lines('promptCapabilities'), memoryRules: lines('promptMemory'), actionContract: value('promptContract'), proactiveInstruction: value('promptProactive') }

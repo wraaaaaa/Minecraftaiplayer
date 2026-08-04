@@ -17,11 +17,12 @@ const rules: BehaviorRules = {
   proactiveChat: { enabled: true, avoidSecrets: true, avoidSpam: true }
 }
 
-test('禁止破坏玩家财产和未知归属方块', () => {
+test('禁止破坏玩家财产、未知归属和没有可信证据的所谓自然方块', () => {
   const policy = new PolicyEngine(rules)
   assert.equal(policy.authorize({ type: 'break_block', block: 'stone', ownership: 'player' }).allowed, false)
   assert.equal(policy.authorize({ type: 'break_block', block: 'stone', ownership: 'unknown' }).allowed, false)
-  assert.equal(policy.authorize({ type: 'break_block', block: 'stone', ownership: 'natural' }).allowed, true)
+  assert.equal(policy.authorize({ type: 'break_block', block: 'stone', ownership: 'natural' }).allowed, false)
+  assert.equal(policy.authorize({ type: 'break_block', block: 'stone', ownership: 'natural', evidence: 'fabric_verified_zone' }).allowed, true)
 })
 
 test('只允许在有效窗口内对实际攻击者自卫', () => {

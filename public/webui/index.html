@@ -25,6 +25,7 @@
       <a href="#server">服务器</a>
       <a href="#model">大模型</a>
       <a href="#chat">聊天与自主</a>
+      <a href="#autonomy">自主生存与任务</a>
       <a href="#persona">AI 人设</a>
       <a href="#prompts">提示词</a>
       <a href="#policy">行为安全</a>
@@ -57,6 +58,7 @@
           <span><small>坐标</small><strong id="worldPosition">—</strong></span>
           <span><small>生命 / 饱食度</small><strong id="worldVitals">—</strong></span>
           <span><small>维度 / 附近玩家</small><strong id="worldContext">—</strong></span>
+          <span><small>当前动作 / 住所</small><strong id="worldAutonomy">—</strong></span>
         </div>
       </section>
 
@@ -105,9 +107,78 @@
       </section>
 
       <section id="chat" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>主动聊天会不会刷屏？</summary><p>空闲时间和最小间隔共同限制主动发言；还会经过行为规则。关闭“允许主动聊天”即可完全禁用。</p></details></div>
-        <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>必须提到 Bot 名称才回复</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>允许空闲主动聊天</label></div>
-        <div class="form-grid three"><label>回复前缀<input id="replyPrefix" type="text"></label><label>聊天冷却（毫秒）<input id="cooldownMs" type="number" min="0"></label><label>进入空闲（毫秒）<input id="proactiveIdleMs" type="number" min="1000"></label><label>主动发言最小间隔（毫秒）<input id="proactiveMinIntervalMs" type="number" min="1000"></label></div>
+        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>空闲时会不会乱动或刷屏？</summary><p>空闲时间和最小间隔共同限制 AI 决策；动作还会经过开发区、财产、距离和真实后置条件检查。关闭“允许空闲 AI 决策与偶尔聊天”会停用模型驱动的空闲发展，但本地进食、防卫和安全挂机仍由下方总开关控制。</p></details></div>
+        <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>远距离且无对话语境时要求点名</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>允许空闲 AI 决策与偶尔聊天</label></div>
+        <div class="form-grid three"><label>回复前缀<input id="replyPrefix" type="text"></label><label>聊天冷却（毫秒）<input id="cooldownMs" type="number" min="0"></label><label>进入空闲决策（毫秒）<input id="proactiveIdleMs" type="number" min="1000"></label><label>空闲决策最小间隔（毫秒）<input id="proactiveMinIntervalMs" type="number" min="1000"></label></div>
+      </section>
+
+      <section id="autonomy" class="panel autonomy-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">AUTONOMY & TASKS</p><h2>自主生存与任务</h2><p class="muted">管理 Bot 如何识别指令、安排多人任务，并在没有指令时照顾自己。</p></div>
+          <details open><summary>任务优先级如何决定？</summary><p>安全反射始终最高；玩家任务全局串行执行。普通玩家之间先选择当前距离 Bot 最近的发令者，再处理该玩家更紧急、入队更早的任务。最高优先玩家的任务不受距离影响。</p></details>
+        </div>
+        <div class="autonomy-summary" role="note">
+          <strong>离线服身份提醒</strong>
+          <span>最高优先玩家目前仅按游戏名匹配。请保持 EasyAuth 开启并保护该名称的登录密码，避免他人冒用。</span>
+          <strong>持久任务队列</strong>
+          <span id="taskQueueSummary">尚无任务记录</span>
+        </div>
+        <div class="priority-flow" aria-label="任务执行顺序">
+          <span><b>1</b>安全反射</span><i>›</i><span><b>2</b>最高优先玩家</span><i>›</i><span><b>3</b>距离最近的玩家</span><i>›</i><span><b>4</b>逐项串行完成</span>
+        </div>
+        <div class="autonomy-groups">
+          <article class="autonomy-card">
+            <h3>总开关与指令判断</h3>
+            <div class="toggle-row">
+              <label class="switch"><input id="autonomyEnabled" type="checkbox"><span></span>启用主动生存反射与安全挂机</label>
+              <label class="switch"><input id="contextualAddressing" type="checkbox"><span></span>允许按语境和距离判断是否在叫 Bot</label>
+            </div>
+            <div class="form-grid two">
+              <label>最高优先玩家<input id="ownerName" type="text" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" title="离线服仅按 3-16 位游戏名识别"><small>默认 wraaaaaa；其任务优先于其他玩家。</small></label>
+              <label>收集同时到达指令（毫秒）<input id="commandArbitrationMs" type="number" min="0" max="5000"><small>短暂收集多人消息后再按优先级排序。</small></label>
+              <label>近距离直接交流范围（格）<input id="directAddressDistance" type="number" min="1" max="64" step="0.5"><small>范围内可结合语气、上下文判断，无需点名。</small></label>
+              <label>连续对话窗口（毫秒）<input id="conversationWindowMs" type="number" min="1000" max="600000"><small>Bot 回复后，这段时间内可自然接着说。</small></label>
+            </div>
+          </article>
+          <article class="autonomy-card">
+            <h3>生存阈值与安全挂机</h3>
+            <div class="toggle-row"><label class="switch"><input id="safeIdleEnabled" type="checkbox"><span></span>任务结束后寻找安全位置挂机</label></div>
+            <div class="form-grid three">
+              <label>低生命阈值<input id="lowHealthThreshold" type="number" min="1" max="20" step="0.5"></label>
+              <label>危险生命阈值<input id="criticalHealthThreshold" type="number" min="1" max="20" step="0.5"><small>不能高于低生命阈值。</small></label>
+              <label>低于此饱食度进食<input id="eatBelowFood" type="number" min="1" max="20"></label>
+              <label>敌对生物扫描半径（格）<input id="hostileScanRadius" type="number" min="1" max="32"></label>
+              <label class="span-two">自主发展与玩家最小距离（格）<input id="wildernessMinPlayerDistance" type="number" min="16" max="512"><small>只是最低距离门槛；可信区域、财产归属和行为安全层仍会再次检查。</small></label>
+            </div>
+          </article>
+          <article class="autonomy-card autonomy-capabilities">
+            <h3>允许的自主准备能力</h3>
+            <div class="policy-grid">
+              <label class="switch"><input id="autoGather" type="checkbox"><span></span>允许自主采集</label>
+              <label class="switch"><input id="autoCraft" type="checkbox"><span></span>允许自主合成</label>
+              <label class="switch"><input id="autoBuildShelter" type="checkbox"><span></span>允许建造避难所</label>
+            </div>
+            <p class="safety-note">这些开关只代表允许规划对应能力，不会绕过行为准则。采集和建造仍必须通过可信荒野、玩家财产与未知归属检查；证据不足时 Bot 应拒绝并说明原因。</p>
+            <div class="development-zone">
+              <div class="development-zone-heading">
+                <div><h3>管理员批准的开发区域</h3><p>只有管理员明确批准并在这里填写的区域，才会启用自主采集和建造；区域外一律不得因此获得破坏权限。</p></div>
+                <label class="switch"><input id="developmentZoneEnabled" type="checkbox"><span></span>启用批准区域</label>
+              </div>
+              <div class="form-grid two">
+                <label class="span-two">维度 ID<input id="developmentDimension" type="text" placeholder="minecraft:overworld"><small>必须与游戏状态中的完整维度 ID 一致。</small></label>
+              </div>
+              <div class="coordinate-grid">
+                <label>最小 X<input id="developmentMinX" type="number" min="-30000000" max="30000000" step="1"></label>
+                <label>最小 Y<input id="developmentMinY" type="number" min="-30000000" max="30000000" step="1"></label>
+                <label>最小 Z<input id="developmentMinZ" type="number" min="-30000000" max="30000000" step="1"></label>
+                <label>最大 X<input id="developmentMaxX" type="number" min="-30000000" max="30000000" step="1"></label>
+                <label>最大 Y<input id="developmentMaxY" type="number" min="-30000000" max="30000000" step="1"></label>
+                <label>最大 Z<input id="developmentMaxZ" type="number" min="-30000000" max="30000000" step="1"></label>
+              </div>
+              <small class="zone-limit">最小坐标不能大于最大坐标；X/Z 单边最多 256 格，高度最多 128 格。</small>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section id="persona" class="panel">
@@ -153,8 +224,8 @@
       </section>
 
       <section id="storage" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json 和 experience.json。前者保存所有玩家和长期记忆，后者保存总结经验；程序还会生成 .bak。</p></details></div>
-        <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label></div>
+        <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json、experience.json、tasks.json 和 autonomy-state.json。它们分别保存记忆、经验、排队任务和 Bot 已验证的住所位置；程序还会生成 .bak。</p></details></div>
+        <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>任务队列文件<input id="taskFile" type="text"><small>保存排队和重启后待恢复的任务。</small></label><label>自主状态文件<input id="autonomyFile" type="text"><small>保存 Bot 已验证并可重新寻找的住所位置。</small></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label><small class="muted">记忆、经验、任务和自主状态文件都必须位于项目 data 文件夹内。</small></div>
         <div class="memory-grid"><article><span>已认识玩家</span><strong id="memoryPlayers">0</strong></article><article><span>记忆事件</span><strong id="memoryEvents">0</strong></article><article><span>经验条目</span><strong id="experienceEntries">0</strong></article></div>
         <div class="inline-actions"><a class="button ghost link-button" href="/api/memory/download" download>导出统一记忆文件</a><a class="button ghost link-button" href="/api/experience/download" download>导出经验文件</a><span class="muted">程序会在聊天、回复、游戏事件和 remember 事实产生时自动原子写入；当前不会定时改写摘要。</span></div>
         <div class="log-grid memory-view"><div><h3>玩家档案</h3><pre id="memoryView">暂无记忆</pre></div><div><h3>经验摘要</h3><pre id="experienceView">暂无经验</pre></div></div>

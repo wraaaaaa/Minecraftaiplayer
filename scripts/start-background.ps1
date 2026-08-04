@@ -21,6 +21,13 @@ if (-not (Test-Path -LiteralPath $configFile)) {
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pidFile), (Split-Path -Parent $stdoutLog) | Out-Null
+$bridgeTokenFile = Join-Path $projectRoot 'data\bridge-token.txt'
+if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
+    $bridgeToken = ([Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N'))
+    [IO.File]::WriteAllText($bridgeTokenFile, $bridgeToken, [Text.UTF8Encoding]::new($false))
+}
+$env:MCAI_BRIDGE_TOKEN = (Get-Content -LiteralPath $bridgeTokenFile -Raw -Encoding UTF8).Trim()
+if ([string]::IsNullOrWhiteSpace($env:MCAI_BRIDGE_TOKEN)) { throw 'Bridge session token is empty.' }
 
 if (Test-Path -LiteralPath $pidFile) {
     $existing = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json

@@ -7,13 +7,14 @@ import type { AgentAction, PolicyEngine } from '../policy/policy-engine.js'
 import type { ActionExecutor } from '../agent/agent-controller.js'
 import type { WorldState } from '../agent/world-state.js'
 import { EasyAuthController } from './easy-auth.js'
+import { AddressingEngine } from '../agent/addressing.js'
+import { autonomyConfig } from '../config/types.js'
+import type { SecretGuard } from '../security/secret-guard.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
 
 const { goals, Movements, pathfinder } = pathfinderPackage
-
-function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') }
 
 export class MinecraftClient implements ActionExecutor {
   readonly #config: BotConfig
@@ -22,18 +23,23 @@ export class MinecraftClient implements ActionExecutor {
   readonly #memory: MemoryStore
   readonly #policy: PolicyEngine
   readonly #easyAuth: EasyAuthController
+  readonly #secrets: SecretGuard
+  readonly #addressing: AddressingEngine
   #bot: Bot | undefined
   #messageHandler: PlayerMessageHandler | undefined
   #proactiveHandler: ProactiveHandler | undefined
   #proactiveTimer: NodeJS.Timeout | undefined
   #endResolve: ((reason: string) => void) | undefined
 
-  constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine; easyAuthPassword?: string }) {
+  constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine; secrets: SecretGuard; easyAuthPassword?: string }) {
     this.#config = options.config
     this.#persona = options.persona
     this.#logger = options.logger
     this.#memory = options.memory
     this.#policy = options.policy
+    this.#secrets = options.secrets
+    const autonomy = autonomyConfig(options.config)
+    this.#addressing = new AddressingEngine({ botNames: [options.config.server.username, options.persona.name], requireMention: options.config.chat.requireMention, contextual: autonomy.contextualAddressing, directDistance: autonomy.directAddressDistance, conversationWindowMs: autonomy.conversationWindowMs })
     this.#easyAuth = new EasyAuthController({ enabled: options.config.easyAuth.enabled, ...(options.easyAuthPassword ? { password: options.easyAuthPassword } : {}), delayMs: options.config.easyAuth.loginDelayMs, logger: options.logger })
   }
 
@@ -94,7 +100,7 @@ export class MinecraftClient implements ActionExecutor {
       food: bot.food,
       dimension: bot.game.dimension,
       timeOfDay: bot.time.timeOfDay,
-      inventory: bot.inventory.items().map((item) => ({ name: item.name, count: item.count })),
+      inventory: bot.inventory.items().map((item) => ({ name: item.displayName, itemId: `minecraft:${item.name}`, count: item.count, slot: item.slot, ...(typeof item.durabilityUsed === 'number' ? { durability: item.durabilityUsed } : {}) })),
       nearbyPlayers
     }
   }
@@ -150,6 +156,18 @@ export class MinecraftClient implements ActionExecutor {
       }
       case 'break_block': return { ok: false, detail: '破坏性方块执行器尚未启用' }
       case 'open_container': return { ok: false, detail: '容器执行器尚未启用' }
+      case 'eat_best_food':
+      case 'equip_best':
+      case 'attack_hostile':
+      case 'collect_own_drops':
+      case 'gather_resource':
+      case 'craft_item':
+      case 'use_item':
+      case 'seek_shelter':
+      case 'build_shelter':
+      case 'wait_safe':
+      case 'prepare_for':
+        return { ok: false, detail: `Mineflayer 兼容适配器尚不支持 ${action.type}；请使用 Fabric 26.2 桥接客户端。` }
     }
   }
 
@@ -171,17 +189,20 @@ export class MinecraftClient implements ActionExecutor {
     bot.on('chat', (username, message) => {
       if (username === bot.username || !this.#messageHandler) return
       const identity: PlayerIdentity = { name: username, ...(bot.players[username]?.uuid ? { uuid: bot.players[username]!.uuid } : {}) }
-      if (!this.#isAddressed(message, bot.username)) {
-        void this.#memory.recordPlayerMessage(identity, message).catch((error) => this.#logger.error('记录旁听聊天失败', error))
+      const addressed = this.#addressing.decide(identity, message, this.snapshot())
+      if (!addressed.addressed) {
+        void this.#memory.recordPlayerMessage(identity, this.#secrets.sanitizeForPersistence(message)).catch((error) => this.#logger.error('记录旁听聊天失败', error))
         return
       }
-      const cleaned = this.#stripMention(message, bot.username)
-      void this.#messageHandler(identity, cleaned || message, this.snapshot()).catch((error) => this.#logger.error('玩家消息处理器失败', error))
+      void this.#messageHandler(identity, addressed.cleaned || message, this.snapshot())
+        .then(() => this.#addressing.noteBotReply(identity))
+        .catch((error) => this.#logger.error('玩家消息处理器失败', error))
     })
     bot.on('entityHurt', (entity, source) => {
       if (entity !== bot.entity || source.type !== 'player' || !source.username) return
       this.#policy.noteAttack(source.username)
       void this.#memory.recordGameEvent(`${source.username} 攻击了 Bot`, { attacker: source.username, health: bot.health }).catch((error) => this.#logger.error('记录受击事件失败', error))
+      void this.execute({ type: 'attack_player', target: source.username }).catch((error) => this.#logger.warn('自动自卫动作失败', error))
     })
     bot.on('kicked', (reason) => this.#logger.warn('Bot 被服务器踢出', { reason }))
     bot.on('error', (error) => this.#logger.error('Minecraft 客户端错误', error))
@@ -192,19 +213,6 @@ export class MinecraftClient implements ActionExecutor {
       this.#endResolve?.(reason)
       this.#endResolve = undefined
     })
-  }
-
-  #isAddressed(message: string, botName: string): boolean {
-    if (!this.#config.chat.requireMention || message.startsWith('!')) return true
-    const lower = message.toLowerCase()
-    return lower.includes(botName.toLowerCase()) || lower.includes(this.#persona.name.toLowerCase())
-  }
-
-  #stripMention(message: string, botName: string): string {
-    return message
-      .replace(new RegExp(`@?${escapeRegExp(botName)}`, 'giu'), '')
-      .replace(new RegExp(`@?${escapeRegExp(this.#persona.name)}`, 'giu'), '')
-      .trim()
   }
 
   #requireBot(): Bot {
