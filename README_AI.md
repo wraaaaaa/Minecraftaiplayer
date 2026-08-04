@@ -63,7 +63,7 @@ npm test
 
 ### 2.2 本轮验证快照（2026-08-05，Asia/Shanghai）
 
-- Node/TypeScript：full `npm test` 为 58 tests、58 pass、0 fail；其中包含破坏方块别名与旧提示词兼容测试。`tsc --noEmit` 与生产 build 均成功。
+- Node/TypeScript：最终 full `npm test` 为 59 tests、59 pass、0 fail，包含破坏方块别名、旧提示词兼容和当前发令玩家缺省目标回归。`tsc --noEmit` 与生产 build 均成功。
 - Fabric：进食完成判定修改后已完成一次 `clean build`，成功，不只是单文件编译。
 - 审计：暂存新增测试后再次扫描 110 个跟踪文件成功，`--history` 全 Git 对象扫描也成功；均为 0 个秘密、编码、控制/零宽字符或乱码问题。
 - 真实目标服：新 jar 已复制到 `.runtime` 且与构建产物 SHA-256 一致；后台重启后重新连接本机桥并进入 `你的域名.com`，WorldState schema v2 正常。开发区仍关闭，未执行破坏；显式进食修复需要玩家下一条“吃一个土豆”指令完成现场后置条件验收。
@@ -430,6 +430,8 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - `seek_shelter`、`build_shelter`、`wait_safe`
 
 `attack_player` 只给本地自卫链路使用，默认模型合约不公开它。`break_block`、`mine_block`、`break_natural_block` 在 `parseAgentDecision` 中只读取 `block/resource/blockId` 和 `count`，统一归一化为 `gather_resource`；模型给出的坐标和 `ownership` 都不会进入执行动作。`buildSystemPrompt` 会在自定义 `actionContract` 之后追加同样的兼容规则，因此升级用户即使保留忽略的旧版 `config/prompts.json`，模型也不会再以“动作列表没有破坏方块”为由拒绝。授权仍由 capability、policy 和 Fabric 开发区验证完成。`open_container` 虽有内部类型和策略分支，但 Fabric 执行器没有实现，也未对模型公开。
+
+玩家任务解析会把可信聊天身份 `identity.name` 作为 `follow_player`、`come_to_player`、`look_at_player` 漏写 `target` 时的缺省目标，因此“来这里”不会因模型少一个字段失败。该回填不用于 `attack_player`，攻击仍必须显式目标并通过短时自卫策略。
 
 ## 10. 本地控制器技术细节
 

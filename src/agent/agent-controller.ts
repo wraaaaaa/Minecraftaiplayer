@@ -270,7 +270,7 @@ export class AgentController {
         user: this.#secrets.sanitizeForModel(buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } }))
       })
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-      const decision = parseAgentDecision(response.text)
+      const decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
       if (decision.validationError) {
         const refusal = `这项指令现在无法执行。原因：${decision.validationError}。请换成当前动作接口支持的目标，或先补齐必要条件。`
         await this.#markFailed(task, decision.validationError)

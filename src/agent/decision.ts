@@ -18,7 +18,7 @@ function extractJson(text: string): unknown {
   }
 }
 
-function normalizeAction(value: unknown): { action: AgentAction; error?: string } {
+function normalizeAction(value: unknown, currentPlayerName?: string): { action: AgentAction; error?: string } {
   if (!value || typeof value !== 'object') return { action: { type: 'none' }, error: '模型没有提供结构化动作对象' }
   const action = value as Record<string, unknown>
   const type = typeof action.type === 'string' ? action.type : 'none'
@@ -27,7 +27,13 @@ function normalizeAction(value: unknown): { action: AgentAction; error?: string 
     case 'stop': return { action: { type: 'stop' } }
     case 'follow_player':
     case 'come_to_player':
-    case 'look_at_player':
+    case 'look_at_player': {
+      const target = typeof action.target === 'string' && action.target.trim()
+        ? action.target.trim()
+        : currentPlayerName?.trim()
+      if (!target) return { action: { type: 'none' }, error: `${type} 缺少 target 玩家名` }
+      return { action: { type, target } }
+    }
     case 'attack_player':
       if (typeof action.target !== 'string' || !action.target.trim()) return { action: { type: 'none' }, error: `${type} 缺少 target 玩家名` }
       return { action: { type, target: action.target.trim() } }
@@ -85,12 +91,12 @@ function cleanChat(value: unknown): string {
   return value.replace(/[\r\n]+/gu, ' ').trim().slice(0, 240)
 }
 
-export function parseAgentDecision(text: string): AgentDecision {
+export function parseAgentDecision(text: string, options: { currentPlayerName?: string } = {}): AgentDecision {
   const parsed = extractJson(text)
   if (!parsed || typeof parsed !== 'object') throw new Error('模型 JSON 必须是对象')
   const root = parsed as Record<string, unknown>
   const reply = cleanChat(root.reply)
   const remember = cleanChat(root.remember)
-  const normalized = normalizeAction(root.action)
+  const normalized = normalizeAction(root.action, options.currentPlayerName)
   return { reply, action: normalized.action, ...(remember ? { remember } : {}), ...(normalized.error ? { validationError: normalized.error } : {}) }
 }

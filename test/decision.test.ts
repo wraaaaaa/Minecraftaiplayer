@@ -14,6 +14,17 @@ test('未知或缺参动作降级为 none', () => {
   assert.deepEqual(parseAgentDecision('{"reply":"好的","action":{"type":"teleport"}}').action, { type: 'none' })
 })
 
+test('玩家移动动作漏写 target 时安全使用当前发令玩家', () => {
+  assert.deepEqual(
+    parseAgentDecision('{"reply":"来了","action":{"type":"come_to_player"}}', { currentPlayerName: 'wraaaaaa' }).action,
+    { type: 'come_to_player', target: 'wraaaaaa' }
+  )
+  assert.deepEqual(
+    parseAgentDecision('{"reply":"不行","action":{"type":"attack_player"}}', { currentPlayerName: 'wraaaaaa' }).action,
+    { type: 'none' }
+  )
+})
+
 test('把玩家语义的破坏和挖掘动作归一化为受保护采集', () => {
   assert.deepEqual(
     parseAgentDecision('{"reply":"我去挖石头。","action":{"type":"break_block","block":"minecraft:stone","count":3,"ownership":"natural"}}').action,
