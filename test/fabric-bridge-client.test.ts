@@ -56,7 +56,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
   const port = await unusedPort()
   const config = {
     server: {
-      adapter: 'fabric_bridge', connectionMode: 'direct', host: 'ciallo.kim', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
+      adapter: 'fabric_bridge', connectionMode: 'direct', host: '你的域名.com', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
       connectTimeoutMs: 2000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
     },
     easyAuth: { enabled: true, registerIfNeeded: true, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },

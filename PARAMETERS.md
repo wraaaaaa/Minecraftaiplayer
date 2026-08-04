@@ -23,7 +23,7 @@ OPENAI_API_KEY=OpenAI密钥
 | --- | --- | --- |
 | `adapter` | `fabric_bridge` / `mineflayer` | 26.2 模组服和局域网世界用 `fabric_bridge`；后者仅作协议诊断。 |
 | `connectionMode` | `direct` / `lan` | `direct` 连接固定地址；`lan` 自动监听 Minecraft 局域网广播。 |
-| `host` / `port` | `ciallo.kim` / `25565` | 固定服务器地址；LAN 扫描结果也会在页面显示到这里。 |
+| `host` / `port` | `你的域名.com` / `25565` | 固定服务器地址；LAN 扫描结果也会在页面显示到这里。 |
 | `lanDiscoveryTimeoutMs` | `8000` | LAN 模式等待广播的毫秒数，可设 250-60000。 |
 | `version` | `26.2` | Minecraft 协议/客户端版本。 |
 | `username` | `CialloAI` | 离线 Bot 游戏名，3-16 位字母、数字或下划线；皮肤文件名必须与它一致。 |

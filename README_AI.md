@@ -9,7 +9,7 @@
 1. 目标是持续开发一个可实际游玩的 Minecraft AI 玩家，不是只写方案或文档。
 2. 每一步开发必须同步维护两份 README：`README.md` 是人类安装、部署、使用、开发教程；本文件保存足以让新账号/Agent 无损续作的全部细节，包括 Git 推送。
 3. 项目必须能在中国大陆正常网络下安装和运行；代理不能成为唯一方案。
-4. 目标服务器 `ciallo.kim:25565`，`server.properties` 已确认 `online-mode:false`。
+4. 目标服务器 `你的域名.com:25565`，`server.properties` 已确认 `online-mode:false`。
 5. 目标游戏是 Minecraft Java Edition `26.2`，Fabric Loader `0.19.3` 模组服，使用 EasyAuth。
 6. DeepSeek 不是多模态模型，AI 根基必须是结构化世界状态、API/指令和动作接口，不能依赖视觉、听觉或模拟人类桌面操作。
 7. Bot 运行时必须静默在后台。
@@ -311,7 +311,7 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 ### Mineflayer 探针
 
-`npm run probe` 能到达 `ciallo.kim:25565`，服务端拒绝非完整 Fabric 客户端。提示要求 Fabric Loader/API，并暴露缺少的注册命名空间，包括 `beautify`、`farmersdelight`、`waystones`、`xaerominimap` 和 1 个额外命名空间。
+`npm run probe` 能到达 `你的域名.com:25565`，服务端拒绝非完整 Fabric 客户端。提示要求 Fabric Loader/API，并暴露缺少的注册命名空间，包括 `beautify`、`farmersdelight`、`waystones`、`xaerominimap` 和 1 个额外命名空间。
 
 ### 原生无界面 Fabric 测试
 
@@ -332,13 +332,13 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 实测证据：
 
 1. Fabric Loader 成功加载整套模组和 bridge，无重复 ID/缺依赖崩溃。
-2. `01:06:58 Connecting to ciallo.kim, 25565`；此前 611 registry entries 错误消失。
+2. `01:06:58 Connecting to 你的域名.com, 25565`；此前 611 registry entries 错误消失。
 3. Xaero 初始化、服务器 recipes/advancements 同步成功，Node 于 `17:07:02.629Z` 记录 `Fabric 客户端已进入世界`，离线 UUID `caee2f5b-1fe9-3d6c-a9ea-96588c1406b6`。
 4. 服务器提示新账号 `Use /register <password> <password>`，还发放首次加入资源/成就；测试未提供密码，因此没有注册/登录命令，也未发聊天/动作。
 5. Simple Voice Chat 发送 secret request，说明服务器通道/版本适配成功；Headless 无 OpenAL context，Speaker unavailable，当前语音不可用但不影响进服。
 6. 测试后精确停止 HeadlessMC/游戏/Node，无遗留进程。
 
-第三轮回归时间：2026-08-04 02:16–02:18（Asia/Shanghai）。Bot 再次进入 `ciallo.kim:25565`，运行时状态为 `in_world`，坐标 `(1231.5, 132, 199.5)`、生命 20、饥饿 20。CustomSkinLoader Universal 15.0.1 在真实 MC 26.2 客户端加载，并完成皮肤/渲染相关类转换。服务器仍提示 `/register`；因未保存 EasyAuth 密码和模型 Key，没有发送注册、聊天或动作。重复双击 `Start-Bot.cmd` 时发现“同步被 Java 锁定的 mod 后误回滚 Node”问题，现已通过启动前 PID 早退和只回滚本轮新进程修复。
+第三轮回归时间：2026-08-04 02:16–02:18（Asia/Shanghai）。Bot 再次进入 `你的域名.com:25565`，运行时状态为 `in_world`，坐标 `(1231.5, 132, 199.5)`、生命 20、饥饿 20。CustomSkinLoader Universal 15.0.1 在真实 MC 26.2 客户端加载，并完成皮肤/渲染相关类转换。服务器仍提示 `/register`；因未保存 EasyAuth 密码和模型 Key，没有发送注册、聊天或动作。重复双击 `Start-Bot.cmd` 时发现“同步被 Java 锁定的 mod 后误回滚 Node”问题，现已通过启动前 PID 早退和只回滚本轮新进程修复。
 
 模组外部前置已经解决。当前实际/未来同步方式：
 

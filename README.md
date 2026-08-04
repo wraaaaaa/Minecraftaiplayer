@@ -2,7 +2,7 @@
 
 让大模型以真正的 Minecraft 客户端玩家身份进入 Java Edition `26.2` Fabric 模组服务器，在后台接收聊天指令、区分玩家、保存记忆，并执行受行为准则约束的游戏动作。
 
-当前是可运行的第一阶段版本：原生 Fabric 无界面客户端、AI 控制器、本机图形总控台、三种模型 API、记忆与经验文件、EasyAuth、安全规则、服务器模组同步、局域网兼容、离线皮肤管理和静默后台运行均已实现。2026-08-04 已使用用户提供的 24 个“进服必须 mod”真实进入 `ciallo.kim` 世界，客户端完成注册表、地图、配方、语音通道握手和初始物品同步；当时没有注入 EasyAuth 密码、发送聊天或执行动作，完整行为验收状态见“测试状态”。
+当前是可运行的第一阶段版本：原生 Fabric 无界面客户端、AI 控制器、本机图形总控台、三种模型 API、记忆与经验文件、EasyAuth、安全规则、服务器模组同步、局域网兼容、离线皮肤管理和静默后台运行均已实现。2026-08-04 已使用用户提供的 24 个“进服必须 mod”真实进入 `你的域名.com` 世界，客户端完成注册表、地图、配方、语音通道握手和初始物品同步；当时没有注入 EasyAuth 密码、发送聊天或执行动作，完整行为验收状态见“测试状态”。
 
 ## 当前能力
 
@@ -118,7 +118,7 @@ Copy-Item config\persona.example.json config\persona.json
 {
   "server": {
     "adapter": "fabric_bridge",
-    "host": "ciallo.kim",
+    "host": "你的域名.com",
     "port": 25565,
     "version": "26.2",
     "username": "CialloAI",
@@ -362,7 +362,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | --- | --- | --- |
 | `server.adapter` | `fabric_bridge` | 正式原生 Fabric 或诊断 Mineflayer |
 | `server.connectionMode` | `direct` | 固定服务器或自动发现局域网世界 |
-| `server.host` / `server.port` | `ciallo.kim` / `25565` | 目标服务器 |
+| `server.host` / `server.port` | `你的域名.com` / `25565` | 目标服务器 |
 | `server.lanDiscoveryTimeoutMs` | `8000` | LAN 广播等待时间（250-60000ms） |
 | `server.version` | `26.2` | Minecraft 协议/客户端版本 |
 | `server.username` | `CialloAI` | 离线玩家名称，也是默认聊天提及词 |
@@ -437,7 +437,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 截至 2026-08-04，本轮代码已通过 16 项 Node 自动测试、TypeScript 类型检查、生产构建、PowerShell/浏览器脚本语法检查、JSON 解析、UTF-8/异常控制字符扫描与 Git 空白检查。一键安装脚本使用本机已有环境完整执行通过，用时约 85 秒；该结果不能替代无 VPN 的中国大陆纯净 Windows 验收。
 
-真实目标服测试已让 Fabric 26.2 无界面客户端进入 `ciallo.kim:25565` 世界，状态接口返回坐标、20 点生命和 20 点饥饿值；CustomSkinLoader 15.0.1 也在真实客户端成功加载。服务器随后要求 EasyAuth `/register`，由于最终提交不保存任何密码或模型 Key，本轮没有发送注册命令、模型聊天或游戏动作，因此这些端到端行为仍待用户在本机安全填写秘密后验收。
+真实目标服测试已让 Fabric 26.2 无界面客户端进入 `你的域名.com:25565` 世界，状态接口返回坐标、20 点生命和 20 点饥饿值；CustomSkinLoader 15.0.1 也在真实客户端成功加载。服务器随后要求 EasyAuth `/register`，由于最终提交不保存任何密码或模型 Key，本轮没有发送注册命令、模型聊天或游戏动作，因此这些端到端行为仍待用户在本机安全填写秘密后验收。
 
 LAN 发现已通过真实 UDP 组播收发与 WebUI 扫描接口测试；仍需在用户实际“开放到局域网”的世界上做一次现场验收。皮肤 PNG 校验、导入、读取和多人客户端包生成流程均已测试，提交前测试产物不会进入 Git。
 

@@ -82,7 +82,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private void autoConnect(Minecraft client) {
         if (client.getConnection() != null || tick < 40 || tick - lastConnectAttempt < 600) return;
-        String host = environment("MCAI_SERVER_HOST", "ciallo.kim");
+        String host = environment("MCAI_SERVER_HOST", "你的域名.com");
         int port;
         try {
             port = Integer.parseInt(environment("MCAI_SERVER_PORT", "25565"));

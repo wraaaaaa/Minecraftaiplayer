@@ -2,7 +2,7 @@
   "server": {
     "adapter": "fabric_bridge",
     "connectionMode": "direct",
-    "host": "ciallo.kim",
+    "host": "你的域名.com",
     "port": 25565,
     "lanDiscoveryTimeoutMs": 8000,
     "version": "26.2",
