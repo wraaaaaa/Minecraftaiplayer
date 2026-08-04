@@ -2,6 +2,21 @@
 
 > 本文件面向接手项目的 AI Agent。开始工作前必须完整阅读本文件与 `README.md`。禁止在本文档、日志、Git 或模型上下文中写入真实密码、API Key、Microsoft Token。
 
+## 0. 接手者 5 分钟启动清单
+
+本节是压缩入口，不能代替阅读全文。
+
+1. 当前主本地仓是 `D:\临时工程\minecraft aibot`；`D:\开发\minecraft aibot` 是需要同步的旧目录。不要误在旧目录启动第二套 WebUI/控制器/客户端。
+2. 进入主仓后先执行 `git status --short --branch`、`git log -5 --oneline`、`git fetch origin`，再确认 `HEAD` 与 `origin/main`。本文更新前的已推送基线是 `01c62ac fix: bound model output to prevent chat timeouts`；以后以 Git 实际结果为准。
+3. 依次阅读本文件、`README.md`、`PARAMETERS.md`。真实配置在 Git 忽略的 `config/*.json`、`.env`、`data/`、`.runtime/`，不能根据 example 猜测用户当前值，也不能在输出中打印它们。
+4. 判断进程归属必须同时核对 PID、可执行文件、命令行入口和 `projectRoot`。不要只凭进程名停止 `node.exe`/`java.exe`，用户可能同时运行人类 Minecraft。
+5. 当前生产链路是原生 Fabric 26.2 客户端 + 本机 TCP 桥 + Node 控制器；Mineflayer 仅为诊断备选。任何新能力优先扩展结构化状态和白名单动作，不要加入屏幕识别依赖。
+6. 修改代码后至少运行 `npm run check`、`npm test`、`npm run build`；改 Fabric 时再运行 Gradle build；改安装/启动脚本时做对应真实入口回归。
+7. 每次提交前同步更新 `README.md` 与本文件；参数或存储位置变化还要更新 `PARAMETERS.md`。检查秘密、占位域名、生成文件、无效字符和 `git diff --check` 后才可推送。
+8. 推送主仓后，在旧目录确认干净，再用 `git pull --ff-only origin main` 同步。实际配置是忽略文件，必须单独按字段迁移，不能通过 Git 覆盖。
+
+权威性顺序：运行源码/脚本与测试 > 当前本地忽略配置 > 本文件 > `README.md` > example。文档与源码冲突时，以源码为事实并在同一提交修正文档。
+
 ## 1. 不可遗忘的用户规则
 
 用户已明确要求：
@@ -29,13 +44,14 @@
 
 ## 2. 仓库与 Git
 
-- 工作区：`D:\开发\minecraft aibot`
+- 主工作区：`D:\临时工程\minecraft aibot`
+- 旧目录/同步副本：`D:\开发\minecraft aibot`
 - 远端：`https://github.com/wraaaaaa/Minecraftaiplayer.git`
 - 远端名/默认分支：`origin` / `main`
-- 当前本轮需求开发前的 HEAD：`a965401 feat: add local control center and managed mod deployment`（已在 origin/main）。
-- 更早提交：`c638099 docs: establish human and AI project guides`、`93dd822 Initial commit`
+- 本文扩写前的 HEAD：`01c62ac fix: bound model output to prevent chat timeouts`（已在 `origin/main`）。
+- 关键历史：`0bfab72` 插件称号聊天、`bfd40f7` 自动复活/BOM 状态、`80de913` 目录/PID 归属、`2ff69ad` 隐私占位域名、`75b25f1` LAN/皮肤/暖色 WebUI、`a965401` 总控与模组部署、`9f44535` 原生 Fabric 基础。
 - 仓库级作者：`wraaaaaa <310438732+wraaaaaa@users.noreply.github.com>`（仅在本仓库配置过；不要擅改全局 Git 身份）。
-- 本文件记录时，局域网/皮肤/暖色 WebUI/参数总表补充轮已完成回归，正准备基于 `a965401` 提交和推送；接手时以 `git status --short --branch` 和 `git log` 为准。
+- 主/旧目录在 `01c62ac` 时均为 `main` 且干净；主目录承担实际运行，旧目录仅同步源码。接手时仍必须重新检查，不能把此快照当实时状态。
 
 安全推送流程：
 
@@ -111,7 +127,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 
 ### 尚未完成
 
-- 已真实进入目标服务器世界；由于未注入 EasyAuth 密码，尚未验证注册/登录、LLM 聊天和动作端到端。
+- 已真实进入目标服务器世界并完成 EasyAuth 登录、模型最小调用、真人消息识别和游戏内失败兜底；输出预算修复后的真人正常回复/动作/记忆完整闭环仍需再做一次现场确认。
 - 可靠寻路、避障、采集、挖掘、制作、放置、战斗循环和自主生存闭环。
 - “荒无人烟选址”的世界扫描/领地判断；当前策略保守拒绝破坏，安全但不自主发展。
 - 经验自动总结目前只有存储与提示检索基础，未形成完整任务结果→失败归因→复验闭环。
@@ -154,6 +170,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | --- | --- |
 | `src/config/*` | 类型与严格配置加载、相对路径解析、环境变量读取 |
 | `src/core/atomic-json-file.ts` | 临时文件→备份→原子替换的 JSON 持久化 |
+| `src/core/json.ts` | 统一剥离 U+FEFF BOM 后解析 JSON，供配置/WebUI/PID读取 |
 | `src/core/logger.ts` | JSONL 文件日志，默认不输出控制台，递归秘密脱敏 |
 | `src/llm/*` | 三供应商统一 `complete()` 边界、超时、响应解析 |
 | `src/agent/prompt.ts` | 明确告知模型只能使用结构化状态、不能声称视听觉；注入人设/记忆/经验/规则 |
@@ -163,9 +180,12 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `src/memory/memory-store.ts` | 单文件 schema、UUID 玩家档案、名称更新、事件上限 |
 | `src/experience/experience-store.ts` | 独立经验文件、去重/检索基础 |
 | `src/policy/policy-engine.ts` | 财产保护、自卫窗口、攻击者匹配、动作拒绝理由 |
+| `src/minecraft/chat-parser.ts` | 严格解析插件 `<[称号]玩家名> 正文`，剥离多个方括号前缀并校验游戏名 |
 | `src/minecraft/fabric-bridge-client.ts` | 本机 TCP server、JSONL 协议、事件与 action_result 关联 |
 | `src/minecraft/minecraft-client.ts` | Mineflayer 备选诊断适配器，pathfinder 加载与基础动作 |
 | `src/minecraft/easy-auth.ts` | Mineflayer 路线 EasyAuth 辅助；Fabric 路线在模组中执行 |
+| `src/network/lan-discovery.ts` | UDP 组播监听、MOTD/动态端口解析和 CLI JSON 输出 |
+| `src/skin/png.ts` | PNG签名/IHDR读取、64×64/64×32校验和 data URL 解码 |
 | `src/runtime/bot-runtime.ts` | 选择适配器、生命周期、关闭后重连 |
 | `src/runtime/status-store.ts` | 原子写 `data/runtime-status.json` 供独立 WebUI 显示世界状态 |
 | `src/webui/server.ts` | loopback HTTP/API、设置校验、秘密写入、启停、同步、模型最小测试 |
@@ -200,14 +220,31 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 
 ## 5. 配置与秘密契约
 
-正式配置路径 `config/bot.json` 和 `config/persona.json` 被 Git 忽略；不存在时加载 example。服务器字段：
+生产配置 `config/bot.json`、`persona.json`、`prompts.json`、`mods.json`、`skin.json` 被 Git 忽略。安装器/WebUI 可从 example 创建它们，但生产控制器缺 `bot.json` 会拒绝启动；persona/prompts 缺失才自动退回 example。`behavior-rules.json` 是跟踪文件并直接参与运行。完整用户向参数解释在 `PARAMETERS.md`，以下记录实现级默认值和边界。
 
-- `adapter`: 默认 `fabric_bridge`；`mineflayer` 只适合协议诊断/非模组环境。
-- `bridgeHost` 必须保持 loopback；当前默认 `127.0.0.1:8765`。
-- `auth`: 目标服是 `offline`。
-- `connectTimeoutMs`: Node 等 Fabric 桥的单次等待；超时后必须确保 server close，再重试，避免 EADDRINUSE。
-- `easyAuth.registerIfNeeded`: 只在服务器明确发 `/register` 提示时允许创建离线服内账号；未给密码的探针绝不注册。
-- `config/mods.json`: `sourceDirectory`、`syncOnClientStart`、排除正则；当前开发机实际文件被忽略但指向用户给的目录。
+| 分组 | 默认/允许值 | 实现注意 |
+| --- | --- | --- |
+| `server.adapter` | `fabric_bridge`; 另有 `mineflayer` | 目标模组服只能用 Fabric；启动原生客户端时会拒绝其他值 |
+| `server.connectionMode` | `direct` / `lan` | LAN 只在启动脚本解析；强制 `auth:offline` 并以 UDP 发现结果覆盖目标 |
+| `host/port/version` | 占位域名/25565/26.2 | host 非空、port 仅校验正整数；不要把真实域名提交，生产值在忽略文件 |
+| `username` | `CialloAI` | 必须 `^[A-Za-z0-9_]{3,16}$`；影响离线 UUID、EasyAuth 与 LocalSkin 文件名 |
+| `auth` | `offline` / `microsoft` | 原生 Headless 启动只实现 offline；配置 microsoft 会提前失败 |
+| `connectTimeoutMs/reconnectDelayMs` | 30000 / 10000 | 前者等 Java hello，后者控制 Node 重建适配器间隔；当前 validator 未限制这两项 |
+| `autoRespawn/respawnDelayMs` | true / 3000 | 旧配置缺字段仍使用 true/3000；delay 限 0–60000ms |
+| `bridgeHost/bridgePort/actionTimeoutMs` | loopback/8765/10000 | WebUI额外强制 loopback；端口/动作超时需正整数；当前启动脚本未把非默认 bridgeHost/Port导出给 Java，实际应保持默认 |
+| `easyAuth.enabled/registerIfNeeded` | true / true | 注册只响应明确 `/register` 提示；密码为空时不发命令 |
+| `easyAuth.passwordEnv/loginDelayMs` | `MINECRAFT_LOGIN_PASSWORD` / 1500 | loginDelay 目前仅 Mineflayer 辅助使用；Fabric 回退固定 100 tick≈5秒 |
+| `model.provider/model` | deepseek/v4-flash | provider 类型声明为 deepseek/volcengine/openai，但 validator 目前只检查非空，工厂未知值会落入 Chat Completions 路线 |
+| `apiKeyEnv/baseUrl` | provider 对应变量/官方根地址 | 只做非空校验，不验证 URL scheme；端点路径由 Provider 追加 |
+| `reasoningEffort` | none/low/medium/high/xhigh/max | DeepSeek 发生映射时日志记录 requested/effective |
+| `timeoutMs/maxOutputTokens` | 120000 / 4096 | 分别限制 1000–600000 和 128–131072；旧配置缺输出预算时 Provider 使用 4096 |
+| `chat.requireMention/replyPrefix/cooldownMs` | true/空/2500 | cooldown 当前未做数值校验；`!` 开头绕过 mention 要求 |
+| `proactiveEnabled/Idle/MinInterval` | true/180000/300000 | 15秒轮询，两个时间阈值当前未做 schema 数值校验 |
+| `storage.memoryFile/experienceFile/maxEvents` | `data/*.json` / 5000 | 两文件不能指向同一路径；WebUI限制在 data，CLI loader只按 path.resolve，不限制根目录 |
+| `policyFile/personaFile/promptsFile` | `config/*.json` | WebUI限制在 config；CLI loader对 policy 不提供 example 回退 |
+| `logging.file/level/console` | `logs/bot.log` / info / false | 静默后台必须保持 console false；WebUI限制日志路径在 logs |
+
+其他 JSON：`persona` 提供 name/description/speakingStyle/goals/boundaries；`prompts` 提供 identity/capabilityRules/memoryRules/actionContract/proactiveInstruction；`mods` 提供 sourceDirectory/syncOnClientStart/excludeFilePatterns；`skin` 提供 enabled/model/visibilityMode/skinFile/capeFile/onlineProvider；行为规则 schema 当前必须 version 1。WebUI 会做数组、路径和枚举补充校验，直接手改文件则只有控制器实际读取到的部分会被校验。
 
 秘密：
 
@@ -216,11 +253,182 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - `ARK_API_KEY`
 - `OPENAI_API_KEY`
 
-运维覆盖：`MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_VERSION`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_SERVER_HOST`、`MCAI_SERVER_PORT`、`MCAI_WEBUI_PORT`。服务器和 EasyAuth开关由启动脚本从 bot config 传给 Fabric 子进程。
+用户/运维覆盖：`BOT_CONFIG`（仅 Node 配置入口）、`MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_VERSION`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_MODS_SOURCE`、`MCAI_WEBUI_PORT`。启动脚本内部再向 Java 设置 `MCAI_SERVER_HOST/PORT`、`MCAI_EASYAUTH_ENABLED`、`MCAI_EASYAUTH_REGISTER_IF_NEEDED`、`MCAI_AUTO_RESPAWN_ENABLED`、`MCAI_RESPAWN_DELAY_MS`；桥读取 `MCAI_BRIDGE_HOST/PORT`。危险调试变量 `MCAI_ALLOW_REMOTE_BRIDGE` 不应在生产使用。
 
 绝对禁止把登录命令原文交给 LLM。Fabric `GAME` 消息会正则替换 `/login` 和 `/register` 参数，并再次替换实际密码。Logger 也递归脱敏典型 key/authorization/password/token 值。WebUI `GET` 只返回秘密是否存在；`PUT /api/secrets` 可写 `.env` 但响应不含值，运行中更新同时替换 WebUI 进程环境。
 
-## 6. 关键技术决策与研究结果
+## 6. 运行时生命周期与端到端时序
+
+### 控制器启动、断线与热加载边界
+
+`src/index.ts` 只做三件事：`loadProjectConfig()`、创建 `BotRuntime`、在 `SIGINT/SIGTERM` 调用 `stop()`。生产启动要求 `config/bot.json` 存在；只有 `probe.ts` 显式允许退回 `bot.example.json`。人设和提示词文件缺失时会分别退回 example，行为规则文件不会退回。
+
+`BotRuntime.run()` 的实际顺序：
+
+1. 加载 `.env`，但已有进程环境变量优先；读取/校验 bot config、人设、提示词、规则和当前模型 Key。
+2. 创建一个长期复用的 `MemoryStore`、`ExperienceStore`、`RuntimeStatusStore` 和 LLM Provider，并先加载其文件。
+3. 写状态 `starting`，进入重连循环；每轮新建 `PolicyEngine`、Minecraft 适配器与 `AgentController`。
+4. 写 `waiting_for_client`；Fabric 路线在 `bridgeHost:bridgePort` 监听，等 Java 桥发 `hello`。连接后等待断开；失败/断开时关闭 socket/server，等待 `reconnectDelayMs` 再创建下一轮。
+5. 收到停止信号后关闭当前适配器，写 `stopped`，等待日志写链 flush。
+
+配置、Provider、记忆路径和提示词都不是热加载。WebUI 保存只修改磁盘；已运行控制器仍持有启动时对象。WebUI 更新 Key 只更新 WebUI 自身环境与 `.env`，不会注入已运行的 Node 控制器或 Java 子进程。因此任何模型、服务器、人设、提示词、规则、存储或秘密变更后都应完整“重新启动 Bot”。
+
+### 真人消息处理时序
+
+```text
+Fabric CHAT 或经过严格解析的 GAME 消息
+  → 忽略 Bot 自己的名字
+  → 同玩家+同正文 1500ms 双通道去重
+  → requireMention / ! / Bot 名称判定
+  → 未被点名：只写该玩家旁听事件，不调用模型
+  → 被点名：移除 Bot 名称并进入 AgentController
+      → 按 UUID（无 UUID 时按小写名）做 cooldown
+      → 先持久化 player_message
+      → 读取该玩家档案 + 最近 12 条相关/全局事件 + 全局摘要
+      → ExperienceStore 词法检索最多 8 条经验
+      → 组装 system/user JSON，调用一次模型
+      → 解析/清洗 JSON 决策
+      → 可选 remember 过滤敏感词后写玩家 facts
+      → PolicyEngine 授权
+      → Fabric 白名单动作，等待相同 id 的 action_result
+      → 动作失败时追加一条 failure experience
+      → 发送 reply 并写 bot_reply
+      → 写不含正文的处理结果日志
+```
+
+冷却键优先 UUID，否则小写名字；时间戳在调用模型前写入。单个玩家在冷却内的新消息会直接忽略且不写事件。当前没有每玩家请求队列、取消旧请求或全局并发限制：不同玩家或冷却后的同一玩家可以产生并发模型请求。`AtomicJsonFile` 串行化实际写入，但多个异步 mutator 共享缓存对象；扩展高并发前应补消息队列和并发测试。
+
+模型/API/JSON/回复动作任一步抛错都会进入 catch。`TimeoutError` 回复“我这次思考超时了，请再说一次。”，其他错误回复通用失败句；这两种兜底当前不写 `bot_reply` 记忆。动作返回 `ok:false` 不抛错，而是记录经验后仍发送模型回复。
+
+### 主动空闲行为
+
+Java 每秒发送世界状态；Node 每 15 秒调用一次 `proactiveTick()` 作为调度探针。只有 `chat.proactiveEnabled=true`、已进世界、距离最后一条被处理入站消息超过 `proactiveIdleMs`、距离上次主动尝试超过 `proactiveMinIntervalMs` 时才调用模型。主动模式即使模型返回其他动作，也只保留 `wander`/`none`；主动回复写成全局 `game_event`。`behavior-rules.json` 的 `proactiveChat.*` 当前尚未接入这段逻辑，真正开关是 `config/bot.json` 的 `chat.proactiveEnabled`。
+
+## 7. Fabric 本机桥协议 v1
+
+### 传输与边界
+
+- Node 是 TCP server，Java 是 client；默认 `127.0.0.1:8765`，UTF-8、每行一个 JSON、换行分帧、`TCP_NODELAY`。
+- Node 和 Java 都拒绝超过 1,000,000 字符/字节量级的单行；Node 累积 buffer 超过 1,000,000 字符会断开。只允许一个活动 Java socket。
+- Java 连接失败后每 2 秒重试；socket read timeout 250ms，用于刷新发件队列和响应关闭。Java outgoing 队列最多 1000 条，超出时新事件会被静默丢弃；incoming 为无显式上限的并发队列，由每 tick 消费。
+- `MCAI_ALLOW_REMOTE_BRIDGE=true` 可绕过 Java 回环检查，但 Node 端仍拒绝非 loopback；生产脚本从不设置它。不要为了远程控制而放宽两侧检查。
+- Node 发动作时生成 UUID `id`，以 `actionTimeoutMs` 建 pending；断线/关闭会将全部 pending 解析为失败，不会永久悬挂。
+
+Java → Node 消息：
+
+| `type` | 关键字段 | 产生时机/Node 行为 |
+| --- | --- | --- |
+| `hello` | `protocolVersion:1`, `adapter:"fabric-26.2"` | TCP 建立后第一条；版本不等于 1 立即断开 |
+| `joined_world` | `name`, `uuid`, `at` | 本地玩家 UUID 形成新会话；状态进入 `in_world` |
+| `state` | `connected`, `position{x,y,z}`, `health`, `food`, `dimension`, `timeOfDay`, `inventory[]`, `nearbyPlayers[]` | 每 20 tick；背包只发非装备物品，附近玩家限 32 格 |
+| `player_chat` | `name`, `uuid`, `message` | Fabric 签名聊天事件 |
+| `game_message` | `message`, `overlay` | 系统/GAME 通道；EasyAuth先在 Java 内处理，正文脱敏后才发 Node；Node 仅把严格 `<称号+用户名> 正文` 解析为玩家聊天 |
+| `attacked_by_player` | `name`, `uuid` | Mixin 确认本地玩家被真实玩家造成伤害；Node 只登记自卫窗口并写记忆，不会自动触发反击 |
+| `death` | `health` | 首次检测死亡；停止移动并进入复活逻辑 |
+| `respawn_requested` | `delayTicks` | 调用 `LocalPlayer.respawn()` 并清死亡界面后 |
+| `respawned` | `health` | 后续 tick 检测恢复存活 |
+| `action_result` | `id`, `ok`, `detail` | 执行动作后与 Node pending 关联 |
+
+Node → Java 只有一种 envelope：
+
+```json
+{"type":"action","id":"UUID","action":{"type":"look_at_player","target":"玩家名"}}
+```
+
+Fabric 动作语义：
+
+| 动作 | 当前实现 | 重要限制 |
+| --- | --- | --- |
+| `none` | 立即成功 | 无副作用 |
+| `stop` | 清 movement 与前后左右/跳跃/冲刺按键 | 只停止本桥设置的移动 |
+| `chat` | 普通内容 `sendChat`；以 `/` 开头则 `sendCommand` | Node 入口清除换行并限 240 字符；LLM action contract不直接开放 chat，回复走独立 `chat()` |
+| `look_at_player` | 按名字查 32格/客户端已加载玩家并设置 yaw/pitch | 无目标则失败 |
+| `follow_player` | 每 tick 刷新玩家坐标，前进、>6格冲刺、水平碰撞时跳跃，2格停止但保持跟随 | 不是寻路器，不识别悬崖、岩浆、复杂障碍或领地 |
+| `come_to_player` | 移动期间每 tick 刷新目标玩家坐标，到 2格内后清除任务 | 同样只是直线按键移动；与 follow 的差别是首次到达后不继续保持跟随 |
+| `wander` | 随机角度直线移动 | Decision 层允许 2–16，Fabric 再夹到 2–8；不做环境安全扫描 |
+| `attack_player` | gameMode 单次攻击 + 主手挥动 | Policy 必须先授权；受击事件本身不会自动调用此动作 |
+| `break_block` / `open_container` | Java default 返回不支持 | 仅保留在 Decision/Policy schema 用于安全拒绝，不能宣称已实现 |
+
+Fabric 自动连服在客户端无 player/level、tick≥40 且距上次尝试至少 600 tick 时调用 `ConnectScreen.startConnecting`；约 2 秒后首次尝试，之后约 30 秒重试。状态上报约每秒一次。自动复活延迟从毫秒除以 50 转 tick，限制 0–1200 tick；未恢复时每 100 tick（5 秒）再次请求。
+
+## 8. 模型、提示词、决策与策略契约
+
+### Provider 请求映射
+
+| provider | 路径 | 结构化输出 | 推理参数 | 输出预算 |
+| --- | --- | --- | --- | --- |
+| `deepseek` | `{baseUrl}/chat/completions` | `response_format:{type:"json_object"}`, `stream:false` | `none`→`thinking.disabled`；low/medium/high→`thinking.enabled + reasoning_effort:high`；xhigh/max→`max` | `max_tokens` |
+| `volcengine` | `{baseUrl}/chat/completions` | 同上 | 原样 `reasoning_effort`；具体端点是否支持由用户账号决定 | `max_tokens` |
+| `openai` | `{baseUrl}/responses` | 输入为 system/user，`text.verbosity:"low"` | `reasoning:{effort}` 原样传递 | `max_output_tokens` |
+
+所有请求使用 Bearer、JSON、`AbortSignal.timeout(timeoutMs)`，先把完整响应读为文本；非 2xx 错误只保留前 500 字符进入异常。当前没有 HTTP 重试、指数退避、429 专用处理、流式输出、token 用量持久化或供应商健康熔断。缺 Key 时 `MissingKeyProvider` 允许 Bot 正常进服，但第一次 AI 请求明确失败。
+
+System prompt 依次拼接：替换人设变量后的 `identity`、`capabilityRules[]`、`memoryRules[]`、`actionContract`。真人 user payload 是单行 JSON：`currentPlayer`、`playerMessage`、最多 12 条 `recentRelevantEvents`、`globalSummary`、最多 8 条 `relevantExperience`、`structuredGameState`。模型看不到其他玩家的专属 facts，但无 `playerKey` 的全局事件会进入所有人的最近上下文。
+
+Decision parser 接受纯 JSON、Markdown JSON fence，或从第一 `{` 到最后 `}` 的对象。`reply`/`remember` 会去换行、trim、截到 240 字符。未知动作或缺少 target 降级 `none`；wander 默认 6 并夹到 2–16。`remember` 还会拒绝包含 password/密码/api key/token/令牌/地址的内容，但这只是补充过滤，不是通用 DLP。
+
+默认 prompt 的允许动作目前只列 `none/stop/follow_player/come_to_player/look_at_player/wander`，没有 `attack_player`。因此“Policy 支持受控自卫”不等于“Bot 会自动反击”：当前 Mixin 只登记攻击者，且没有事件直接触发 Agent。要完成真正自动自卫，需要新增受击事件控制流程、威胁停止条件和测试，不能只把 `attack_player` 加进提示词。
+
+Policy 当前实际读取的规则只有：`allowSelfDefense`、`allowPlayerOrderedPvp`、`selfDefenseWindowMs`、`denyBreakingPlayerProperty`、`denyOpeningPlayerContainers`、`allowDestructiveActionsWhenOwnershipUnknown`。`denyTakingPlayerItems`、`wildernessDevelopmentOnly`、`stopSelfDefenseWhenThreatEnds`、`proactiveChat.*` 目前尚未接入执行分支；它们是未来约束声明，不得标记为已执行。
+
+## 9. 记忆、经验、状态与日志持久化
+
+### 原子 JSON 规则
+
+`AtomicJsonFile<T>` 首次缺文件时创建默认文档；同一实例缓存对象并用 Promise write chain 串行写入。每次保存先写 `<file>.<pid>.tmp`，尝试把旧文件复制为 `<file>.bak`，再 rename；Windows rename 失败时删除目标后重命名临时文件。`.bak` 是上一版本，不会多代轮转。读取到损坏 JSON 会抛错，不会自动用 `.bak` 覆盖；恢复必须先停止 Bot、备份损坏文件、人工校验 `.bak` 后再替换。
+
+| 文件 | schema/写入者 | 核心语义 |
+| --- | --- | --- |
+| `data/memory.json` | schemaVersion 1 / `MemoryStore` | 唯一长期记忆；Bot 名、玩家表、事件、全局摘要 |
+| `data/experience.json` | schemaVersion 1 / `ExperienceStore` | 行为失败经验；任务、上下文、结果、lesson、correction、tags |
+| `data/runtime-status.json` | schemaVersion 1 / `RuntimeStatusStore` | `starting/waiting_for_client/connected/in_world/disconnected/stopped` 与最后世界快照 |
+| `logs/bot.log` | JSON Lines / `Logger` | ISO 时间、level、message、递归脱敏 data；写失败被吞掉以避免拖垮 Bot |
+| `logs/webui-model-test.log` | JSON Lines / WebUI 模型测试 | 只记录测试错误，默认 error 级别 |
+| `data/*.pid.json` | PowerShell 启动脚本 | PID、executable、projectRoot、入口/运行目录、startedAt；不是业务状态 |
+
+玩家 key：优先 `uuid:<lowercase uuid>`，缺 UUID 时 `name:<lowercase name>`。已知同 UUID 改名会更新 `currentName` 并追加 `knownNames`；先以 name 建档、后来获得 UUID时当前没有自动合并，可能形成两个档案。`facts` 去重是精确字符串匹配。`events` 只保留最后 `maxEvents` 条；删旧事件不删玩家 facts。
+
+`conversationSummary` 与 `globalSummary` 当前不会自动生成或定时改写；example 中的内容只是格式说明。长期 facts 仅来自模型 `remember`。WebUI 对 memory/experience 只读展示和下载，没有编辑 API，避免运行时与缓存对象冲突。人工恢复/迁移必须停 Bot 后复制 `memory.json`、`experience.json` 及需要的 `.bak`，再启动验证 schema 与玩家数。
+
+Experience 只在“模型给出非 none 动作且执行返回 `ok:false`”时自动追加 failure；API 超时、无效 JSON、通用异常不会写经验。检索按消息分词和 tags/task/lesson 子串打分，最多 8 条；`timesApplied` 当前不递增，`verified` 始终初始 false，成功/partial 自动总结尚未实现。
+
+## 10. WebUI API、安全模型与文件写入
+
+WebUI 是独立 Node 进程，只绑定 `127.0.0.1`，默认端口 3210。所有请求要求 Host 为 loopback；有 Origin 时必须精确匹配本机端口。响应包含 CSP、`nosniff`、`no-store`，静态文件做路径归一化并限制在 `public/webui`。它没有登录认证，安全前提就是“不暴露到 LAN/公网”。
+
+| 方法与路径 | 作用/副作用 |
+| --- | --- |
+| `GET /api/snapshot` | 聚合设置、persona、prompts、skin、rules、mods、manifest、live status、memory、experience、bot/client PID 状态、秘密布尔状态和两份日志尾 30 行 |
+| `PUT /api/settings` | 校验并原子临时重命名写入 bot/persona/prompts/skin/rules/mods 六个 JSON；路径限制在 config/data/logs 对应根 |
+| `PUT /api/secrets` / `DELETE /api/secrets` | 更新或清空四项 `.env` 秘密；空字符串表示保持原值，null 表示删除；响应只返回布尔状态 |
+| `POST /api/model/test` | 用当前 Provider 发最小 JSON 请求，真实消耗少量额度；不测试完整 Agent prompt |
+| `POST /api/runtime/start|stop|restart` | 隐藏调用组合 PowerShell 脚本；每个脚本调用上限 5 分钟 |
+| `POST /api/lan/discover` | 按配置超时监听原版 UDP 广播，不改配置 |
+| `POST /api/mods/sync` | 运行受管理模组同步并返回新 snapshot |
+| `POST /api/skin/import` | 接收 data URL、验证 PNG 后写 `data/skins` 并更新配置 |
+| `GET /api/skin/image` | 返回当前导入皮肤；无外部 URL |
+| `POST /api/skin/pack` | 运行 PowerShell 生成给其他玩家的 zip |
+| `GET /api/memory/download` / `experience/download` | 只允许 config 指向 `data/` 内且内容是有效 JSON，下载时 no-store |
+
+请求体常量实际是 2 MiB；当前错误文案仍写“1 MiB”，是已知文案不一致。`PUT /api/settings` 不会自动重启 Bot。Snapshot 的 `runtime.bot/client.running` 只根据 PID 文件 `projectRoot` 与 `process.kill(pid,0)` 判断；最终故障诊断还应对照命令行和运行日志。
+
+## 11. Windows 进程、部署、迁移与恢复契约
+
+### 三类后台进程
+
+- AI 控制器：`data/bot.pid.json`，入口必须包含当前根目录的 `dist/src/index.js`。
+- HeadlessMc 父进程/游戏子进程：`data/minecraft-client.pid.json`，记录固定 launcher jar 和 gameDirectory；停止脚本通过 CIM 追踪当前项目子进程后再结束父进程。
+- WebUI：`data/webui.pid.json`，入口必须包含当前根目录的 `dist/src/webui/server.js`；启动前还核对监听端口所有者，避免打开旧目录服务。
+
+停止脚本拒绝 executable、命令行入口或项目根不匹配的 PID。不要删除 PID 文件后按进程名强杀；先读 PID、CIM command line、端口所有者。`Start-Bot.cmd` 的组合启动先启动控制器再启动客户端；只有本轮新启动控制器且客户端失败时才回滚它。已运行实例重复启动应幂等返回。
+
+纯净 Windows 安装器顺序：检查 Windows→可选 winget 安装 Node LTS/JDK25→确认 Node≥22/Java25→从 example 创建本地忽略配置→可选写 mod 来源→`npm install/check/build`→预取并哈希验证 MC 资源→Gradle build→固定哈希 HeadlessMc→准备隔离客户端和 mod→启动 WebUI。安装器不会填写真实 Key/密码，也不会自动启动 Bot。
+
+项目迁移不能只复制 Git 跟踪文件。停掉源目录进程后，至少复制并核验：`config/bot.json`、`persona.json`、`prompts.json`、`mods.json`、`skin.json`、`.env`、`data/memory.json`、`data/experience.json`、皮肤/披风数据；`.runtime` 可重新构建，日志/PID 不应直接作为新目录运行依据。复制来的 PID 文件会因 `projectRoot` 不匹配而显示停止，应该删除陈旧 PID 后从新目录启动。
+
+灾难恢复顺序：保留 memory/experience 与 `.bak`→从 GitHub 克隆→运行安装器或人工构建→恢复忽略配置与数据（先不恢复 PID/logs）→WebUI最小模型测试→同步 mod→启动 Bot→确认 `waiting_for_client`→`connected`→`in_world`→验证 EasyAuth→只读聊天。若 Bot 误删但记忆文件存在，玩家 key/facts/events 均可恢复；若只剩 `.bak`，会损失最后一次成功保存之后的数据。
+
+## 12. 关键技术决策与研究结果
 
 ### ADR-001：双 README 和中国网络是完成条件
 
@@ -280,7 +488,7 @@ Java 版开放 LAN 后端口是动态的；监听 `224.0.2.60:4445` 并解析原
 
 CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG 后只在 Bot/本机验证，并生成供每个观看客户端安装的同内容包；长期服务器推荐共同 CustomSkinAPI 站点。不能声称只给 Bot 装 mod 就能让所有人看见。官方 Universal jar 固定版本/哈希并随仓库提供，避免中国运行时再访问 GitHub；上游允许未修改二进制随 modpack 分发但必须列名，归属在 vendor README。
 
-## 7. 中国大陆网络实现与实测
+## 13. 中国大陆网络实现与实测
 
 实测环境：Windows，中文且含空格项目路径，Asia/Shanghai。**用户于 2026-08-04 明确说明电脑全局挂美国 VPN**，此前“普通中国网络”表述作废。所有下载/构建结果只能证明功能路线和哈希正确，不能证明中国大陆无代理可达。PowerShell 5 对无 BOM UTF-8 中文脚本曾出现解析错误，因此所有运行脚本的输出/异常文本保持 ASCII；README 仍为 UTF-8。路径参数显式加引号，后台 Node 中文路径启动已测试。
 
@@ -311,7 +519,7 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 注意：Gradle 初次构建曾卡在 Microsoft/Mojang 的 client/server jar（`.part` 为 0 字节）；实测通过 BMCLAPI 下载与官方 SHA-1 一致的 client/server 放入 Loom cache 后构建完成。新环境优先先运行 `npm run prefetch:minecraft`，但 Loom 自身 server merge 仍可能需要单独镜像改进，这是后续中国网络工作的一个待办。
 
-## 8. 真实服务器测试证据
+## 14. 真实服务器测试证据
 
 测试时间：2026-08-04 00:35–00:36（Asia/Shanghai）。测试 Bot：`CialloAI` 离线身份；未提供 EasyAuth 密码、未发送聊天、未移动或执行行为。
 
@@ -365,7 +573,7 @@ npm run sync:mods
 
 下一步端到端验证顺序：通过 WebUI安全保存 EasyAuth 密码/DeepSeek Key→最小模型 API→注册→重新连接登录→只读聊天→look/stop→follow→受击自卫。任何破坏/采集动作在领地策略完成前禁止测试。
 
-## 9. 测试和构建手册
+## 15. 测试和构建手册
 
 Node：
 
@@ -384,6 +592,26 @@ $env:Path="$env:JAVA_HOME\bin;$env:Path"
 Set-Location fabric-bridge
 .\gradlew.bat build --no-daemon
 ```
+
+当前 24 项 Node 回归由 13 个文件组成：
+
+| 测试文件 | 项数 | 固定契约 |
+| --- | ---: | --- |
+| `agent-controller.test.ts` | 2 | 玩家专属记忆/动作/回复链；TimeoutError 专用兜底 |
+| `chat-parser.test.ts` | 3 | 单/多称号解析、系统消息和非法用户名拒绝 |
+| `config-validation.test.ts` | 3 | EasyAuth 名称、非法名称、自动复活兼容/范围 |
+| `decision.test.ts` | 2 | JSON 决策、动作降级、wander 半径 |
+| `experience-store.test.ts` | 1 | 创建、持久化、相关性检索 |
+| `fabric-bridge-client.test.ts` | 1 | hello/state/GAME+CHAT去重/action_result 本机回环 |
+| `json.test.ts` | 1 | PowerShell UTF-8 BOM JSON 读取 |
+| `lan-discovery.test.ts` | 2 | 原版组播格式与非法包拒绝 |
+| `llm-provider.test.ts` | 3 | DeepSeek映射/预算、OpenAI Responses预算、缺 Key |
+| `logger.test.ts` | 1 | 登录命令、Key、嵌套秘密脱敏 |
+| `memory-store.test.ts` | 1 | 单文件恢复、UUID隔离、事件上限 |
+| `policy-engine.test.ts` | 2 | 财产/未知归属拒绝、自卫窗口与攻击者匹配 |
+| `skin-png.test.ts` | 2 | 64×64/64×32 接受，其他尺寸拒绝 |
+
+这套 Node 测试没有覆盖真实 Gradle/Fabric 运行、Java动作实现、PowerShell进程树、WebUI全部 API、模组兼容、网络镜像或真人游戏行为；对应改动必须追加专项/现场测试，不能把“24项通过”解释为完整功能验收。
 
 已通过的测试类型：
 
@@ -407,7 +635,7 @@ Set-Location fabric-bridge
 
 本文件当前更新后必须再次运行完整测试；接手者不要仅凭“已通过”跳过回归。
 
-## 10. 已踩过的坑
+## 16. 已踩过的坑
 
 1. Mineflayer ESM 下 `mineflayer-pathfinder` 不是可靠 named import，已改为 default package 解构；否则 Node 24 启动即崩。
 2. `package.json` 入口必须是 `dist/src/index.js`，不是 `dist/index.js`。
@@ -423,23 +651,34 @@ Set-Location fabric-bridge
 12. Java `-version` 写 stderr，PowerShell `$ErrorActionPreference=Stop` 会把正常版本输出当 NativeCommandError；环境探测时临时 Continue。
 13. `node -p` 经 PowerShell/函数参数转义容易丢引号；安装器改用 `node --version` 解析主版本。
 14. 用户电脑全局美国 VPN；不要再把当前下载结果写成中国大陆无代理测试。
+15. 项目移动后，复制来的 PID 会指向旧目录；必须按 projectRoot/命令行/端口识别，不能只看 PID 存活。
+16. PowerShell 5 写出的 UTF-8 PID JSON可能带 BOM；WebUI/配置读取必须用 `parseJsonDocument`，否则会把正在运行误报成停止。
+17. EasyAuth 用户名不接受连字符、空格、中文或超过 16 位；Bot 离线名、皮肤文件名和服内账号必须统一。
+18. 目标服称号聊天走 `GAME` 而非 `CHAT`；只解析严格尖括号格式并剥离方括号称号，不能把任意系统广播当玩家指令。
+19. GAME/CHAT 可能同时出现相同正文，必须保留 1500ms 去重；删掉会造成重复模型计费和重复动作。
+20. DeepSeek V4 高推理未设输出预算时可超过 60秒；游戏决策默认 4096 token、120秒。不要用盲目重试消耗用户有限余额。
+21. 自动复活必须由 Fabric 客户端调用原版 respawn 接口；断线重连并不保证退出死亡界面。
+22. WebUI保存设置/秘密不会热更新正在运行的控制器和 Java；测试新配置前完整重启。
+23. `AtomicJsonFile` 的 `.bak` 只保留上一代且损坏 JSON 不自动回退；恢复时必须停进程并人工校验。
+24. 当前 Fabric 移动是直线按键控制，不是寻路；“动作返回成功”表示开始移动，不表示已安全到达。
+25. `start-headless-client.ps1` 当前没有把 bot config 的 `bridgeHost/bridgePort` 映射为 `MCAI_BRIDGE_HOST/PORT`；Java 仍用 127.0.0.1:8765。修复脚本前不要在 WebUI 修改桥端口，否则 Node 与 Java 会等待不同端口。
 
-## 11. 需求追踪
+## 17. 需求追踪
 
 | ID | 需求 | 状态 |
 | --- | --- | --- |
-| R1 | DeepSeek/豆包/GPT，可调推理 | 适配器/WebUI已实现；真实 Key最小回归待做 |
-| R2 | 人设、聊天命令与回复 | MVP/目标服进世界已实现；认证后聊天待验证 |
+| R1 | DeepSeek/豆包/GPT，可调推理 | 三适配器/WebUI已实现；DeepSeek V4/high真实最小及完整提示诊断通过，豆包/OpenAI仍待真实账号验证 |
+| R2 | 人设、聊天命令与回复 | 人设/提示词和目标服真人消息识别已实现；输出预算修复后的正常回复/动作现场闭环待复验 |
 | R3 | 单一可迁移记忆文件 | 已实现并测试 |
 | R4 | 不同玩家独立记忆/回复 | UUID 隔离已实现并测试 |
 | R5 | 队友动作、主动聊天、自主发展 | 基础队友动作/主动聊天已实现；完整发展未实现 |
 | R6 | 独立经验文件、避免重复错误 | 存储/检索基础已实现；自动复盘闭环未实现 |
 | R7 | 26.2/Fabric 0.19.3 模组服、本地/服务器 | 23 外部 mod + bridge 真实进入世界 |
-| R8 | EasyAuth | login/register 提示优先、回退和脱敏已实现；密码未注入，待验证 |
+| R8 | EasyAuth | login/register 提示优先、5秒回退和脱敏已实现；忽略文件密码注入及目标服认证成功已验证 |
 | R9 | 名称、皮肤、披风 | 离线名称、标准 PNG 导入、CustomSkinLoader 和多人客户端包已实现；MS 登录/正版披风未实现 |
 | R10 | 搜索/本地化开源方案 | 持续执行；所有固定来源/哈希已记录 |
 | R11 | 语音接口/Simple Voice Chat | mod/服务器 secret 握手成功；Headless OpenAL不可用，收发未实现 |
-| R12 | 行为规则、荒野、自卫 | 独立规则和自卫已实现；荒野选址未实现 |
+| R12 | 行为规则、荒野、自卫 | 独立规则和 Policy自卫窗口已实现；自动反击、威胁停止、荒野选址与部分规则字段接线未实现 |
 | R13 | 模块化 | 已按 adapter/provider/agent/policy/storage/runtime 分层 |
 | R14 | 图形总控页 | 本机暖色 WebUI 已实现设置、状态、解释、启停、LAN、皮肤、提示词、记忆、模组和日志 |
 | R15 | 后续服务器 mod 更新 | 清单式同步、启动自动同步、WebUI按钮已实现 |
@@ -451,7 +690,7 @@ Set-Location fabric-bridge
 | R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
 | R22 | Bug/无效字符/秘密终检 | 已完成：24 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；实际秘密只在本机忽略文件，未进入 Git，运行产物被忽略 |
 
-## 12. 推荐下一阶段（按顺序）
+## 18. 推荐下一阶段（按顺序）
 
 1. EasyAuth、DeepSeek 最小请求和真人消息接收已通过；模型超时修复部署后，由真人再发一次明确低风险指令，验证模型决策→基础动作→回复→记忆。Key 曾在聊天暴露，测试后提醒轮换。
 2. 在一台无 VPN、无 Node/Java/Minecraft 的中国大陆 Windows 验证双击部署器；记录 winget/npm/BMCL/Gradle/Headless每段结果和回退。
@@ -462,7 +701,7 @@ Set-Location fabric-bridge
 7. 验证豆包/OpenAI，记录精确 model ID/限流；不要猜方舟端点 ID。
 8. 增加 Linux systemd；实现 Microsoft 登录/正版披风；最后研究虚拟音频或 Voice Chat API。
 
-## 13. 每次 Agent 完成前检查
+## 19. 每次 Agent 完成前检查
 
 1. 两份 README 是否都准确，不夸大未验证功能。
 2. `npm run check && npm test && npm run build` 与 Fabric build 是否通过。

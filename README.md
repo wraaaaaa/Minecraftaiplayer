@@ -486,6 +486,8 @@ npm run probe
 
 每次变更必须同步更新本文档和 `README_AI.md`。提交前还应运行 Fabric 构建、`git diff --check`、秘密扫描和相关真实环境测试。远端为 `https://github.com/wraaaaaa/Minecraftaiplayer.git`，默认分支 `main`。
 
+`README_AI.md` 是完整技术交接源，现已逐项记录主/旧工作目录、启动与重连时序、Fabric JSONL v1 每类消息和动作、模型请求参数、提示词上下文、策略实际接线范围、记忆/经验 schema 与恢复方式、WebUI 全部 API、安全边界、Windows PID 所有权、迁移/灾难恢复、测试矩阵、已知缺口和 Git 推送流程。更换账号或 Agent 时，应先完整阅读该文件，再以当前源码和 `git status/log` 核对文档快照。
+
 ## 兼容范围与许可证
 
 - 当前完整部署脚本针对 Windows/Windows Server；核心 Node 和 Java 代码可移植，但 Linux 无界面服务脚本尚未提供。
