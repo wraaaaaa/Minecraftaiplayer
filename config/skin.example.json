@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "model": "classic",
+  "visibilityMode": "client_pack",
+  "skinFile": "data/skins/CialloAI.png",
+  "capeFile": "",
+  "onlineProvider": {
+    "name": "LittleSkin",
+    "profileName": "CialloAI",
+    "website": "https://littleskin.cn/"
+  }
+}

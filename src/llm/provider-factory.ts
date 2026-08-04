@@ -89,8 +89,17 @@ class OpenAiResponsesProvider implements LlmProvider {
   }
 }
 
+class MissingKeyProvider implements LlmProvider {
+  readonly #variable: string
+  constructor(variable: string) { this.#variable = variable }
+  async complete(): Promise<LlmResponse> { throw new Error(`缺少模型 API Key 环境变量：${this.#variable}`) }
+}
+
 export function createLlmProvider(config: BotConfig['model'], apiKey: string, logger: Logger): LlmProvider {
-  if (!apiKey) throw new Error(`缺少模型 API Key 环境变量：${config.apiKeyEnv}`)
+  if (!apiKey) {
+    logger.warn('模型 API Key 未配置；Bot 仍可进入游戏，但不会处理 AI 请求', { variable: config.apiKeyEnv })
+    return new MissingKeyProvider(config.apiKeyEnv)
+  }
   const options: ProviderOptions = { model: config.model, apiKey, baseUrl: config.baseUrl, effort: config.reasoningEffort, timeoutMs: config.timeoutMs, logger }
   if (config.provider === 'openai') return new OpenAiResponsesProvider(options)
   return new ChatCompletionsProvider(config.provider, options)

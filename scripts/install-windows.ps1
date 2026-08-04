@@ -77,11 +77,15 @@ try {
 
     $botConfig = Join-Path $projectRoot 'config\bot.json'
     $personaConfig = Join-Path $projectRoot 'config\persona.json'
-    $modsConfig = Join-Path $projectRoot 'config\mods.json'
+      $modsConfig = Join-Path $projectRoot 'config\mods.json'
+      $promptsConfig = Join-Path $projectRoot 'config\prompts.json'
+      $skinConfig = Join-Path $projectRoot 'config\skin.json'
     $envFile = Join-Path $projectRoot '.env'
     if (-not (Test-Path -LiteralPath $botConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\bot.example.json') -Destination $botConfig }
     if (-not (Test-Path -LiteralPath $personaConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\persona.example.json') -Destination $personaConfig }
-    if (-not (Test-Path -LiteralPath $modsConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\mods.example.json') -Destination $modsConfig }
+      if (-not (Test-Path -LiteralPath $modsConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\mods.example.json') -Destination $modsConfig }
+      if (-not (Test-Path -LiteralPath $promptsConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\prompts.example.json') -Destination $promptsConfig }
+      if (-not (Test-Path -LiteralPath $skinConfig)) { Copy-Item -LiteralPath (Join-Path $projectRoot 'config\skin.example.json') -Destination $skinConfig }
     if (-not (Test-Path -LiteralPath $envFile)) { Copy-Item -LiteralPath (Join-Path $projectRoot '.env.example') -Destination $envFile }
     if (-not [string]::IsNullOrWhiteSpace($ModsDirectory)) {
         $resolvedMods = (Resolve-Path -LiteralPath $ModsDirectory).Path

@@ -51,3 +51,11 @@ test('OpenAI 适配器使用 Responses API 和请求的推理强度', async () =
     assert.equal(result.effectiveEffort, 'xhigh')
   } finally { await logger.flush(); await api.close() }
 })
+
+test('缺少密钥时允许 Bot 启动，但首次模型请求明确失败', async () => {
+  const logger = new Logger({ file: path.join(tmpdir(), `minecraft-ai-missing-key-${process.pid}.log`), level: 'error', console: false })
+  try {
+    const provider = createLlmProvider(config('deepseek', 'http://127.0.0.1'), '', logger)
+    await assert.rejects(provider.complete({ system: 's', user: 'u' }), /TEST_KEY/u)
+  } finally { await logger.flush() }
+})

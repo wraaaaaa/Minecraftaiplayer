@@ -23,6 +23,39 @@ if ($config.server.adapter -ne 'fabric_bridge') {
     throw 'The headless Fabric client requires server.adapter=fabric_bridge.'
 }
 
+New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pidFile), (Split-Path -Parent $stdoutLog) | Out-Null
+if (Test-Path -LiteralPath $pidFile) {
+    $existing = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json
+    $existingProcess = Get-Process -Id $existing.pid -ErrorAction SilentlyContinue
+    if ($existingProcess -and $existingProcess.Path -eq $existing.executable) {
+        Write-Output "Minecraft client is already running in background. PID=$($existing.pid)"
+        exit 0
+    }
+}
+
+$envFile = Join-Path $projectRoot '.env'
+if (Test-Path -LiteralPath $envFile) {
+    foreach ($rawLine in (Get-Content -LiteralPath $envFile -Encoding UTF8)) {
+        $line = $rawLine.Trim()
+        if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) { continue }
+        $separator = $line.IndexOf('=')
+        if ($separator -le 0) { continue }
+        $name = $line.Substring(0, $separator).Trim()
+        $value = $line.Substring($separator + 1).Trim()
+        if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) {
+            $value = $value.Substring(1, $value.Length - 2)
+        }
+        if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name, 'Process'))) {
+            [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+        }
+    }
+}
+$passwordVariable = [string]$config.easyAuth.passwordEnv
+$configuredPassword = [Environment]::GetEnvironmentVariable($passwordVariable, 'Process')
+if (-not [string]::IsNullOrWhiteSpace($configuredPassword)) {
+    $env:MINECRAFT_LOGIN_PASSWORD = $configuredPassword
+}
+
 $modsConfigFile = Join-Path $projectRoot 'config\mods.json'
 if (Test-Path -LiteralPath $modsConfigFile) {
     $modsConfig = Get-Content -LiteralPath $modsConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -50,18 +83,29 @@ if (-not $javaCommand) {
     throw 'Java 25 was not found. Set MCAI_JAVA_HOME or install the Minecraft 26.2 Java runtime.'
 }
 
-New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pidFile), (Split-Path -Parent $stdoutLog) | Out-Null
-if (Test-Path -LiteralPath $pidFile) {
-    $existing = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json
-    $existingProcess = Get-Process -Id $existing.pid -ErrorAction SilentlyContinue
-    if ($existingProcess -and $existingProcess.Path -eq $existing.executable) {
-        Write-Output "Minecraft client is already running in background. PID=$($existing.pid)"
-        exit 0
+$connectionHost = [string]$config.server.host
+$connectionPort = [int]$config.server.port
+if ($config.server.connectionMode -eq 'lan') {
+    if ($config.server.auth -ne 'offline') {
+        throw 'LAN compatibility mode requires server.auth=offline.'
     }
+    $discoveryScript = Join-Path $projectRoot 'dist\src\network\lan-discovery.js'
+    if (-not (Test-Path -LiteralPath $discoveryScript)) {
+        throw 'LAN discovery program is missing. Run npm run build first.'
+    }
+    $discoveryOutput = & node $discoveryScript --timeout ([int]$config.server.lanDiscoveryTimeoutMs)
+    if ($LASTEXITCODE -ne 0) { throw 'Minecraft LAN discovery failed.' }
+    $discovery = $discoveryOutput | ConvertFrom-Json
+    $selected = $discovery.servers | Select-Object -First 1
+    if (-not $selected) {
+        throw 'No Minecraft LAN world was found. Open the human player world to LAN, allow UDP 4445 through the firewall, then try again.'
+    }
+    $connectionHost = [string]$selected.host
+    $connectionPort = [int]$selected.port
+    Write-Output "Discovered LAN world '$($selected.motd)' at ${connectionHost}:${connectionPort}."
 }
-
-$env:MCAI_SERVER_HOST = [string]$config.server.host
-$env:MCAI_SERVER_PORT = [string]$config.server.port
+$env:MCAI_SERVER_HOST = $connectionHost
+$env:MCAI_SERVER_PORT = [string]$connectionPort
 $env:MCAI_EASYAUTH_ENABLED = [string]$config.easyAuth.enabled
 $env:MCAI_EASYAUTH_REGISTER_IF_NEEDED = [string]$config.easyAuth.registerIfNeeded
 $offline = $config.server.auth -eq 'offline'

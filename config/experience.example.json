@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-08-04T00:00:00.000Z",
+  "updatedAt": "2026-08-04T00:00:00.000Z",
+  "entries": [
+    {
+      "id": "00000000-0000-4000-8000-000000000002",
+      "createdAt": "2026-08-04T00:00:00.000Z",
+      "updatedAt": "2026-08-04T00:00:00.000Z",
+      "task": "跟随玩家",
+      "context": "路径被障碍物阻挡",
+      "outcome": "failure",
+      "lesson": "轻量移动不能可靠绕过复杂障碍",
+      "correction": "先停止并告知玩家路径受阻，不要重复撞墙。",
+      "tags": ["follow_player", "path_blocked"],
+      "timesApplied": 0,
+      "verified": false
+    }
+  ]
+}

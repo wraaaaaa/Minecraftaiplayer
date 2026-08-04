@@ -1,8 +1,10 @@
 {
   "server": {
     "adapter": "fabric_bridge",
+    "connectionMode": "direct",
     "host": "ciallo.kim",
     "port": 25565,
+    "lanDiscoveryTimeoutMs": 8000,
     "version": "26.2",
     "username": "CialloAI",
     "auth": "offline",
@@ -41,6 +43,7 @@
   },
   "policyFile": "config/behavior-rules.json",
   "personaFile": "config/persona.json",
+  "promptsFile": "config/prompts.json",
   "logging": {
     "file": "logs/bot.log",
     "level": "info",

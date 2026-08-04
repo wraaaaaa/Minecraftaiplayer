@@ -6,6 +6,8 @@ logs/
 config/bot.json
 config/persona.json
 config/mods.json
+config/prompts.json
+config/skin.json
 *.log
 *.tmp
 *.bak

@@ -19,6 +19,11 @@
 11. 最终面向没有任何运行环境的纯净 Windows，优先提供一键安装程序，失败时提供人工教程。
 12. 人类 README 必须说明各文件作用/原理，以及每个参数具体存储位置。
 13. 当前电脑开启全局美国 VPN，任何本机下载成功都不得标记为“中国大陆无代理实测通过”。
+14. 增加局域网兼容模式：同机/同 LAN 的人类玩家开放单人世界后，离线 Bot 自动发现动态端口并加入。
+15. 离线皮肤必须考虑“其他玩家可见”；导入图片必须严格遵循 Minecraft PNG 格式，优先万用皮肤加载器，并明确 LocalSkin 的客户端分发条件。
+16. 根目录必须有日常打开 WebUI、启动和停止 Bot 的快捷入口；WebUI 使用白、橙等暖柔配色。
+17. 最后必须正式测试 AI 游戏行为、检查 Bug/无效字符，删除 API Key 后再推送 GitHub。
+18. 必须维护独立 `PARAMETERS.md`，精确列出每个参数、本地路径、允许值、人设/提示词/记忆示例和自动写入机制。
 
 任何代码、配置、依赖、部署、架构或测试变化没有同时反映到两份 README，就不能视为完成。
 
@@ -27,10 +32,10 @@
 - 工作区：`D:\开发\minecraft aibot`
 - 远端：`https://github.com/wraaaaaa/Minecraftaiplayer.git`
 - 远端名/默认分支：`origin` / `main`
-- 当前补充需求开发前的 HEAD：`9f44535 feat: add headless Fabric AI player foundation`（已在 origin/main）。
+- 当前本轮需求开发前的 HEAD：`a965401 feat: add local control center and managed mod deployment`（已在 origin/main）。
 - 更早提交：`c638099 docs: establish human and AI project guides`、`93dd822 Initial commit`
 - 仓库级作者：`wraaaaaa <310438732+wraaaaaa@users.noreply.github.com>`（仅在本仓库配置过；不要擅改全局 Git 身份）。
-- 本文件记录时，WebUI/模组同步/一键安装/真实进服补充轮尚待最终回归、提交和推送；接手时以 `git status --short --branch` 和 `git log` 为准。
+- 本文件记录时，局域网/皮肤/暖色 WebUI/参数总表补充轮已完成回归，正准备基于 `a965401` 提交和推送；接手时以 `git status --short --branch` 和 `git log` 为准。
 
 安全推送流程：
 
@@ -62,7 +67,7 @@ Node.js TypeScript AI 控制器
   ├─ Memory / Experience
   └─ Runtime / JSONL Logger
        ↕ data/runtime-status.json
-本机 WebUI 127.0.0.1:3210（设置、状态、启停、模组、日志）
+本机 WebUI 127.0.0.1:3210（设置、状态、启停、LAN、皮肤、提示词、记忆、模组、日志）
 ```
 
 Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户端对象状态，向 Node 发玩家聊天、系统消息、世界状态、受击者信息；Node 只发送白名单动作。大模型不看画面、不听声音、不直接发任意网络包或系统命令。
@@ -73,6 +78,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - Fabric 内部自动连接 `MCAI_SERVER_HOST/MCAI_SERVER_PORT`（默认项目目标地址），每 600 tick 可重试。
 - Node 本机桥、断线/超时/动作结果处理、重连循环。
 - DeepSeek、火山方舟 OpenAI-compatible Chat Completions、OpenAI Responses 三类模型适配器。
+- OpenAI GPT-5.6 官方核对（2026-08-04）：`gpt-5.6` 别名路由到旗舰 `gpt-5.6-sol`，另有 `gpt-5.6-terra` / `gpt-5.6-luna`；项目保留自由模型 ID 输入，不把所有角色强制改成 Sol。Responses 请求显式传 `reasoning.effort`，与现有适配器相容。来源：`https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6`。
 - 推理强度 `none/low/medium/high/xhigh/max`；DeepSeek 显式映射到当前 `disabled/high/max`，发生降档时记录警告。
 - 人设、多人 UUID 隔离记忆、单一记忆文件、独立经验文件、原子替换和 `.bak`。
 - 聊天提及、冷却、主动聊天调度、结构化 JSON 决策解析和长度清洗。
@@ -86,6 +92,16 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - 本机 WebUI：全部配置表单、解释、运行/世界状态、启停、模组同步、日志、秘密状态和最小模型测试；只绑定 loopback，Host/Origin 校验，CSP，无外部 CDN。
 - `runtime-status.json` 原子状态通道，Fabric 每秒世界快照供独立 WebUI 读取。
 - 纯净 Windows 一键入口：winget 安装 Node LTS/JDK25→创建本地配置→Node/Fabric 构建→校验资源→Headless→模组→WebUI；支持手动跳过环境安装。
+- LAN 兼容：`src/network/lan-discovery.ts` 监听 UDP 组播 `224.0.2.60:4445`，解析 `[MOTD]...[/MOTD][AD]port[/AD]`；`start-headless-client.ps1` 在 `connectionMode=lan` 时强制 offline 并把发现地址注入 Fabric。
+- 皮肤：`src/skin/png.ts` 校验 PNG/IHDR 和 64x64/64x32；WebUI 导入到 `data/skins` 并同步 Bot LocalSkin；官方未修改的 CustomSkinLoader Universal 15.0.1（SHA-256 记录在 vendor README）进入实例。
+- 多人皮肤：`build-skin-pack.ps1` 生成包含 loader 和 Bot 同名纹理的 zip。官方文档明确 LocalSkin 不会自动被其他人看见，因此所有观看者必须安装此包，或共同使用 LittleSkin/CustomSkinAPI 站点。
+- 外置提示词：`config/prompts*.json` 实际参与每次模型请求；WebUI 可编辑。记忆/经验在 WebUI 只读查看和导出，避免误删。
+- 日常入口：`Open-WebUI.cmd`、`Start-Bot.cmd`、`Stop-Bot.cmd`；页面已改暖色白/橙，仍无 CDN。
+- `start-headless-client.ps1` 必须自行读取 `.env`：直接双击 Start-Bot 不经过 WebUI 进程，若只依赖父进程环境，Java EasyAuth 会拿不到密码。解析时不输出值，现有进程变量优先，并将 `easyAuth.passwordEnv` 映射到 Java 侧固定读取的 `MINECRAFT_LOGIN_PASSWORD`。
+- 模型 Provider 缺 Key 时不能让整个控制器在启动阶段退出；`MissingKeyProvider` 允许 Bot/桥正常运行，只有实际 AI 请求才抛出明确缺变量错误。这样清理 Key 后仍能启动做联机诊断，也不会伪造模型回复。
+- `start-headless-client.ps1` 的已有 PID 检查必须发生在 mod 同步之前。否则重复双击 Start-Bot 会尝试删除被运行中 Java 锁定的 jar，失败后组合脚本还会回滚停止 Node。已调整为幂等早退；这是 2026-08-04 根目录入口真实测试发现的回归。
+- 组合启动只在“本轮新启动了 Node”且客户端失败时回滚 Node；若 Node 原本已运行（例如 LAN 尚未开放），不能误停现有控制器。
+- 独立 `PARAMETERS.md` 已覆盖秘密、服务器、LAN、EasyAuth、模型、推理、人设、提示词、记忆、经验、皮肤、模组、日志、PID 和 Git 位置。
 
 ### 尚未完成
 
@@ -93,7 +109,7 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - 可靠寻路、避障、采集、挖掘、制作、放置、战斗循环和自主生存闭环。
 - “荒无人烟选址”的世界扫描/领地判断；当前策略保守拒绝破坏，安全但不自主发展。
 - 经验自动总结目前只有存储与提示检索基础，未形成完整任务结果→失败归因→复验闭环。
-- Microsoft 正版认证自动化、皮肤/披风设置；Fabric 后台脚本当前面向 `offline`。
+- Microsoft 正版认证自动化与正版披风设置；离线 PNG 皮肤/客户端包已实现，公共皮肤站上传需用户自己的站点账号。
 - Simple Voice Chat 已兼容加载、加入服务器并发起 secret 请求，但 headless OpenAL 不可用，当前日志为 Speaker unavailable，未实现语音收发。
 - Linux systemd/无界面启动脚本；核心可移植，现有运维脚本是 PowerShell/Windows。
 - 用户在聊天中提供了一个余额有限的 DeepSeek Key。**不得在任何文件、命令记录、工具输出或本文复述其值**；当前尚未安全注入工作区，因此真实模型调用仍待通过 WebUI秘密表单做一次最小测试。因 Key 已出现在聊天，最终提醒用户轮换。
@@ -109,9 +125,13 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `.env.example` | 秘密变量模板；代码会加载被忽略的 `.env`，但不覆盖进程环境已有变量 |
 | `.gitignore` | 排除 node_modules、dist、data、logs、本地配置、Fabric 构建缓存、`.runtime`、HeadlessMC 临时目录 |
 | `Install-and-Open-Control-Center.cmd` | 纯净 Windows 双击入口 |
+| `Open-WebUI.cmd` / `Start-Bot.cmd` / `Stop-Bot.cmd` | 日常打开总控台、静默启停 |
 | `config/bot.example.json` | 服务器、桥、EasyAuth、模型、聊天、存储、日志完整示例 |
 | `config/persona.example.json` | 默认人设；本地复制为被忽略的 `persona.json` |
 | `config/mods.example.json` | 模组来源、启动同步和排除正则模板；实际 `mods.json` 被忽略 |
+| `config/prompts.example.json` | 完整系统、能力、记忆、动作契约和空闲提示词；实际 `prompts.json` 被忽略 |
+| `config/memory.example.json` / `experience.example.json` | 不参与运行的完整持久化格式示例 |
+| `config/skin.example.json` | 皮肤模型、本地路径、多人可见模式和在线站点模板 |
 | `config/behavior-rules.json` | 版本化行为准则，当前允许受控自卫、拒绝财产破坏 |
 | `scripts/start-background.ps1` / `stop-background.ps1` | 隐藏 Node 控制器与精确 PID 停止 |
 | `scripts/start-headless-client.ps1` / `stop-headless-client.ps1` | 隐藏 HeadlessMc 父进程及其项目子进程 |
@@ -119,6 +139,8 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 | `scripts/start-webui-background.ps1` / `stop-webui-background.ps1` / `open-control-center.ps1` | 本机总控台隐藏启停与打开浏览器 |
 | `scripts/install-windows.ps1` | winget 环境安装与完整部署；`-SkipEnvironmentInstall` 手动环境回退，`-NoOpen` 自动测试用 |
 | `scripts/sync-client-mods.mjs` | 受管理 mod 替换、SHA-256 清单；跳过 Fabric API/桥重复项 |
+| `scripts/build-skin-pack.ps1` | 在验证过的 `.runtime/skin-pack` 下生成供其他玩家使用的 zip |
+| `vendor/custom-skin-loader/*` | 官方未修改 Universal 15.0.1 二进制、上游/许可/哈希归属 |
 
 ### Node 控制器
 
@@ -234,7 +256,7 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 
 ### ADR-007：管理面采用仅本机、无外部前端依赖的 WebUI
 
-绑定 `127.0.0.1:3210`，不用云端托管、不向 LAN 暴露。原因：页面含启停和秘密写入能力，远程发布会扩大攻击面；纯 HTML/CSS/JS 不需 CDN，符合中国网络和一键部署。API 验证 Host/Origin、CSP、路径范围、1 MiB body；所有配置保存前走后端 schema，Fabric bridge 仍只允许 loopback。
+绑定 `127.0.0.1:3210`，不用云端托管、不向 LAN 暴露。原因：页面含启停和秘密写入能力，远程发布会扩大攻击面；纯 HTML/CSS/JS 不需 CDN，符合中国网络和一键部署。API 验证 Host/Origin、CSP、路径范围、2 MiB body（容纳 1 MiB PNG 的 base64）；所有配置保存前走后端 schema，Fabric bridge 仍只允许 loopback。
 
 ### ADR-008：外部服务器模组采用清单式同步
 
@@ -243,6 +265,14 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 ### ADR-009：纯净 Windows 使用 winget 引导，手动安装为回退
 
 双击 cmd 调 PowerShell；缺 Node/JDK 时安装 `OpenJS.NodeJS.LTS` 和 `EclipseAdoptium.Temurin.25.JDK`，之后走与人工部署完全相同的构建/校验脚本。没有 winget 或网络不可用时，README 引导手动 Node 22+/Temurin 25，再用 `-SkipEnvironmentInstall`，避免把 winget 当唯一渠道。
+
+### ADR-010：LAN 兼容模式使用原版组播发现，不修改人类世界端口
+
+Java 版开放 LAN 后端口是动态的；监听 `224.0.2.60:4445` 并解析原版 `[MOTD]/[AD]` 广播比要求用户每次抄端口可靠。自动发现只决定目标地址，不开放控制接口；LAN 模式强制 Bot 离线身份。VPN/多网卡/防火墙失败时 WebUI 显示明确排查信息。
+
+### ADR-011：离线多人皮肤采用“共同来源”，不伪装成协议广播
+
+CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG 后只在 Bot/本机验证，并生成供每个观看客户端安装的同内容包；长期服务器推荐共同 CustomSkinAPI 站点。不能声称只给 Bot 装 mod 就能让所有人看见。官方 Universal jar 固定版本/哈希并随仓库提供，避免中国运行时再访问 GitHub；上游允许未修改二进制随 modpack 分发但必须列名，归属在 vendor README。
 
 ## 7. 中国大陆网络实现与实测
 
@@ -308,6 +338,8 @@ Prompt 明确模型没有视觉/听觉，只能根据 JSON 世界状态判断。
 5. Simple Voice Chat 发送 secret request，说明服务器通道/版本适配成功；Headless 无 OpenAL context，Speaker unavailable，当前语音不可用但不影响进服。
 6. 测试后精确停止 HeadlessMC/游戏/Node，无遗留进程。
 
+第三轮回归时间：2026-08-04 02:16–02:18（Asia/Shanghai）。Bot 再次进入 `ciallo.kim:25565`，运行时状态为 `in_world`，坐标 `(1231.5, 132, 199.5)`、生命 20、饥饿 20。CustomSkinLoader Universal 15.0.1 在真实 MC 26.2 客户端加载，并完成皮肤/渲染相关类转换。服务器仍提示 `/register`；因未保存 EasyAuth 密码和模型 Key，没有发送注册、聊天或动作。重复双击 `Start-Bot.cmd` 时发现“同步被 Java 锁定的 mod 后误回滚 Node”问题，现已通过启动前 PID 早退和只回滚本轮新进程修复。
+
 模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
@@ -352,8 +384,10 @@ Set-Location fabric-bridge
 - 国内 Minecraft 依赖预取与真实服务器连接。
 - 服务器 23 个受管理模组同步和完整原生进服。
 - WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
-- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；10 项 Node 测试全部通过。
-- `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，36 秒通过。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；16 项 Node 测试全部通过。
+- `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，约 85 秒通过。
+- LAN 发现通过真实本机 UDP 组播包和 WebUI 扫描接口验证；实际玩家开放 LAN 世界仍待现场验收。
+- 皮肤 PNG 校验/导入/读取、CustomSkinLoader 安装及多人客户端包生成已验证；临时皮肤与 zip 均留在 Git 忽略的 `.runtime/test-artifacts`，正式配置恢复为禁用状态。
 
 本文件当前更新后必须再次运行完整测试；接手者不要仅凭“已通过”跳过回归。
 
@@ -386,16 +420,20 @@ Set-Location fabric-bridge
 | R6 | 独立经验文件、避免重复错误 | 存储/检索基础已实现；自动复盘闭环未实现 |
 | R7 | 26.2/Fabric 0.19.3 模组服、本地/服务器 | 23 外部 mod + bridge 真实进入世界 |
 | R8 | EasyAuth | login/register 提示优先、回退和脱敏已实现；密码未注入，待验证 |
-| R9 | 名称、皮肤、披风 | 离线名称已实现；皮肤/披风/MS 登录未实现 |
+| R9 | 名称、皮肤、披风 | 离线名称、标准 PNG 导入、CustomSkinLoader 和多人客户端包已实现；MS 登录/正版披风未实现 |
 | R10 | 搜索/本地化开源方案 | 持续执行；所有固定来源/哈希已记录 |
 | R11 | 语音接口/Simple Voice Chat | mod/服务器 secret 握手成功；Headless OpenAL不可用，收发未实现 |
 | R12 | 行为规则、荒野、自卫 | 独立规则和自卫已实现；荒野选址未实现 |
 | R13 | 模块化 | 已按 adapter/provider/agent/policy/storage/runtime 分层 |
-| R14 | 图形总控页 | 本机 WebUI 已实现全部设置、状态、解释、启停、模组和日志 |
+| R14 | 图形总控页 | 本机暖色 WebUI 已实现设置、状态、解释、启停、LAN、皮肤、提示词、记忆、模组和日志 |
 | R15 | 后续服务器 mod 更新 | 清单式同步、启动自动同步、WebUI按钮已实现 |
 | R16 | 纯净 Windows 一键部署 | cmd + winget/手动回退脚本已实现，现有环境全流程通过 |
 | R17 | 人类 README 文件/参数原理 | 已增加逐文件和逐 JSON 路径说明 |
 | R18 | 中国网络测试口径 | 已纠正 VPN 口径；无代理干净机验收仍待做 |
+| R19 | 局域网同机/同网游玩 | UDP 组播自动发现、离线强制、WebUI 扫描和解析测试已实现；需用户实际开放 LAN 世界做现场验收 |
+| R20 | 根目录便捷入口 | Open-WebUI/Start-Bot/Stop-Bot 三个 cmd 已实现 |
+| R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
+| R22 | Bug/无效字符/秘密终检 | 已完成：16 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；四个秘密变量均未保存，运行产物被忽略 |
 
 ## 12. 推荐下一阶段（按顺序）
 
@@ -406,7 +444,7 @@ Set-Location fabric-bridge
 5. 实现荒野选址：检测玩家建筑/容器/农田/红石/领地模组，未知时远离并拒绝破坏。
 6. 完成经验闭环：动作结果与任务结果归因、失败摘要、相似经验检索、复验计数。
 7. 验证豆包/OpenAI，记录精确 model ID/限流；不要猜方舟端点 ID。
-8. 增加 Linux systemd；实现 Microsoft/皮肤/披风；最后研究虚拟音频或 Voice Chat API。
+8. 增加 Linux systemd；实现 Microsoft 登录/正版披风；最后研究虚拟音频或 Voice Chat API。
 
 ## 13. 每次 Agent 完成前检查
 

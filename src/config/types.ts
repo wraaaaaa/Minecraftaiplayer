@@ -3,8 +3,10 @@ export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'ma
 export interface BotConfig {
   server: {
     adapter: 'fabric_bridge' | 'mineflayer'
+    connectionMode: 'direct' | 'lan'
     host: string
     port: number
+    lanDiscoveryTimeoutMs: number
     version: string
     username: string
     auth: 'offline' | 'microsoft'
@@ -43,10 +45,32 @@ export interface BotConfig {
   }
   policyFile: string
   personaFile: string
+  promptsFile: string
   logging: {
     file: string
     level: 'debug' | 'info' | 'warn' | 'error'
     console: boolean
+  }
+}
+
+export interface PromptTemplates {
+  identity: string
+  capabilityRules: string[]
+  memoryRules: string[]
+  actionContract: string
+  proactiveInstruction: string
+}
+
+export interface SkinConfig {
+  enabled: boolean
+  model: 'classic' | 'slim'
+  visibilityMode: 'client_pack' | 'online_provider' | 'microsoft'
+  skinFile: string
+  capeFile: string
+  onlineProvider: {
+    name: string
+    profileName: string
+    website: string
   }
 }
 

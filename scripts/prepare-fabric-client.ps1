@@ -10,6 +10,9 @@ $modsDirectory = Join-Path $gameDirectory 'mods'
 $bridgeSource = Join-Path $projectRoot 'fabric-bridge\build\libs\minecraft-ai-fabric-bridge-0.1.0.jar'
 $bridgeTarget = Join-Path $modsDirectory 'minecraft-ai-fabric-bridge-0.1.0.jar'
 $fabricApiTarget = Join-Path $modsDirectory 'fabric-api-0.156.0+26.2.jar'
+$skinLoaderSource = Join-Path $projectRoot 'vendor\custom-skin-loader\CustomSkinLoader_Universal-15.0.1.jar'
+$skinLoaderTarget = Join-Path $modsDirectory 'CustomSkinLoader_Universal-15.0.1.jar'
+$skinLoaderSha256 = '026D8B38EA93EDCCD647F60568193E79801A377B7BD4E916DCFC0D5482B767FC'
 $fabricApiSha256 = '8DE18D9F6A8A2A5B2120EF9E8BFFB79CC9B75989C0C022C39C9DFC1BC3A29A99'
 
 if (-not (Test-Path -LiteralPath $bridgeSource)) {
@@ -21,6 +24,10 @@ if ([string]::IsNullOrWhiteSpace($FabricApiUrl)) {
 
 New-Item -ItemType Directory -Force -Path $modsDirectory | Out-Null
 Copy-Item -LiteralPath $bridgeSource -Destination $bridgeTarget -Force
+if (Test-Path -LiteralPath $skinLoaderSource) {
+    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $skinLoaderSource).Hash -ne $skinLoaderSha256) { throw 'CustomSkinLoader SHA256 mismatch.' }
+    Copy-Item -LiteralPath $skinLoaderSource -Destination $skinLoaderTarget -Force
+}
 
 $needsFabricApi = $true
 if (Test-Path -LiteralPath $fabricApiTarget) {

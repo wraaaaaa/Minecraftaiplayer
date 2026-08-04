@@ -1,4 +1,4 @@
-import type { BotConfig, Persona } from '../config/types.js'
+import type { BotConfig, Persona, PromptTemplates } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
 import type { ExperienceStore } from '../experience/experience-store.js'
 import type { LlmProvider } from '../llm/types.js'
@@ -16,6 +16,7 @@ export interface ActionExecutor {
 export class AgentController {
   readonly #config: BotConfig
   readonly #persona: Persona
+  readonly #prompts: PromptTemplates
   readonly #provider: LlmProvider
   readonly #memory: MemoryStore
   readonly #experience: ExperienceStore
@@ -26,9 +27,10 @@ export class AgentController {
   #lastInboundAt = Date.now()
   #lastProactiveAt = 0
 
-  constructor(options: { config: BotConfig; persona: Persona; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger }) {
+  constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger }) {
     this.#config = options.config
     this.#persona = options.persona
+    this.#prompts = options.prompts
     this.#provider = options.provider
     this.#memory = options.memory
     this.#experience = options.experience
@@ -48,7 +50,7 @@ export class AgentController {
     const experiences = await this.#experience.relevant(message)
     try {
       const response = await this.#provider.complete({
-        system: buildSystemPrompt(this.#persona),
+        system: buildSystemPrompt(this.#persona, this.#prompts),
         user: buildPlayerRequest({ ...context, message, experiences, world })
       })
       const decision = parseAgentDecision(response.text)
@@ -81,8 +83,8 @@ export class AgentController {
     try {
       const experiences = await this.#experience.relevant('空闲 自主 闲逛 聊天')
       const response = await this.#provider.complete({
-        system: buildSystemPrompt(this.#persona),
-        user: JSON.stringify({ mode: 'proactive_idle', instruction: '你已空闲一段时间。可以保持安静、发一句不打扰人的自然聊天，或进行半径不超过 8 格的非破坏性闲逛。不要假装完成采集或建造。', structuredGameState: world, relevantExperience: experiences })
+        system: buildSystemPrompt(this.#persona, this.#prompts),
+        user: JSON.stringify({ mode: 'proactive_idle', instruction: this.#prompts.proactiveInstruction, structuredGameState: world, relevantExperience: experiences })
       })
       const decision = parseAgentDecision(response.text)
       const safeAction: AgentAction = decision.action.type === 'wander' || decision.action.type === 'none' ? decision.action : { type: 'none' }

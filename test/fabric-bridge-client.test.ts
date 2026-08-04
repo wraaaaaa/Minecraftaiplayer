@@ -56,14 +56,14 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
   const port = await unusedPort()
   const config = {
     server: {
-      adapter: 'fabric_bridge', host: 'ciallo.kim', port: 25565, version: '26.2', username: 'CialloAI', auth: 'offline',
+      adapter: 'fabric_bridge', connectionMode: 'direct', host: 'ciallo.kim', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
       connectTimeoutMs: 2000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
     },
     easyAuth: { enabled: true, registerIfNeeded: true, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
     model: { provider: 'deepseek', model: 'test', apiKeyEnv: 'TEST_KEY', baseUrl: 'https://example.invalid', reasoningEffort: 'low', timeoutMs: 1000 },
     chat: { requireMention: true, replyPrefix: '', cooldownMs: 10, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
     storage: { memoryFile: path.join(directory, 'memory.json'), experienceFile: path.join(directory, 'experience.json'), maxEvents: 10 },
-    policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json',
+    policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json', promptsFile: 'config/prompts.json',
     logging: { file: path.join(directory, 'bot.log'), level: 'error', console: false }
   } satisfies BotConfig
   const logger = new Logger(config.logging)

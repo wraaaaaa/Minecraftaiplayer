@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { BehaviorRules, BotConfig, Persona, ReasoningEffort } from './types.js'
+import type { BehaviorRules, BotConfig, Persona, PromptTemplates, ReasoningEffort } from './types.js'
 
 const VALID_EFFORTS = new Set<ReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
 
@@ -44,8 +44,10 @@ function requirePositiveInteger(value: unknown, name: string): asserts value is 
 
 export function validateConfig(config: BotConfig): void {
   if (!['fabric_bridge', 'mineflayer'].includes(config.server?.adapter)) throw new Error('server.adapter 只能是 fabric_bridge 或 mineflayer')
+  if (!['direct', 'lan'].includes(config.server?.connectionMode)) throw new Error('server.connectionMode 只能是 direct 或 lan')
   requireString(config.server?.host, 'server.host')
   requirePositiveInteger(config.server?.port, 'server.port')
+  requirePositiveInteger(config.server?.lanDiscoveryTimeoutMs, 'server.lanDiscoveryTimeoutMs')
   requireString(config.server?.version, 'server.version')
   requireString(config.server?.username, 'server.username')
   requireString(config.server?.bridgeHost, 'server.bridgeHost')
@@ -63,11 +65,13 @@ export function validateConfig(config: BotConfig): void {
     throw new Error('记忆文件与经验文件必须分开')
   }
   if (typeof config.easyAuth?.registerIfNeeded !== 'boolean') throw new Error('easyAuth.registerIfNeeded 必须是布尔值')
+  requireString(config.promptsFile, 'promptsFile')
 }
 
 export interface LoadedProjectConfig {
   config: BotConfig
   persona: Persona
+  prompts: PromptTemplates
   rules: BehaviorRules
   apiKey: string
   easyAuthPassword?: string
@@ -91,6 +95,9 @@ export async function loadProjectConfig(options: { allowExample?: boolean } = {}
   const personaPath = path.resolve(config.personaFile)
   const effectivePersonaPath = await exists(personaPath) ? personaPath : path.resolve('config/persona.example.json')
   const persona = await readJson<Persona>(effectivePersonaPath)
+  const promptsPath = path.resolve(config.promptsFile)
+  const effectivePromptsPath = await exists(promptsPath) ? promptsPath : path.resolve('config/prompts.example.json')
+  const prompts = await readJson<PromptTemplates>(effectivePromptsPath)
   const rules = await readJson<BehaviorRules>(path.resolve(config.policyFile))
   requireString(persona.name, 'persona.name')
 
@@ -99,6 +106,7 @@ export async function loadProjectConfig(options: { allowExample?: boolean } = {}
   return {
     config,
     persona,
+    prompts,
     rules,
     apiKey,
     ...(password ? { easyAuthPassword: password } : {})

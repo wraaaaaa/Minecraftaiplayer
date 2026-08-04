@@ -22,7 +22,7 @@ export class BotRuntime {
   }
 
   async run(): Promise<void> {
-    const { config, persona, rules, apiKey, easyAuthPassword } = this.#loaded
+    const { config, persona, prompts, rules, apiKey, easyAuthPassword } = this.#loaded
     const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
     const experience = new ExperienceStore(config.storage.experienceFile)
     const status = new RuntimeStatusStore()
@@ -37,7 +37,7 @@ export class BotRuntime {
         : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
       await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
-      const controller = new AgentController({ config, persona, provider, memory, experience, policy, executor: client, logger: this.#logger })
+      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger })
       client.setMessageHandler((identity, message, world) => controller.handlePlayerMessage(identity, message, world))
       client.setProactiveHandler((world) => controller.proactiveTick(world))
       try {

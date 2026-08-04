@@ -2,7 +2,7 @@
 
 让大模型以真正的 Minecraft 客户端玩家身份进入 Java Edition `26.2` Fabric 模组服务器，在后台接收聊天指令、区分玩家、保存记忆，并执行受行为准则约束的游戏动作。
 
-当前是可运行的第一阶段版本：原生 Fabric 无界面客户端、AI 控制器、本机图形总控台、三种模型 API、记忆与经验文件、EasyAuth、安全规则、服务器模组同步和静默后台运行均已实现。2026-08-04 已使用用户提供的 24 个“进服必须 mod”真实进入 `ciallo.kim` 世界，客户端完成注册表、地图、配方、语音通道握手和初始物品同步；测试没有注入 EasyAuth 密码、发送聊天或执行动作，并已正常结束全部进程。
+当前是可运行的第一阶段版本：原生 Fabric 无界面客户端、AI 控制器、本机图形总控台、三种模型 API、记忆与经验文件、EasyAuth、安全规则、服务器模组同步、局域网兼容、离线皮肤管理和静默后台运行均已实现。2026-08-04 已使用用户提供的 24 个“进服必须 mod”真实进入 `ciallo.kim` 世界，客户端完成注册表、地图、配方、语音通道握手和初始物品同步；当时没有注入 EasyAuth 密码、发送聊天或执行动作，完整行为验收状态见“测试状态”。
 
 ## 当前能力
 
@@ -22,9 +22,12 @@
 - Mineflayer 兼容探针与固定来源的 26.2 协议数据，供诊断使用；目标模组服默认使用原生 Fabric 适配器。
 - 中国大陆下载路线：npm 镜像、BMCLAPI/CERNET Minecraft 资源镜像、GitHub 下载镜像回退，并对游戏资源或工具执行官方 SHA-1/SHA-256 校验。
 - 受管理的服务器模组同步：记录来源、文件名和 SHA-256；未来更新来源文件夹后可从总控台一键替换，不会误删项目自己的桥或 Fabric API。
+- 局域网兼容模式：自动监听 Java 版“对局域网开放”的广播和动态端口，用离线 Bot 与同一台电脑或同一局域网的人类玩家游玩。
+- 皮肤管理：WebUI 严格校验 64x64/64x32 PNG、选择 classic/slim，并集成官方万用皮肤加载器；可生成分发给所有玩家的客户端皮肤包，确保安装者看见 Bot 皮肤。
+- 提示词与记忆管理：页面可编辑完整提示词、查看分玩家档案/经验并导出文件；根目录 `PARAMETERS.md` 精确列出全部本地位置。
 - 纯净 Windows 一键部署入口，可安装 Node.js LTS、Java 25 并完成全套构建、资源准备和总控台启动。
 
-尚未实现：完整寻路、挖掘、采集、制作、建筑、自主生存闭环、Microsoft 正版登录自动化、皮肤/披风管理、Simple Voice Chat 语音适配。当前移动是轻量键位控制，不能绕开复杂障碍。
+尚未实现：完整寻路、挖掘、采集、制作、建筑、自主生存闭环、Microsoft 正版登录自动化、正版披风上传、Simple Voice Chat 语音收发。当前移动是轻量键位控制，不能绕开复杂障碍；语音模组的网络握手已通过，但后台环境没有音频设备。
 
 ## 运行结构
 
@@ -43,7 +46,7 @@ Fabric 桥只监听/连接本机回环地址，不向局域网或公网开放控
 
 ## 最简单的使用方式：图形总控台
 
-已经构建过项目时，双击根目录的 `Install-and-Open-Control-Center.cmd` 会检查环境、补齐部署并打开总控台。只想再次打开页面时执行：
+首次安装双击根目录的 `Install-and-Open-Control-Center.cmd`；以后只打开页面双击 `Open-WebUI.cmd`，静默启动或停止 Bot 双击 `Start-Bot.cmd` / `Stop-Bot.cmd`。命令行也可以执行：
 
 ```powershell
 npm run dashboard
@@ -57,6 +60,9 @@ npm run dashboard
 - 模型：DeepSeek/豆包/OpenAI、模型 ID、端点、推理强度、密钥以及一次最小额度测试。
 - 聊天、人设、安全、记忆、日志等全部可设置项；难理解的区域带有可展开说明。
 - 模组：填写服务器客户端模组来源文件夹，保存后点“立即同步”；以后新增或升级 mod 仍使用同一个入口。
+- 局域网：选择“局域网自动发现”，在人类世界开放 LAN 后扫描并自动填写动态端口。
+- 皮肤：导入标准 PNG、选择手臂模型、安装万用皮肤加载器并生成其他玩家使用的皮肤包。
+- 记忆与提示词：可视化编辑完整提示词，查看和导出统一记忆/经验文件。
 
 所有设置最终仍保存在普通 JSON/`.env` 文件中，总控台不是唯一入口，换机器后可以直接携带这些文件。
 
@@ -121,7 +127,11 @@ Copy-Item config\persona.example.json config\persona.json
 }
 ```
 
-不要删除示例中其余字段。`online-mode:false` 对应 `auth:"offline"`。离线名称可直接修改 `username`；离线皮肤和披风是否显示取决于服务器的皮肤插件/模组。官方披风只能来自拥有该披风的正版账号。
+不要删除示例中其余字段。`online-mode:false` 对应 `auth:"offline"`。离线名称可直接修改 `username`。所有参数的精确路径、允许值和效果见 [`PARAMETERS.md`](PARAMETERS.md)。
+
+### 局域网兼容模式
+
+人类玩家在单人世界暂停菜单选择“对局域网开放”，然后在 WebUI 将连接模式改为 `lan`（或直接点“扫描局域网世界”）并保持 `auth:"offline"`。Bot 启动时监听 `224.0.2.60:4445`，读取广播里的动态端口后静默加入；无需把世界改成固定端口。同机和同路由器都支持。扫描失败时先检查 Windows 防火墙是否允许 UDP 4445、是否真的已开放 LAN，以及 VPN/虚拟网卡是否抢占组播接口。
 
 编辑 `config\persona.json` 可以修改名字、性格、说话方式、目标和边界；编辑 `config\behavior-rules.json` 可以调整行为准则。
 
@@ -142,7 +152,7 @@ Copy-Item config\persona.example.json config\persona.json
 
 - `provider:"deepseek"`：使用 `/chat/completions`；`none` 关闭思考，其余强度映射为 DeepSeek 当前支持的 `high/max`。
 - `provider:"volcengine"`：把 `model` 改成方舟控制台创建的豆包 Seed 2.1 Pro 端点/模型 ID，把 `baseUrl` 改成控制台给出的 OpenAI 兼容地址，密钥变量建议用 `ARK_API_KEY`。
-- `provider:"openai"`：使用 `/responses`，密钥变量建议用 `OPENAI_API_KEY`；模型和推理强度按账号可用范围填写。
+- `provider:"openai"`：使用 `/responses`，密钥变量建议用 `OPENAI_API_KEY`。GPT-5.6 旗舰可填 `gpt-5.6-sol`（或会路由到 Sol 的 `gpt-5.6` 别名），平衡/高吞吐角色可分别选择 `gpt-5.6-terra` / `gpt-5.6-luna`；以账号实际权限为准。官方说明见 [Using GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6)。
 
 ### 3. 注入秘密
 
@@ -159,7 +169,7 @@ $env:DEEPSEEK_API_KEY='你的 API Key'
 $env:MINECRAFT_LOGIN_PASSWORD='你的 EasyAuth 密码'
 ```
 
-改用豆包或 OpenAI 时设置 `ARK_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。
+改用豆包或 OpenAI 时设置 `ARK_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。没有模型 Key 时 Bot 仍会进入游戏并保持后台连接，但收到 AI 请求会明确失败，不会伪造回答。
 
 ### 4. 构建控制器和 Fabric 桥
 
@@ -247,6 +257,17 @@ CialloAI 停下
 
 正常写入时程序还生成同名 `.bak`。误删主文件但备份仍在时，应先停止程序，再把 `.bak` 复制回原文件名。
 
+记忆不是定时让模型重写全部文件的 OpenClaw 多层目录：玩家消息、Bot 回复、游戏事件会即时原子追加，模型只有返回合规 `remember` 时才新增该玩家的长期事实；不同玩家按 UUID/名称隔离。动作失败会自动写入独立 `experience.json`，之后处理相似任务时检索 `correction`。完整可编辑示例分别在 `config/memory.example.json`、`config/experience.example.json` 和 `config/prompts.example.json`。
+
+## 离线皮肤与多人可见
+
+1. 在 WebUI“Bot 皮肤”选择 `classic` 或 `slim`，上传标准 64x64（或旧版 64x32）PNG。
+2. 点击“校验并导入皮肤”；官方 `CustomSkinLoader_Universal-15.0.1.jar` 会进入 Bot 的隔离客户端。
+3. 点击“生成给其他玩家的皮肤包”，取得 `.runtime\skin-pack\Minecraft-AI-Skin-Pack.zip`。
+4. 每个需要看见 Bot 皮肤的人将压缩包内容复制到自己正在使用的 Minecraft 实例目录，然后重启并重新进服。
+
+万用皮肤加载器官方明确说明 LocalSkin 只能由持有同一文件的客户端看见，所以“只给 Bot 装 Mod”不会把纹理广播给其他玩家。长期服务器更推荐把同名 Bot 角色上传到所有玩家共同配置的 LittleSkin/兼容皮肤站；配置位置为 `config/skin.json`。官方正版披风仍只能随实际拥有披风的 Microsoft 账号使用。
+
 ## EasyAuth 与安全行为
 
 Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得密码并发送 `login <密码>`；新 Bot 名称收到 `/register` 提示且 `easyAuth.registerIfNeeded:true` 时发送两次密码完成注册。若插件没有提示，进入世界 5 秒后回退尝试登录。密码不会交给大模型；聊天和日志会将 `/login`、`/register` 参数及已知密码替换为 `[REDACTED]`。
@@ -265,8 +286,11 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | 文件 | 效果 | 实现原理 |
 | --- | --- | --- |
 | `Install-and-Open-Control-Center.cmd` | 双击完成安装并打开总控台 | 从项目目录调用 PowerShell 部署器，失败时保留窗口和日志 |
+| `Open-WebUI.cmd` / `Start-Bot.cmd` / `Stop-Bot.cmd` | 日常打开页面、静默启动和停止 | 调用固定脚本并保持工作目录正确 |
 | `config/bot.json` | 实际服务器、模型、聊天、存储和日志参数 | 总控台将表单转换为 JSON；启动时严格校验后一次性载入 |
 | `config/persona.json` | 实际 Bot 人设 | 每次模型请求把描述、说话风格、目标和边界放入系统上下文 |
+| `config/prompts.json` | 完整系统/记忆/动作/空闲提示词 | 启动时读取，页面可编辑，模板再注入人设 |
+| `config/skin.json` | 皮肤模型、路径和多人可见方式 | PNG 校验后保存本地副本或指导共同皮肤站配置 |
 | `config/behavior-rules.json` | 实际安全规则 | LLM 动作执行前由 `PolicyEngine` 再审查，不能靠提示词绕过 |
 | `config/mods.json` | 服务器 mod 来源和同步规则 | 启动前/按钮触发时与上次清单比较，受管理地替换 jar |
 | `.env` | API Key 和 EasyAuth 密码 | 仅本机载入且被 Git 忽略；WebUI 只显示是否存在，不返回值 |
@@ -274,10 +298,11 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `data/experience.json` | 任务经验、失败与修正 | 与记忆独立，提示组装时按任务检索相关经验 |
 | `data/runtime-status.json` | 当前游戏阶段、坐标、生命、背包等 | Fabric 每秒上报结构化状态，Node 原子落盘，WebUI 轮询读取 |
 | `.runtime/minecraft/managed-mods.json` | 最近一次服务器 mod 同步清单 | 记录来源、时间、文件名、大小和 SHA-256，用于安全升级/删除 |
+| `.runtime/skin-pack/Minecraft-AI-Skin-Pack.zip` | 给其他玩家安装的离线皮肤包 | 含官方万用皮肤加载器和按 Bot 名称放置的本地皮肤 |
 | `logs/bot.log` | AI 控制器 JSONL 日志 | 每行一个结构化事件，递归脱敏 password/token/authorization |
 | `.runtime/minecraft/logs/latest.log` | 原生客户端和 mod 日志 | Minecraft/Fabric 自身日志，用于排查注册表和模组崩溃 |
 
-`config/*.example.json` 和 `.env.example` 是可提交的无秘密模板；同名非 example 文件才是本机实际设置。
+`config/*.example.json` 和 `.env.example` 是可提交的无秘密模板；同名非 example 文件才是本机实际设置。Node 控制器和直接双击启动的 Fabric 客户端都会读取 `.env`，已有进程环境变量优先；EasyAuth 密码按 `easyAuth.passwordEnv` 映射且不会输出。
 
 ### 程序源码与脚本
 
@@ -300,9 +325,11 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/minecraft/easy-auth.ts` | Mineflayer 路线的认证提示处理；正式 Fabric 路线在 Java 模组中处理 |
 | `src/runtime/bot-runtime.ts` | 创建模块、连接/关闭/重连循环并写运行阶段 |
 | `src/runtime/status-store.ts` | 将 WebUI 所需实时状态原子保存到 `data/runtime-status.json` |
+| `src/network/lan-discovery.ts` | 监听 224.0.2.60:4445、解析 LAN 世界动态地址和端口 |
+| `src/skin/png.ts` | 校验 PNG 签名和 Minecraft 标准皮肤尺寸 |
 | `src/core/atomic-json-file.ts` | 临时文件→备份→替换，避免断电留下半个 JSON |
 | `src/core/logger.ts` | 后台 JSONL 日志和秘密脱敏 |
-| `src/webui/server.ts` | 仅绑定 `127.0.0.1:3210` 的管理 API、静态文件、配置校验、启停和模组同步；限制 Host/Origin/1 MiB 请求 |
+| `src/webui/server.ts` | 仅绑定 `127.0.0.1:3210` 的管理 API、静态文件、配置校验、启停、LAN、皮肤、记忆和模组同步；限制 Host/Origin/2 MiB 请求 |
 | `public/webui/index.html` | 总控台信息架构和无障碍表单 |
 | `public/webui/styles.css` | 不依赖外部 CDN 的响应式界面，适配桌面和窄屏 |
 | `public/webui/app.js` | 读取状态、表单映射、保存、启停、同步、模型最小测试；不读取或回显秘密 |
@@ -317,6 +344,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `scripts/install-headlessmc.ps1` | 下载固定 HeadlessMc 2.10.0 并验证 SHA-256 |
 | `scripts/prepare-fabric-client.ps1` | 组装隔离客户端、桥、固定 Fabric API 和服务器模组 |
 | `scripts/sync-client-mods.mjs` | 清理上次受管理 jar、复制当前来源、生成 SHA-256 清单 |
+| `scripts/build-skin-pack.ps1` | 在受限运行目录组装并压缩供其他客户端使用的离线皮肤包 |
 | `scripts/apply-minecraft-data-26.2.mjs` | 给 Mineflayer 诊断栈补充经审查的 26.2 协议数据 |
 | `scripts/start-*`、`stop-*` | WebUI、Node、Minecraft 的隐藏启动和精确 PID 停止，组合启动失败会回滚 |
 | `src/probe.ts` | 不发言、不动作的 Mineflayer 握手诊断 |
@@ -324,7 +352,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `vendor/minecraft-data/26.2/*` | 固定上游提交的声明式协议 JSON，仅用于诊断 |
 | `package.json` / `package-lock.json` / `tsconfig.json` | 固定 Node 依赖、命令和严格 TypeScript 构建 |
 | `.npmrc` / `.gitignore` | npmmirror 默认源；排除秘密、数据、日志、构建和运行时目录 |
-| `README.md` / `README_AI.md` | 本文是人类教程；后者是跨账号/Agent 的完整续作档案 |
+| `README.md` / `README_AI.md` / `PARAMETERS.md` | 人类教程、跨 Agent 续作档案、精确参数位置总表 |
 
 ## 所有参数存放位置
 
@@ -333,7 +361,9 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | JSON 路径 | 默认值 | 作用 |
 | --- | --- | --- |
 | `server.adapter` | `fabric_bridge` | 正式原生 Fabric 或诊断 Mineflayer |
+| `server.connectionMode` | `direct` | 固定服务器或自动发现局域网世界 |
 | `server.host` / `server.port` | `ciallo.kim` / `25565` | 目标服务器 |
+| `server.lanDiscoveryTimeoutMs` | `8000` | LAN 广播等待时间（250-60000ms） |
 | `server.version` | `26.2` | Minecraft 协议/客户端版本 |
 | `server.username` | `CialloAI` | 离线玩家名称，也是默认聊天提及词 |
 | `server.auth` | `offline` | `online-mode:false` 使用 offline；Microsoft 尚未完成 |
@@ -360,7 +390,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `storage.memoryFile` | `data/memory.json` | 唯一长期记忆文件 |
 | `storage.experienceFile` | `data/experience.json` | 独立经验文件 |
 | `storage.maxEvents` | `5000` | 长期事件最多保留数 |
-| `policyFile` / `personaFile` | `config/...json` | 规则和人设路径；WebUI 只允许项目 config 内 |
+| `policyFile` / `personaFile` / `promptsFile` | `config/...json` | 规则、人设和提示词路径；WebUI 只允许项目 config 内 |
 | `logging.file` | `logs/bot.log` | JSONL 日志路径 |
 | `logging.level` | `info` | `debug/info/warn/error` |
 | `logging.console` | `false` | 是否同时输出控制台；静默后台建议 false |
@@ -372,6 +402,10 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `config/persona.json` | `name` 名称、`description` 身份、`speakingStyle` 风格、`goals[]` 目标、`boundaries[]` 边界 |
 | `config/behavior-rules.json` | `denyBreakingPlayerProperty`、`denyOpeningPlayerContainers`、`denyTakingPlayerItems`、`wildernessDevelopmentOnly`、`allowSelfDefense`、`selfDefenseWindowMs`、`stopSelfDefenseWhenThreatEnds`、`allowPlayerOrderedPvp`、`allowDestructiveActionsWhenOwnershipUnknown` 和 `proactiveChat.*` |
 | `config/mods.json` | `sourceDirectory` 外部 mod 文件夹、`syncOnClientStart` 启动自动同步、`excludeFilePatterns[]` 文件名正则排除 |
+| `config/prompts.json` | `identity` 模板、`capabilityRules[]`、`memoryRules[]`、`actionContract`、`proactiveInstruction` |
+| `config/skin.json` | `enabled`、`model`、`visibilityMode`、`skinFile`、`capeFile`、`onlineProvider.*` |
+
+更完整的允许值、修改效果、记忆自动写入机制和全部运行文件位置见 [`PARAMETERS.md`](PARAMETERS.md)。
 | `.env` | `MINECRAFT_LOGIN_PASSWORD`、`DEEPSEEK_API_KEY`、`ARK_API_KEY`、`OPENAI_API_KEY`；内容绝不提交 |
 | 环境变量 | `MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_WEBUI_PORT` 可覆盖运行/下载位置 |
 
@@ -398,6 +432,14 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 **模型没有回复**
 
 检查 API Key 环境变量、`config\bot.json` 的模型 ID/端点，以及 `logs\bot.log`。默认需要在消息中提到 Bot 名称，并有 2.5 秒聊天冷却。
+
+## 测试状态
+
+截至 2026-08-04，本轮代码已通过 16 项 Node 自动测试、TypeScript 类型检查、生产构建、PowerShell/浏览器脚本语法检查、JSON 解析、UTF-8/异常控制字符扫描与 Git 空白检查。一键安装脚本使用本机已有环境完整执行通过，用时约 85 秒；该结果不能替代无 VPN 的中国大陆纯净 Windows 验收。
+
+真实目标服测试已让 Fabric 26.2 无界面客户端进入 `ciallo.kim:25565` 世界，状态接口返回坐标、20 点生命和 20 点饥饿值；CustomSkinLoader 15.0.1 也在真实客户端成功加载。服务器随后要求 EasyAuth `/register`，由于最终提交不保存任何密码或模型 Key，本轮没有发送注册命令、模型聊天或游戏动作，因此这些端到端行为仍待用户在本机安全填写秘密后验收。
+
+LAN 发现已通过真实 UDP 组播收发与 WebUI 扫描接口测试；仍需在用户实际“开放到局域网”的世界上做一次现场验收。皮肤 PNG 校验、导入、读取和多人客户端包生成流程均已测试，提交前测试产物不会进入 Git。
 
 ## 开发与验证
 

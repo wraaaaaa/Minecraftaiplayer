@@ -26,8 +26,10 @@
       <a href="#model">大模型</a>
       <a href="#chat">聊天与自主</a>
       <a href="#persona">AI 人设</a>
+      <a href="#prompts">提示词</a>
       <a href="#policy">行为安全</a>
       <a href="#mods">服务器模组</a>
+      <a href="#skin">皮肤</a>
       <a href="#storage">存储与日志</a>
       <a href="#logs">运行日志</a>
     </nav>
@@ -61,6 +63,7 @@
       <section id="server" class="panel">
         <div class="section-heading"><div><p class="eyebrow">CONNECTION</p><h2>服务器与客户端</h2></div><details><summary>这些参数有什么用？</summary><p>这里决定 Bot 用什么身份、通过哪种适配器连接哪个服务器。模组服应保持 Fabric 桥；本机桥地址不要改成公网地址。</p></details></div>
         <div class="form-grid three">
+          <label>连接模式<select id="connectionMode"><option value="direct">固定服务器地址</option><option value="lan">局域网自动发现（兼容模式）</option></select></label>
           <label>接入方式<select id="serverAdapter"><option value="fabric_bridge">Fabric 原生桥（推荐）</option><option value="mineflayer">Mineflayer 诊断</option></select></label>
           <label>服务器地址<input id="serverHost" type="text"></label>
           <label>服务器端口<input id="serverPort" type="number" min="1" max="65535"></label>
@@ -68,11 +71,13 @@
           <label>Bot 游戏名<input id="serverUsername" type="text" maxlength="16"></label>
           <label>账号模式<select id="serverAuth"><option value="offline">离线账号</option><option value="microsoft">Microsoft 正版（尚未实现）</option></select></label>
           <label>连接等待（毫秒）<input id="connectTimeout" type="number" min="1000"></label>
+          <label>局域网发现等待（毫秒）<input id="lanDiscoveryTimeout" type="number" min="250" max="60000"></label>
           <label>断线重连间隔（毫秒）<input id="reconnectDelay" type="number" min="1000"></label>
           <label>动作超时（毫秒）<input id="actionTimeout" type="number" min="1000"></label>
           <label>本机桥地址<input id="bridgeHost" type="text"></label>
           <label>本机桥端口<input id="bridgePort" type="number" min="1024" max="65535"></label>
         </div>
+        <div class="inline-actions"><button id="discoverLanButton" class="button ghost">扫描局域网世界</button><span id="lanResult" class="muted">人类玩家先在单人世界选择“对局域网开放”</span></div>
         <div class="subpanel">
           <h3>EasyAuth</h3>
           <div class="toggle-row"><label class="switch"><input id="easyAuthEnabled" type="checkbox"><span></span>启用服内认证</label><label class="switch"><input id="registerIfNeeded" type="checkbox"><span></span>首次进入时允许自动注册</label></div>
@@ -84,7 +89,7 @@
         <div class="section-heading"><div><p class="eyebrow">INTELLIGENCE</p><h2>大模型</h2></div><details><summary>推理强度说明</summary><p>强度越高通常思考更久、费用更高。DeepSeek 会把 low/medium/high 映射到 high，把 xhigh/max 映射到 max；none 会关闭思考。</p></details></div>
         <div class="form-grid three">
           <label>供应商<select id="modelProvider"><option value="deepseek">DeepSeek</option><option value="volcengine">火山方舟 / 豆包</option><option value="openai">OpenAI</option></select></label>
-          <label>模型或端点 ID<input id="modelName" type="text"></label>
+          <label>模型或端点 ID<input id="modelName" type="text" placeholder="例如 gpt-5.6-sol；也可填任意账号可用 ID"></label>
           <label>推理强度<select id="reasoningEffort"><option>none</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
           <label class="span-two">API Base URL<input id="modelBaseUrl" type="url"></label>
           <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000"></label>
@@ -93,7 +98,7 @@
           <label>火山方舟 API Key<input id="arkKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
           <label>OpenAI API Key<input id="openaiKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
         </div>
-        <div class="inline-actions"><button id="saveSecretsButton" class="button ghost">安全保存密钥</button><button id="testModelButton" class="button ghost">最小额度测试模型</button><span id="modelTestResult" class="muted"></span></div>
+        <div class="inline-actions"><button id="saveSecretsButton" class="button ghost">安全保存密钥</button><button id="clearSecretsButton" class="button danger">清空本机全部密钥</button><button id="testModelButton" class="button ghost">最小额度测试模型</button><span id="modelTestResult" class="muted"></span></div>
       </section>
 
       <section id="chat" class="panel">
@@ -105,6 +110,11 @@
       <section id="persona" class="panel">
         <div class="section-heading"><div><p class="eyebrow">PERSONA</p><h2>AI 人设</h2></div><details><summary>如何写人设？</summary><p>描述“它是谁”和“怎么说话”，目标写希望长期坚持的方向，边界写绝对不能做的事。每行一个目标或边界。</p></details></div>
         <div class="form-grid two"><label>角色名称<input id="personaName" type="text"></label><label>说话风格<input id="speakingStyle" type="text"></label><label class="span-two">角色描述<textarea id="personaDescription" rows="3"></textarea></label><label>长期目标（每行一个）<textarea id="personaGoals" rows="6"></textarea></label><label>角色边界（每行一个）<textarea id="personaBoundaries" rows="6"></textarea></label></div>
+      </section>
+
+      <section id="prompts" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">PROMPT TEMPLATES</p><h2>提示词与记忆规则</h2></div><details><summary>这些内容何时使用？</summary><p>每次处理玩家聊天和空闲决策时都会读取这里。身份模板支持 {{name}}、{{description}}、{{speakingStyle}}、{{goals}}、{{boundaries}} 占位符；每行一条能力或记忆规则。</p></details></div>
+        <div class="form-grid two"><label class="span-two">身份模板<textarea id="promptIdentity" rows="5"></textarea></label><label>能力与安全规则（每行一条）<textarea id="promptCapabilities" rows="8"></textarea></label><label>记忆与经验规则（每行一条）<textarea id="promptMemory" rows="8"></textarea></label><label class="span-two">动作输出契约<textarea id="promptContract" rows="5"></textarea></label><label class="span-two">空闲自主提示<textarea id="promptProactive" rows="4"></textarea></label></div>
       </section>
 
       <section id="policy" class="panel">
@@ -122,9 +132,29 @@
         <div id="modList" class="mod-list"></div>
       </section>
 
+      <section id="skin" class="panel">
+        <div class="section-heading"><div><p class="eyebrow">SKIN & CAPE</p><h2>Bot 皮肤</h2></div><details open><summary>怎样让其他玩家看见？</summary><p>仅把图片放进 Bot 本地目录时，其他人看不到。选择“分发客户端皮肤包”后，导入标准 PNG 并生成压缩包，每个需要看到皮肤的玩家都要安装一次；或把同名角色上传到 LittleSkin 等共同皮肤站。万用皮肤加载器是客户端 Mod，不要装进服务端。</p></details></div>
+        <div class="skin-layout">
+          <div class="skin-preview"><img id="skinPreview" alt="Bot 皮肤原图预览"><span id="skinState">尚未导入</span></div>
+          <div class="form-grid two">
+            <label class="switch"><input id="skinEnabled" type="checkbox"><span></span>启用皮肤配置</label>
+            <label>皮肤模型<select id="skinModel"><option value="classic">Classic / Steve（4 像素手臂）</option><option value="slim">Slim / Alex（3 像素手臂）</option></select></label>
+            <label>多人可见方式<select id="skinVisibility"><option value="client_pack">分发客户端皮肤包</option><option value="online_provider">共同在线皮肤站</option><option value="microsoft">Microsoft 正版皮肤</option></select></label>
+            <label>皮肤 PNG<input id="skinFileInput" type="file" accept="image/png"></label>
+            <label>在线皮肤站名称<input id="skinProviderName" type="text"></label>
+            <label>皮肤站角色名<input id="skinProfileName" type="text"></label>
+            <label class="span-two">皮肤站地址<input id="skinProviderWebsite" type="url"></label>
+          </div>
+        </div>
+        <div class="inline-actions"><button id="importSkinButton" class="button primary">校验并导入皮肤</button><button id="buildSkinPackButton" class="button ghost">生成给其他玩家的皮肤包</button><span id="skinPackResult" class="muted"></span></div>
+      </section>
+
       <section id="storage" class="panel">
         <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json 和 experience.json。前者保存所有玩家和长期记忆，后者保存总结经验；程序还会生成 .bak。</p></details></div>
         <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label></div>
+        <div class="memory-grid"><article><span>已认识玩家</span><strong id="memoryPlayers">0</strong></article><article><span>记忆事件</span><strong id="memoryEvents">0</strong></article><article><span>经验条目</span><strong id="experienceEntries">0</strong></article></div>
+        <div class="inline-actions"><a class="button ghost link-button" href="/api/memory/download" download>导出统一记忆文件</a><a class="button ghost link-button" href="/api/experience/download" download>导出经验文件</a><span class="muted">程序会在聊天、回复、游戏事件和 remember 事实产生时自动原子写入；当前不会定时改写摘要。</span></div>
+        <div class="log-grid memory-view"><div><h3>玩家档案</h3><pre id="memoryView">暂无记忆</pre></div><div><h3>经验摘要</h3><pre id="experienceView">暂无经验</pre></div></div>
       </section>
 
       <section id="logs" class="panel">
