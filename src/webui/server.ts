@@ -157,7 +157,8 @@ function ensureSkinPaths(skin: SkinConfig): void {
 
 async function processStatus(pidFile: string): Promise<{ running: boolean; pid?: number }> {
   try {
-    const record = await readJson<{ pid: number }>(pidFile)
+    const record = await readJson<{ pid: number; projectRoot?: string }>(pidFile)
+    if (!record.projectRoot || path.resolve(record.projectRoot) !== projectRoot) return { running: false }
     process.kill(record.pid, 0)
     return { running: true, pid: record.pid }
   } catch { return { running: false } }

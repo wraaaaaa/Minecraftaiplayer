@@ -26,7 +26,7 @@ OPENAI_API_KEY=OpenAI密钥
 | `host` / `port` | `你的域名.com` / `25565` | 固定服务器地址；LAN 扫描结果也会在页面显示到这里。 |
 | `lanDiscoveryTimeoutMs` | `8000` | LAN 模式等待广播的毫秒数，可设 250-60000。 |
 | `version` | `26.2` | Minecraft 协议/客户端版本。 |
-| `username` | `CialloAI` | 离线 Bot 游戏名，3-16 位字母、数字或下划线；皮肤文件名必须与它一致。 |
+| `username` | `CialloAI` | 离线 Bot 游戏名，必须匹配 `^[A-Za-z0-9_]{3,16}$`；EasyAuth 不接受连字符、空格或中文，皮肤文件名必须与它一致。 |
 | `auth` | `offline` / `microsoft` | 当前原生无界面启动已实现 `offline`；LAN 模式强制离线。Microsoft 自动登录仍未实现。 |
 | `connectTimeoutMs` | `30000` | 等待连接超时。 |
 | `reconnectDelayMs` | `10000` | 断线后再次连接的等待。 |

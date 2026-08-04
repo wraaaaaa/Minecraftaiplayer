@@ -2,10 +2,13 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $botWasRunning = $false
 $botPidFile = Join-Path $projectRoot 'data\bot.pid.json'
+$botEntryPoint = Join-Path $projectRoot 'dist\src\index.js'
 if (Test-Path -LiteralPath $botPidFile) {
     try {
         $record = Get-Content -LiteralPath $botPidFile -Raw | ConvertFrom-Json
-        $botWasRunning = [bool](Get-Process -Id $record.pid -ErrorAction SilentlyContinue)
+        $candidate = Get-Process -Id $record.pid -ErrorAction SilentlyContinue
+        $details = Get-CimInstance Win32_Process -Filter "ProcessId=$($record.pid)" -ErrorAction SilentlyContinue
+        $botWasRunning = [bool]($candidate -and $details -and -not [string]::IsNullOrWhiteSpace($details.CommandLine) -and $details.CommandLine.IndexOf($botEntryPoint, [StringComparison]::OrdinalIgnoreCase) -ge 0)
     } catch { $botWasRunning = $false }
 }
 

@@ -68,7 +68,7 @@
           <label>服务器地址<input id="serverHost" type="text"></label>
           <label>服务器端口<input id="serverPort" type="number" min="1" max="65535"></label>
           <label>Minecraft 版本<input id="serverVersion" type="text"></label>
-          <label>Bot 游戏名<input id="serverUsername" type="text" maxlength="16"></label>
+          <label>Bot 游戏名<input id="serverUsername" type="text" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" title="只能使用 3-16 位英文字母、数字或下划线；EasyAuth 不接受连字符、空格或中文"></label>
           <label>账号模式<select id="serverAuth"><option value="offline">离线账号</option><option value="microsoft">Microsoft 正版（尚未实现）</option></select></label>
           <label>连接等待（毫秒）<input id="connectTimeout" type="number" min="1000"></label>
           <label>局域网发现等待（毫秒）<input id="lanDiscoveryTimeout" type="number" min="250" max="60000"></label>

@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$headlessJar = Join-Path $projectRoot '.runtime\headlessmc\headlessmc-launcher-2.10.0.jar'
 $pidFile = Join-Path $projectRoot 'data\minecraft-client.pid.json'
 if (-not (Test-Path -LiteralPath $pidFile)) {
     Write-Output 'No background Minecraft client PID file was found.'
@@ -16,6 +17,10 @@ if (-not $rootProcess) {
 }
 if ($rootProcess.Path -ne $record.executable) {
     throw "PID $($record.pid) belongs to another executable; refusing to stop it."
+}
+$details = Get-CimInstance Win32_Process -Filter "ProcessId=$($record.pid)" -ErrorAction SilentlyContinue
+if (-not $details -or [string]::IsNullOrWhiteSpace($details.CommandLine) -or $details.CommandLine.IndexOf($headlessJar, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw "PID $($record.pid) belongs to another project directory; refusing to stop it."
 }
 
 $allProcesses = Get-CimInstance Win32_Process

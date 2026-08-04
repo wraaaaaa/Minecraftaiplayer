@@ -101,6 +101,8 @@ Fabric 桥是游戏里的结构化“传感器+执行器”：直接读取客户
 - 模型 Provider 缺 Key 时不能让整个控制器在启动阶段退出；`MissingKeyProvider` 允许 Bot/桥正常运行，只有实际 AI 请求才抛出明确缺变量错误。这样清理 Key 后仍能启动做联机诊断，也不会伪造模型回复。
 - `start-headless-client.ps1` 的已有 PID 检查必须发生在 mod 同步之前。否则重复双击 Start-Bot 会尝试删除被运行中 Java 锁定的 jar，失败后组合脚本还会回滚停止 Node。已调整为幂等早退；这是 2026-08-04 根目录入口真实测试发现的回归。
 - 组合启动只在“本轮新启动了 Node”且客户端失败时回滚 Node；若 Node 原本已运行（例如 LAN 尚未开放），不能误停现有控制器。
+- 项目目录被复制/移动后，旧 WebUI 可能仍占用 3210，而复制来的 PID JSON 只凭“同一个 node/java 可执行文件”会误认旧进程属于新目录。所有后台 PID 记录现加入 `projectRoot`/入口标记，启停脚本核对进程命令行；WebUI 启动还核对端口所有者，禁止静默打开另一份项目。秘密和实际配置不会自动跨目录迁移。
+- EasyAuth 的用户名规则是 `^[a-zA-Z0-9_]{3,16}$`。2026-08-04 搬迁诊断中，只读探针确认带 `-` 的名称被 `text.easyauth.disallowedUsername` 拒绝；配置后端、浏览器和测试现统一提前拦截。
 - 独立 `PARAMETERS.md` 已覆盖秘密、服务器、LAN、EasyAuth、模型、推理、人设、提示词、记忆、经验、皮肤、模组、日志、PID 和 Git 位置。
 
 ### 尚未完成
@@ -340,6 +342,10 @@ CustomSkinLoader 官方 LocalSkin 不会自动被别人看见。项目导入 PNG
 
 第三轮回归时间：2026-08-04 02:16–02:18（Asia/Shanghai）。Bot 再次进入 `你的域名.com:25565`，运行时状态为 `in_world`，坐标 `(1231.5, 132, 199.5)`、生命 20、饥饿 20。CustomSkinLoader Universal 15.0.1 在真实 MC 26.2 客户端加载，并完成皮肤/渲染相关类转换。服务器仍提示 `/register`；因未保存 EasyAuth 密码和模型 Key，没有发送注册、聊天或动作。重复双击 `Start-Bot.cmd` 时发现“同步被 Java 锁定的 mod 后误回滚 Node”问题，现已通过启动前 PID 早退和只回滚本轮新进程修复。
 
+第四轮搬迁回归时间：2026-08-04 09:02–09:14（Asia/Shanghai）。项目主本地仓改为 `D:\临时工程\minecraft aibot`，旧目录 WebUI 仍占用 3210 且复制的 `webui.pid.json` 指向旧 PID。新版启动脚本实测拒绝该端口并报告另一项目目录占用；精确停止旧项目 Node/Headless Java 后，新 WebUI 以新根目录 PID 记录启动，HTTP snapshot 200，旧项目进程为 0，用户的人类 Java 客户端保留。
+
+旧目录实际设置、`.env` 秘密和本地皮肤通过 WebUI API 迁移到新目录，未在终端输出值；带 `-` 的 Bot 名称按 EasyAuth 规则替换为 `_`。只读探针此前收到 `text.easyauth.disallowedUsername`，修正后真实 Fabric Bot 在新目录进入世界，EasyAuth 先返回认证成功再返回已经认证，状态 `in_world`、生命 20、饥饿 20。模型最小请求真实使用 `deepseek-v4-flash`、`high`，约 1254 ms 成功；运行中重复 start API 约 1488 ms 幂等成功。首次 start HTTP 调用等待较长但后台进程实际正常启动，终止调用端后没有遗留 WebUI 子 PowerShell，重复调用正常，因此未判定为服务端死锁。
+
 模组外部前置已经解决。当前实际/未来同步方式：
 
 ```powershell
@@ -384,7 +390,7 @@ Set-Location fabric-bridge
 - 国内 Minecraft 依赖预取与真实服务器连接。
 - 服务器 23 个受管理模组同步和完整原生进服。
 - WebUI GET snapshot、静态页面/CSP、同值 PUT 保存；WebUI 隐藏启停。
-- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；16 项 Node 测试全部通过。
+- WebUI 页面返回 200/CSP，伪造非本机 Host 返回 403；18 项 Node 测试全部通过，包含 EasyAuth 用户名规则正反例。
 - `install-windows.ps1 -SkipEnvironmentInstall -NoOpen` 全流程：npm/check/build、88 库缓存校验、Fabric build、Headless hash、23 mod、WebUI，约 85 秒通过。
 - LAN 发现通过真实本机 UDP 组播包和 WebUI 扫描接口验证；实际玩家开放 LAN 世界仍待现场验收。
 - 皮肤 PNG 校验/导入/读取、CustomSkinLoader 安装及多人客户端包生成已验证；临时皮肤与 zip 均留在 Git 忽略的 `.runtime/test-artifacts`，正式配置恢复为禁用状态。
@@ -433,7 +439,7 @@ Set-Location fabric-bridge
 | R19 | 局域网同机/同网游玩 | UDP 组播自动发现、离线强制、WebUI 扫描和解析测试已实现；需用户实际开放 LAN 世界做现场验收 |
 | R20 | 根目录便捷入口 | Open-WebUI/Start-Bot/Stop-Bot 三个 cmd 已实现 |
 | R21 | 独立参数位置总表 | `PARAMETERS.md` 已实现并与三份示例关联 |
-| R22 | Bug/无效字符/秘密终检 | 已完成：16 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；四个秘密变量均未保存，运行产物被忽略 |
+| R22 | Bug/无效字符/秘密终检 | 已完成：18 项测试、类型/构建/脚本/JSON、UTF-8/控制字符、Git 空白和秘密扫描均通过；四个秘密变量均未保存，运行产物被忽略 |
 
 ## 12. 推荐下一阶段（按顺序）
 

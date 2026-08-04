@@ -50,6 +50,9 @@ export function validateConfig(config: BotConfig): void {
   requirePositiveInteger(config.server?.lanDiscoveryTimeoutMs, 'server.lanDiscoveryTimeoutMs')
   requireString(config.server?.version, 'server.version')
   requireString(config.server?.username, 'server.username')
+  if (!/^[A-Za-z0-9_]{3,16}$/u.test(config.server.username)) {
+    throw new Error('server.username 必须是 3-16 位英文字母、数字或下划线；EasyAuth 不接受空格、连字符或中文')
+  }
   requireString(config.server?.bridgeHost, 'server.bridgeHost')
   requirePositiveInteger(config.server?.bridgePort, 'server.bridgePort')
   requirePositiveInteger(config.server?.actionTimeoutMs, 'server.actionTimeoutMs')

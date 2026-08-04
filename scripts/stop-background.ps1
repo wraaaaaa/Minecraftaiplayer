@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$entryPoint = Join-Path $projectRoot 'dist\src\index.js'
 $pidFile = Join-Path $projectRoot 'data\bot.pid.json'
 
 if (-not (Test-Path -LiteralPath $pidFile)) {
@@ -18,6 +19,10 @@ if (-not $process) {
 
 if ($process.Path -ne $record.executable) {
     throw "PID $($record.pid) belongs to another executable; refusing to stop it."
+}
+$details = Get-CimInstance Win32_Process -Filter "ProcessId=$($record.pid)" -ErrorAction SilentlyContinue
+if (-not $details -or [string]::IsNullOrWhiteSpace($details.CommandLine) -or $details.CommandLine.IndexOf($entryPoint, [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+    throw "PID $($record.pid) belongs to another project directory; refusing to stop it."
 }
 
 Stop-Process -Id $record.pid
