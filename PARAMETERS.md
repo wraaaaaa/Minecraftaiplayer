@@ -80,6 +80,17 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 - `MEMORY.md`：记忆召回、分玩家隔离、摘要、压缩和过期规则；不存放秘密。
 - `USER.md`：当前玩家的兴趣、表达方式、协作偏好和稳定事实；模型只加载正在对话玩家对应的一份。
 
+### 修改人设与名称
+
+| 目标 | 修改位置 | 生效方式 |
+| --- | --- | --- |
+| 修改性格、语气、价值观 | WebUI 的 `SOUL.md`，或 `data/agent-prompts/SOUL.md` | 下一次模型决策热读取 |
+| 修改身份摘要 | WebUI 的 `IDENTITY.md`，或 `data/agent-prompts/IDENTITY.md` | 下一次模型决策热读取 |
+| 修改 AI 对外角色名 | WebUI“兼容角色名”或 `config/persona.json.name`，并同步替换上述两份 Markdown 中的旧角色称呼 | 保存后重启 Bot；`{{name}}` 会替换为此值 |
+| 修改 Minecraft 头顶/玩家列表名称 | WebUI“Bot 游戏名”或 `config/bot.json.server.username` | 必须重启；只允许 3–16 位字母、数字、下划线 |
+
+“兼容角色名”和“Bot 游戏名”可以不同。前者用于 AI 自称、点名识别和记忆标签；后者是离线登录身份。修改登录名可能触发新 EasyAuth 注册、离线 UUID 变化以及皮肤文件/皮肤站角色名迁移。`config/agent-prompts.example/` 是新安装模板，不是当前运行源。
+
 配置位于 `config/bot.json` 的 `agentWorkspace`：
 
 | 字段 | 默认值 | 效果 |

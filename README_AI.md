@@ -39,6 +39,7 @@ npm test
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
+- 2026-08-05 后续人设增量：运行时与模板的 `SOUL.md`/`IDENTITY.md` 已从用户提供的 OpenClaw SOUL 中仅抽取角色设定并改写为 Minecraft 角色“小粉”。保留粉色猫娘、温柔元气、有主见、主人关系和自然聊天句末“喵”；排除 OpenClaw 的外部行动、文件连续性和平台工具规则。只有 `wraaaaaa` 可称主人；JSON/工具输出禁止加入语气词或动作描写。
 - `memory.json` 仍是统一原始记忆文件。`ContextCompressor` 在估算上下文达到预算阈值时保留最近事件，用当前模型总结较旧事件；先原子更新当前玩家 `USER.md`，成功后才写玩家/全局摘要并按事件 ID 原子删除已压缩事件，避免画像写入失败造成上下文丢失。
 - 同类动作失败达到阈值后，`SelfImprovementManager` 可通过百度或自建 SearXNG 查找思路。搜索结果是不可信文本，只能用于生成 `TOOLS.md` 托管经验段和 `behavior-patches.json` 声明式补丁；程序不能自改 JS/Java/PowerShell、硬规则、启动脚本或秘密。这是“可进化”与供应链/远程代码执行安全之间的硬边界。
 - 无持久住所时，主动循环不再反复调用 `seek_shelter`；没有建房材料则继续确定性发育。探索单个动作到达一个安全分段即成功，不再为了寻找“完全无人造痕迹区域”耗尽八段而超时。矿道使用导航器真实落脚格修复两格上行判断错误。
@@ -287,7 +288,19 @@ Node.js AI 控制器
 
 人工坐标开发区不再参与决策。Fabric 为单次动作建立短生命周期的已加载工作窗口，并对候选逐格检查；采集检查 Bot/目标周围的其他玩家，建造在开始和施工过程中持续检查荒野距离。该窗口不持久化，也不能把人造结构变成可修改目标。
 
-### 5.3 `.env` 变量
+### 5.3 人设与三种名称的修改规则
+
+维护者必须区分以下三层，不能在交接时统称“Bot 名字”：
+
+1. `SOUL.md` 是核心人格、价值观、口癖、情绪表达和关系设定；运行源是 `data/agent-prompts/SOUL.md`，每次模型决策重新读取。
+2. 对外角色称呼同时受 `config/persona.json.name`、`IDENTITY.md` 和 `SOUL.md` 影响。`{{name}}` 只替换为 `persona.name`，不是 Minecraft 登录名。WebUI 将它显示为“兼容角色名”；该值还参与聊天点名和 MemoryStore 的 Bot 标签，因此修改后应重启 Node 控制器。
+3. Minecraft 实际登录名只由 `config/bot.json.server.username` 决定，WebUI 名为“Bot 游戏名”。它必须匹配 `^[A-Za-z0-9_]{3,16}$`，修改后必须重启 Node 与 Minecraft 客户端。
+
+WebUI 标准流程：进入“提示词与玩家画像”→修改“兼容角色名”、`IDENTITY.md`、`SOUL.md`→点击“保存全部设置”→若改了角色名则点“重新启动”。只改 Markdown 正文时无需重启。实际登录名在“服务器与客户端”修改，保存后必须重启；离线 UUID、EasyAuth 注册身份、LocalSkin 文件名和在线皮肤站角色名可能随之变化。
+
+本地标准流程：修改忽略文件 `config/persona.json` 的 `name` 和运行文件 `data/agent-prompts/{IDENTITY.md,SOUL.md}`。`config/agent-prompts.example/` 只负责新部署初始化，不能替代运行文件；确认人设稳定后才同步模板。只改 AI 自称时禁止顺手改 `server.username`。提示词不得含 API Key、密码、真实服务器地址或其他秘密。
+
+### 5.4 `.env` 变量
 
 只允许以下模型秘密变量：
 

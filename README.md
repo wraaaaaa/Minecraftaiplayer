@@ -29,6 +29,7 @@
 - 局域网兼容模式：自动监听 Java 版“对局域网开放”的广播和动态端口，用离线 Bot 与同一台电脑或同一局域网的人类玩家游玩。
 - 皮肤管理：WebUI 严格校验 64x64/64x32 PNG、选择 classic/slim，并集成官方万用皮肤加载器；可生成分发给所有玩家的客户端皮肤包，确保安装者看见 Bot 皮肤。
 - OpenClaw 风格提示词工作区：`rules.md`、`IDENTITY.md`、`SOUL.md`、`TOOLS.md`、`MEMORY.md` 可在 WebUI 或本地同步编辑；每位玩家自动生成隔离的 `USER.md`。上下文接近预算时会调用当前模型压缩旧事件、更新摘要和对应玩家画像。
+- 默认角色示例已改为粉色猫娘“小粉”：`wraaaaaa` 是唯一使用“主人”称呼的玩家，其他玩家仍按独立 `USER.md` 作为朋友或队友交流。自然语言聊天以“喵”类语尾收束；动作 JSON、工具参数和机器输出严格保持纯格式，不受猫娘语气影响。
 - 受限自我改进：同类动作重复失败达到阈值后，可经百度或自建 SearXNG 检索公开解决思路；网页内容按不可信文本处理。AI 只可写 `TOOLS.md` 的托管经验段和声明式 `behavior-patches.json`，不能修改可执行源码、启动脚本、硬规则或秘密。
 - 纯净 Windows 一键部署入口，可安装 Node.js LTS、Java 25 并完成全套构建、资源准备和总控台启动。
 - 持久自主目标 `reach_end`：本地规划器按饥饿/食物储备、工作设施、住所、床、石器、铁器、钻石装备、附魔、下界材料、末影之眼、要塞和末地逐步推进；安全、玩家任务和受击会抢占长期计划。
@@ -165,11 +166,32 @@ Copy-Item config\persona.example.json config\persona.json
 
 不要删除示例中其余字段。`online-mode:false` 对应 `auth:"offline"`。离线名称可直接修改 `username`，但 EasyAuth 只接受 3–16 位英文字母、数字或下划线，不能使用空格、连字符或中文；WebUI 和后端都会在保存时拦截无效名称。所有参数的精确路径、允许值和效果见 [`PARAMETERS.md`](PARAMETERS.md)。
 
+#### 修改人设、角色称呼和 Minecraft 名字
+
+这三个概念彼此独立，改错位置会出现“AI 自称已经变了，但服务器头顶名字没变”的情况：
+
+| 想修改的内容 | WebUI 位置 | 本地文件 | 是否需要重启 |
+| --- | --- | --- | --- |
+| 性格、价值观、语气和角色设定 | “提示词与玩家画像”→`SOUL.md（核心人设）` | `data/agent-prompts/SOUL.md` | 不需要；下一次模型决策重新读取 |
+| AI 对外角色称呼 | “兼容角色名”，并同步修改 `IDENTITY.md`、`SOUL.md` 中的旧称呼 | `config/persona.json` 的 `name`，以及 `data/agent-prompts/IDENTITY.md`、`SOUL.md` | 建议重启；Markdown 本身可热读取，但兼容角色名、点名和记忆标签在启动时载入 |
+| 服务器玩家列表和头顶显示的登录名 | “服务器与客户端”→“Bot 游戏名” | `config/bot.json` 的 `server.username` | 必须重启 Minecraft 客户端和 Bot |
+
+用 WebUI 修改“小粉”人设：
+
+1. 双击 `Open-WebUI.cmd`，进入“提示词与玩家画像”。
+2. 在 `SOUL.md` 修改性格、口癖、关系和表达示例；在 `IDENTITY.md` 修改身份摘要。不要把 API Key、密码或真实服务器地址写进提示词。
+3. 如要把角色名从“小粉”改成其他称呼，同时修改页面中的“兼容角色名”，并把 `IDENTITY.md`、`SOUL.md` 内所有作为角色称呼的“小粉”替换为新名字。
+4. 点击页面顶部“保存全部设置”。只改 Markdown 时下一次对话即可生效；改了“兼容角色名”后点击“重新启动”。
+
+直接修改本地文件时，当前运行文件是 `data/agent-prompts/`，不是 `config/agent-prompts.example/`；后者只是新安装时使用的模板。若想让以后新部署也采用同一人设，再把确认后的 `SOUL.md` 和 `IDENTITY.md` 同步到模板目录。
+
+修改“Bot 游戏名”还要注意：新离线名会产生不同的离线 UUID，EasyAuth 可能要求为新名称执行 `/register`，皮肤文件和皮肤站角色名也应同步改成新登录名。只想改变 AI 自称时不要修改 `server.username`。
+
 ### 局域网兼容模式
 
 人类玩家在单人世界暂停菜单选择“对局域网开放”，然后在 WebUI 将连接模式改为 `lan`（或直接点“扫描局域网世界”）并保持 `auth:"offline"`。Bot 启动时监听 `224.0.2.60:4445`，读取广播里的动态端口后静默加入；无需把世界改成固定端口。同机和同路由器都支持。扫描失败时先检查 Windows 防火墙是否允许 UDP 4445、是否真的已开放 LAN，以及 VPN/虚拟网卡是否抢占组播接口。
 
-编辑 `config\persona.json` 可以修改名字、性格、说话方式、目标和边界；编辑 `config\behavior-rules.json` 可以调整行为准则。
+编辑 `config\behavior-rules.json` 可以调整行为准则；它是硬策略配置，不应当用来编写人设。
 
 模型配置示例：
 

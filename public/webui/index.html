@@ -193,6 +193,9 @@
 
       <section id="persona" class="panel">
         <div class="section-heading"><div><p class="eyebrow">OPENCLAW-STYLE AGENT WORKSPACE</p><h2>身份、人设与自我进化</h2></div><details open><summary>文件怎样生效？</summary><p>下方内容与 <code>data/agent-prompts</code> 中同名文件双向对应，每次模型决策都会重新读取。SOUL.md 是核心人设；rules.md 只是最高文字规则，真正安全边界仍由本地策略、秘密沙箱与 Fabric 逐目标验证执行。</p></details></div>
+        <div class="form-grid two">
+          <label>兼容角色名<input id="personaName" type="text"><small>用于 <code>{{name}}</code>、聊天点名和记忆标签；修改后需重启 Bot。它不是服务器登录名。</small></label>
+        </div>
         <div class="prompt-file-grid">
           <label>rules.md（规则说明）<textarea id="agentRules" rows="16" spellcheck="false"></textarea></label>
           <label>IDENTITY.md（身份基线）<textarea id="agentIdentity" rows="16" spellcheck="false"></textarea></label>
@@ -227,7 +230,7 @@
           <label>USER.md<textarea id="playerProfileContent" class="ui-only" rows="18" spellcheck="false" placeholder="选择玩家后显示其独立画像"></textarea></label>
         </div>
         <div hidden aria-hidden="true">
-          <input id="personaName"><input id="speakingStyle"><textarea id="personaDescription"></textarea><textarea id="personaGoals"></textarea><textarea id="personaBoundaries"></textarea>
+          <input id="speakingStyle"><textarea id="personaDescription"></textarea><textarea id="personaGoals"></textarea><textarea id="personaBoundaries"></textarea>
           <textarea id="promptIdentity"></textarea><textarea id="promptCapabilities"></textarea><textarea id="promptMemory"></textarea><textarea id="promptContract"></textarea><textarea id="promptProactive"></textarea>
         </div>
       </section>
