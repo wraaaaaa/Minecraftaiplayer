@@ -14,10 +14,16 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
 import java.util.UUID;
@@ -36,6 +42,11 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private UUID activeSession;
     private boolean bridgeWasConnected;
     private MovementTarget movement;
+    private Vec3 movementProgressPosition;
+    private int movementNoProgressTicks;
+    private int movementDetourTicks;
+    private int movementDetourDirection = 1;
+    private int movementRecoveryAttempts;
     private PendingSurvivalAction pendingSurvivalAction;
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
     private final SurvivalController survival = new SurvivalController(
@@ -315,7 +326,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private static boolean isPrimitiveAction(String type) {
         return switch (type) {
-            case "equip_best", "prepare_for", "use_item", "collect_own_drops", "gather_resource", "craft_item" -> true;
+            case "equip_best", "prepare_for", "use_item", "collect_own_drops", "gather_resource", "craft_item", "place_block", "drop_item" -> true;
             default -> false;
         };
     }
@@ -403,7 +414,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private String activeTaskType() {
         if (pendingSurvivalAction != null) return pendingSurvivalAction.type();
         if (!primitives.activeType().isEmpty()) return primitives.activeType();
-        return shelter.activeType();
+        if (!shelter.activeType().isEmpty()) return shelter.activeType();
+        return movement == null ? "" : "movement";
     }
 
     private ActionResult execute(Minecraft client, LocalPlayer player, JsonObject action) {
@@ -432,14 +444,43 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     lookAt(player, target.getX(), target.getEyeY(), target.getZ());
                     yield new ActionResult(true, "已看向 " + targetName);
                 }
-                movement = new MovementTarget(targetName, target.getX(), target.getY(), target.getZ(), "follow_player".equals(string(action, "type")), 2.0);
+                setMovement(new MovementTarget(targetName, target.getX(), target.getY(), target.getZ(), "follow_player".equals(string(action, "type")), 2.0), player);
                 yield new ActionResult(true, "已开始前往 " + targetName);
             }
             case "wander" -> {
+                PrimitiveTaskController.ApprovedZone zone = primitives.approvedZone();
+                if (zone == null) yield new ActionResult(false, "refused: no explicit approved exploration AABB");
+                if (!zone.dimension().equals(client.level.dimension().identifier().toString())) {
+                    yield new ActionResult(false, "refused: approved exploration zone belongs to another dimension");
+                }
+                if (!zone.contains(player.blockPosition())) {
+                    yield new ActionResult(false, "refused: bot is outside approved exploration AABB");
+                }
                 double radius = Math.max(2, Math.min(8, number(action, "radius", 6)));
                 double angle = Math.random() * Math.PI * 2;
-                movement = new MovementTarget(null, player.getX() + Math.cos(angle) * radius, player.getY(), player.getZ() + Math.sin(angle) * radius, false, 1.2);
-                yield new ActionResult(true, "已开始安全闲逛");
+                double targetX = Math.max(zone.min().getX() + 0.5D, Math.min(zone.max().getX() + 0.5D,
+                    player.getX() + Math.cos(angle) * radius));
+                double targetZ = Math.max(zone.min().getZ() + 0.5D, Math.min(zone.max().getZ() + 0.5D,
+                    player.getZ() + Math.sin(angle) * radius));
+                setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player);
+                yield new ActionResult(true, "started approved-zone environment exploration");
+            }
+            case "return_to_zone" -> {
+                PrimitiveTaskController.ApprovedZone zone = primitives.approvedZone();
+                if (zone == null) yield new ActionResult(false, "refused: no explicit approved development AABB");
+                if (!zone.dimension().equals(client.level.dimension().identifier().toString())) {
+                    yield new ActionResult(false, "refused: approved development zone belongs to another dimension");
+                }
+                if (zone.contains(player.blockPosition())) {
+                    movement = null;
+                    clearMovement(client);
+                    yield new ActionResult(true, "already inside approved development AABB");
+                }
+                double targetX = (zone.min().getX() + zone.max().getX() + 1.0D) / 2.0D;
+                double targetZ = (zone.min().getZ() + zone.max().getZ() + 1.0D) / 2.0D;
+                double targetY = Math.max(zone.min().getY(), Math.min(zone.max().getY(), player.getY()));
+                setMovement(new MovementTarget(null, targetX, targetY, targetZ, false, 1.2), player);
+                yield new ActionResult(true, "started returning to approved development AABB");
             }
             case "attack_player" -> {
                 String targetName = string(action, "target");
@@ -479,13 +520,84 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance <= target.stopDistance()) {
             clearMovement(client);
+            movementNoProgressTicks = 0;
+            movementRecoveryAttempts = 0;
             if (!target.follow()) movement = null;
             return;
         }
-        lookAt(player, target.x(), target.y() + 1.5, target.z());
+        if (movementProgressPosition == null || player.position().distanceToSqr(movementProgressPosition) >= 0.09D) {
+            movementProgressPosition = player.position();
+            movementNoProgressTicks = 0;
+        } else {
+            movementNoProgressTicks++;
+        }
+        if (movementNoProgressTicks >= 20) {
+            movementNoProgressTicks = 0;
+            movementRecoveryAttempts++;
+            movementDetourDirection *= -1;
+            movementDetourTicks = 30;
+            if (movementRecoveryAttempts >= 5) {
+                movement = null;
+                clearMovement(client);
+                return;
+            }
+        }
+        driveToward(client, player, new Vec3(target.x(), target.y() + 1.5D, target.z()), distance > 6.0D);
+    }
+
+    private void setMovement(MovementTarget target, LocalPlayer player) {
+        movement = target;
+        movementProgressPosition = player.position();
+        movementNoProgressTicks = 0;
+        movementDetourTicks = 0;
+        movementRecoveryAttempts = 0;
+    }
+
+    private void driveToward(Minecraft client, LocalPlayer player, Vec3 target, boolean sprint) {
+        clearMovement(client);
+        lookAt(player, target.x, target.y, target.z);
+        double dx = target.x - player.getX();
+        double dz = target.z - player.getZ();
+        double length = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
+        double forwardX = dx / length;
+        double forwardZ = dz / length;
+        AABB forward = player.getBoundingBox().move(forwardX * 0.55D, 0.0D, forwardZ * 0.55D);
+        boolean clearAhead = client.level.noCollision(player, forward);
+        boolean supportedAhead = hasSafeLandingBelow(client, player, forward);
+        if ((!clearAhead || !supportedAhead || player.horizontalCollision) && movementDetourTicks <= 0) {
+            boolean headRoom = client.level.noCollision(player, forward.move(0.0D, 1.0D, 0.0D));
+            if (!clearAhead && headRoom && player.onGround()) {
+                client.options.keyUp.setDown(true);
+                client.options.keyJump.setDown(true);
+                return;
+            }
+            movementDetourTicks = 24;
+            movementDetourDirection = chooseDetourDirection(client, player, forwardX, forwardZ);
+        }
         client.options.keyUp.setDown(true);
-        client.options.keySprint.setDown(distance > 6);
-        client.options.keyJump.setDown(player.horizontalCollision);
+        client.options.keySprint.setDown(sprint && clearAhead && supportedAhead && movementDetourTicks <= 0);
+        if (movementDetourTicks > 0) {
+            if (movementDetourDirection < 0) client.options.keyLeft.setDown(true);
+            else client.options.keyRight.setDown(true);
+            client.options.keyJump.setDown(player.horizontalCollision && player.onGround());
+            movementDetourTicks--;
+        }
+    }
+
+    private int chooseDetourDirection(Minecraft client, LocalPlayer player, double forwardX, double forwardZ) {
+        double leftX = -forwardZ;
+        double leftZ = forwardX;
+        AABB left = player.getBoundingBox().move(forwardX * 0.25D + leftX * 0.7D, 0.0D, forwardZ * 0.25D + leftZ * 0.7D);
+        AABB right = player.getBoundingBox().move(forwardX * 0.25D - leftX * 0.7D, 0.0D, forwardZ * 0.25D - leftZ * 0.7D);
+        boolean leftSafe = client.level.noCollision(player, left) && hasSafeLandingBelow(client, player, left);
+        boolean rightSafe = client.level.noCollision(player, right) && hasSafeLandingBelow(client, player, right);
+        if (leftSafe != rightSafe) return leftSafe ? -1 : 1;
+        return movementDetourDirection == 0 ? 1 : -movementDetourDirection;
+    }
+
+    private static boolean hasSafeLandingBelow(Minecraft client, LocalPlayer player, AABB projected) {
+        return !client.level.noCollision(player, projected.move(0.0D, -0.7D, 0.0D))
+            || !client.level.noCollision(player, projected.move(0.0D, -1.7D, 0.0D));
     }
 
     private static void clearMovement(Minecraft client) {
@@ -543,10 +655,33 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             nearby.addProperty("name", candidate.getGameProfile().name());
             nearby.addProperty("uuid", candidate.getUUID().toString());
             nearby.addProperty("distance", distance);
+            JsonObject pointed = playerPointedBlock(client, candidate);
+            if (pointed != null) nearby.add("lookingAtBlock", pointed);
             nearbyPlayers.add(nearby);
         }
         event.add("nearbyPlayers", nearbyPlayers);
         return event;
+    }
+
+    private static JsonObject playerPointedBlock(Minecraft client, AbstractClientPlayer player) {
+        Vec3 start = player.getEyePosition();
+        Vec3 end = start.add(player.getLookAngle().scale(6.0D));
+        BlockHitResult hit = client.level.clip(new ClipContext(
+            start,
+            end,
+            ClipContext.Block.OUTLINE,
+            ClipContext.Fluid.NONE,
+            player
+        ));
+        if (hit.getType() != HitResult.Type.BLOCK || !client.level.isLoaded(hit.getBlockPos())) return null;
+        BlockPos position = hit.getBlockPos();
+        JsonObject output = new JsonObject();
+        output.addProperty("blockId", BuiltInRegistries.BLOCK.getKey(client.level.getBlockState(position).getBlock()).toString());
+        output.addProperty("x", position.getX());
+        output.addProperty("y", position.getY());
+        output.addProperty("z", position.getZ());
+        output.addProperty("distance", start.distanceTo(hit.getLocation()));
+        return output;
     }
 
     private static JsonObject baseMessage(String type) {

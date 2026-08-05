@@ -3,6 +3,7 @@ import type { AgentAction } from '../policy/policy-engine.js'
 export interface AgentDecision {
   reply: string
   action: AgentAction
+  actions?: AgentAction[]
   remember?: string
   validationError?: string
 }
@@ -27,17 +28,21 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
     case 'stop': return { action: { type: 'stop' } }
     case 'follow_player':
     case 'come_to_player':
+    case 'go_to_player':
+    case 'move_to_player':
     case 'look_at_player': {
       const target = typeof action.target === 'string' && action.target.trim()
         ? action.target.trim()
         : currentPlayerName?.trim()
       if (!target) return { action: { type: 'none' }, error: `${type} 缺少 target 玩家名` }
-      return { action: { type, target } }
+      const normalizedType = type === 'go_to_player' || type === 'move_to_player' ? 'come_to_player' : type
+      return { action: { type: normalizedType, target } as AgentAction }
     }
     case 'attack_player':
       if (typeof action.target !== 'string' || !action.target.trim()) return { action: { type: 'none' }, error: `${type} 缺少 target 玩家名` }
       return { action: { type, target: action.target.trim() } }
-    case 'wander': {
+    case 'wander':
+    case 'explore': {
       const radius = typeof action.radius === 'number' && Number.isFinite(action.radius) ? Math.max(2, Math.min(16, Math.round(action.radius))) : 6
       return { action: { type: 'wander', radius } }
     }
@@ -68,8 +73,29 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
       return { action: { type: 'gather_resource', resource: resource.trim().slice(0, 80), count: integer(action.count, 1, 64, 1) } }
     }
     case 'craft_item':
+    case 'craft':
+    case 'make_item':
       if (typeof action.itemId !== 'string' || !action.itemId.trim()) return { action: { type: 'none' }, error: 'craft_item 缺少 itemId' }
-      return { action: { type, itemId: action.itemId.trim(), count: integer(action.count, 1, 64, 1) } }
+      return { action: { type: 'craft_item', itemId: action.itemId.trim(), count: integer(action.count, 1, 64, 1) } }
+    case 'place_block':
+    case 'place_item':
+    case 'place':
+      return { action: { type: 'place_block', count: integer(action.count, 1, 16, 1), ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {}) } }
+    case 'drop_item':
+    case 'give_item':
+    case 'give_item_to_player':
+    case 'throw_item': {
+      const target = typeof action.target === 'string' && action.target.trim()
+        ? action.target.trim()
+        : currentPlayerName?.trim()
+      if (!target) return { action: { type: 'none' }, error: 'drop_item 缺少 target 玩家名' }
+      return { action: {
+        type: 'drop_item',
+        target,
+        count: integer(action.count, 1, 64, 1),
+        ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {})
+      } }
+    }
     case 'use_item':
       return { action: { type, ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {}) } }
     case 'seek_shelter': return { action: { type: 'seek_shelter' } }
@@ -98,5 +124,16 @@ export function parseAgentDecision(text: string, options: { currentPlayerName?: 
   const reply = cleanChat(root.reply)
   const remember = cleanChat(root.remember)
   const normalized = normalizeAction(root.action, options.currentPlayerName)
-  return { reply, action: normalized.action, ...(remember ? { remember } : {}), ...(normalized.error ? { validationError: normalized.error } : {}) }
+  const rawActions = Array.isArray(root.actions) ? root.actions.slice(0, 12) : []
+  const normalizedActions = rawActions.map(value => normalizeAction(value, options.currentPlayerName))
+  const firstError = normalizedActions.find(result => result.error)?.error
+  const actions = normalizedActions.map(result => result.action).filter(action => action.type !== 'none')
+  const primary = actions[0] ?? normalized.action
+  return {
+    reply,
+    action: primary,
+    ...(actions.length > 0 ? { actions } : {}),
+    ...(remember ? { remember } : {}),
+    ...((firstError ?? (actions.length === 0 ? normalized.error : undefined)) ? { validationError: firstError ?? normalized.error } : {})
+  }
 }

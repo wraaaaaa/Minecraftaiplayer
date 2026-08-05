@@ -128,6 +128,21 @@ test('known and shaped secrets are detected without returning their values', asy
   assert.equal(serialized.includes('K'.repeat(24)), false)
 })
 
+test('repository audit also checks non-ignored untracked files before staging', async (t) => {
+  const root = await fixture()
+  t.after(async () => rm(root, { recursive: true, force: true }))
+  const knownSecret = ['sk', 'U'.repeat(32)].join('-')
+  await put(root, '.env', `DEEPSEEK_API_KEY=${knownSecret}\n`)
+  await put(root, 'new-untracked-source.ts', `export const accidental = '${knownSecret}'\n`)
+
+  const { auditRepository } = await importModule(pathToFileURL(scriptFile).href)
+  const result = await auditRepository({ cwd: root })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.issues.some(issue => issue.code === 'known_secret_value' && issue.path === 'new-untracked-source.ts'), true)
+  assert.equal(JSON.stringify(result).includes(knownSecret), false)
+})
+
 test('CLI exits nonzero for findings and emits structured JSON without secret text', async (t) => {
   const root = await fixture()
   t.after(async () => rm(root, { recursive: true, force: true }))

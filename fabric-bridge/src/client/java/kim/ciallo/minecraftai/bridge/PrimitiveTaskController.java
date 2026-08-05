@@ -22,8 +22,11 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.StackedItemContents;
 import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
 import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.component.ItemAttributeModifiers;
 import net.minecraft.world.item.component.Tool;
@@ -37,7 +40,9 @@ import net.minecraft.world.item.crafting.display.SlotDisplayContext;
 import net.minecraft.world.item.equipment.Equippable;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -67,6 +72,8 @@ public final class PrimitiveTaskController {
     private static final int COLLECT_TIMEOUT_TICKS = 600;
     private static final int GATHER_TIMEOUT_TICKS = 1_200;
     private static final int CRAFT_TIMEOUT_TICKS = 400;
+    private static final int PLACE_TIMEOUT_TICKS = 600;
+    private static final int DROP_TIMEOUT_TICKS = 600;
     private static final int EQUIP_TIMEOUT_TICKS = 240;
     private static final long OWNED_DROP_TTL_MS = 5 * 60_000L;
     private static final List<EquipmentSlot> ARMOR_SLOTS = List.of(
@@ -134,6 +141,8 @@ public final class PrimitiveTaskController {
                 case "collect_own_drops" -> createCollectTask(id, action, client);
                 case "gather_resource" -> createGatherTask(id, action, client);
                 case "craft_item" -> createCraftTask(id, action, client);
+                case "place_block" -> createPlaceTask(id, action, client);
+                case "drop_item" -> createDropTask(id, action, client);
                 default -> null;
             };
         } catch (IllegalArgumentException error) {
@@ -141,7 +150,7 @@ public final class PrimitiveTaskController {
             return false;
         }
         if (task == null) {
-            if (!Set.of("collect_own_drops", "gather_resource", "craft_item").contains(type)) {
+            if (!Set.of("collect_own_drops", "gather_resource", "craft_item", "place_block", "drop_item").contains(type)) {
                 results.add(new TaskResult(id, false, "unsupported primitive: " + type));
             }
             return false;
@@ -263,7 +272,12 @@ public final class PrimitiveTaskController {
             return null;
         }
         LocalPlayer player = client.player;
-        AbstractClientPlayer nearbyPlayer = nearestUnsafePlayer(client, player, null);
+        String authorizedPlayer = optionalString(action, "authorizedPlayer", null);
+        if (authorizedPlayer != null && !authorizedPlayer.matches("[A-Za-z0-9_]{1,16}")) {
+            results.add(new TaskResult(id, false, "invalid authorizedPlayer name"));
+            return null;
+        }
+        AbstractClientPlayer nearbyPlayer = nearestUnsafePlayer(client, player, null, authorizedPlayer);
         if (nearbyPlayer != null) {
             results.add(new TaskResult(id, false, "refused: player "
                 + nearbyPlayer.getGameProfile().name() + " is only "
@@ -274,7 +288,26 @@ public final class PrimitiveTaskController {
         String resource = requiredString(action, "resource");
         int count = integer(action, "count", 1, 64, 1);
         ResourceMatcher matcher = ResourceMatcher.parse(resource);
-        return new GatherResourceTask(id, matcher, count, approvedZone, tick);
+        BlockPos requestedTarget = null;
+        if (action.has("targetBlock") && action.get("targetBlock").isJsonObject()) {
+            JsonObject target = action.getAsJsonObject("targetBlock");
+            if (!target.has("x") || !target.has("y") || !target.has("z")) {
+                results.add(new TaskResult(id, false, "invalid targetBlock coordinates"));
+                return null;
+            }
+            requestedTarget = new BlockPos(target.get("x").getAsInt(), target.get("y").getAsInt(), target.get("z").getAsInt());
+            if (count != 1 || !approvedZone.contains(requestedTarget)) {
+                results.add(new TaskResult(id, false, "targeted break must be one block inside approved AABB"));
+                return null;
+            }
+            if (!client.level.isLoaded(requestedTarget)
+                || client.level.getBlockEntity(requestedTarget) != null
+                || !matcher.matches(client.level.getBlockState(requestedTarget))) {
+                results.add(new TaskResult(id, false, "player-pointed block changed, is unloaded, or does not match " + matcher.description()));
+                return null;
+            }
+        }
+        return new GatherResourceTask(id, matcher, count, approvedZone, authorizedPlayer, requestedTarget, tick);
     }
 
     private CraftItemTask createCraftTask(String id, JsonObject action, Minecraft client) {
@@ -285,12 +318,60 @@ public final class PrimitiveTaskController {
             results.add(new TaskResult(id, false, "craft_item requires the normal player 2x2 inventory with an empty cursor"));
             return null;
         }
-        RecipeDisplayEntry recipe = findCraftableTwoByTwoRecipe(client, player, targetItemId);
+        RecipeDisplayEntry recipe = findCraftableRecipe(client, player, targetItemId, 2);
+        boolean requiresTable = false;
         if (recipe == null) {
-            results.add(new TaskResult(id, false, "no unlocked craftable 2x2 recipe for " + targetItemId));
+            recipe = findCraftableRecipe(client, player, targetItemId, 3);
+            requiresTable = recipe != null;
+        }
+        if (recipe == null) {
+            results.add(new TaskResult(id, false, "no unlocked craftable 2x2/3x3 recipe with available ingredients for " + targetItemId));
             return null;
         }
-        return new CraftItemTask(id, targetItemId, count, recipe, tick);
+        if (requiresTable && approvedZone == null) {
+            results.add(new TaskResult(id, false, "3x3 crafting requires an approved AABB containing a crafting table"));
+            return null;
+        }
+        return new CraftItemTask(id, targetItemId, count, recipe, requiresTable, approvedZone, tick);
+    }
+
+    private PlaceBlockTask createPlaceTask(String id, JsonObject action, Minecraft client) {
+        if (approvedZone == null) {
+            results.add(new TaskResult(id, false, "refused: no explicit approved placement AABB"));
+            return null;
+        }
+        String dimension = client.level.dimension().identifier().toString();
+        if (!approvedZone.dimension().equals(dimension)) {
+            results.add(new TaskResult(id, false, "refused: approved zone belongs to another dimension"));
+            return null;
+        }
+        String requestedItemId = optionalId(action, "itemId");
+        int count = integer(action, "count", 1, 16, 1);
+        PlaceableCandidate material = findPlaceableCandidate(client, client.player, requestedItemId);
+        if (material == null) {
+            results.add(new TaskResult(id, false, requestedItemId == null
+                ? "no ordinary safe full-block material in inventory"
+                : "requested item is missing or is not an ordinary safe full block: " + requestedItemId));
+            return null;
+        }
+        return new PlaceBlockTask(id, requestedItemId, count, approvedZone, tick);
+    }
+
+    private DropItemTask createDropTask(String id, JsonObject action, Minecraft client) {
+        String target = requiredString(action, "target");
+        if (!target.matches("[A-Za-z0-9_]{1,16}")) {
+            results.add(new TaskResult(id, false, "invalid target player name"));
+            return null;
+        }
+        String requestedItemId = optionalId(action, "itemId");
+        int count = integer(action, "count", 1, 64, 1);
+        if (findInventoryItemSlot(client.player, requestedItemId) < 0) {
+            results.add(new TaskResult(id, false, requestedItemId == null
+                ? "inventory has no droppable item"
+                : "requested item is not in inventory: " + requestedItemId));
+            return null;
+        }
+        return new DropItemTask(id, target, requestedItemId, count, tick);
     }
 
     private abstract class PrimitiveTask {
@@ -709,6 +790,8 @@ public final class PrimitiveTaskController {
         private final ResourceMatcher matcher;
         private final int requestedCount;
         private final ApprovedZone taskZone;
+        private final String authorizedPlayer;
+        private final BlockPos requestedTarget;
         private final Set<BlockPos> completedPositions = new HashSet<>();
         private final Set<Integer> dropIdsBefore = new HashSet<>();
         private Phase phase = Phase.SEEK;
@@ -725,18 +808,25 @@ public final class PrimitiveTaskController {
         private StackFingerprint toolCandidate;
         private StackFingerprint toolDisplaced;
         private int toolSwapStateId = -1;
+        private final int baselineInventoryCount;
 
         GatherResourceTask(
             String id,
             ResourceMatcher matcher,
             int requestedCount,
             ApprovedZone taskZone,
+            String authorizedPlayer,
+            BlockPos requestedTarget,
             long startedTick
         ) {
             super(id, "gather_resource", startedTick, GATHER_TIMEOUT_TICKS);
             this.matcher = matcher;
             this.requestedCount = requestedCount;
             this.taskZone = taskZone;
+            this.authorizedPlayer = authorizedPlayer;
+            this.requestedTarget = requestedTarget == null ? null : requestedTarget.immutable();
+            LocalPlayer player = Minecraft.getInstance().player;
+            baselineInventoryCount = player == null ? 0 : totalInventoryCount(player);
         }
 
         @Override
@@ -746,7 +836,7 @@ public final class PrimitiveTaskController {
                 finish(client, this, false, "left approved resource dimension");
                 return;
             }
-            AbstractClientPlayer nearbyPlayer = nearestUnsafePlayer(client, player, target);
+            AbstractClientPlayer nearbyPlayer = nearestUnsafePlayer(client, player, target, authorizedPlayer);
             if (nearbyPlayer != null) {
                 finish(client, this, false, nearbyPlayerCancellationDetail(nearbyPlayer, player, target));
                 return;
@@ -760,8 +850,15 @@ public final class PrimitiveTaskController {
                 }
                 if (tick - phaseStartedTick < 10L) return;
                 if (completedCount >= requestedCount) {
+                    int inventoryDelta = Math.max(0, totalInventoryCount(player) - baselineInventoryCount);
+                    if (registeredDropCount == 0 && inventoryDelta == 0) {
+                        finish(client, this, false, "verified blocks broke but neither inventory growth nor owned drops were observed; resource="
+                            + matcher.description());
+                        return;
+                    }
                     finish(client, this, true, "verified_broken_blocks=" + completedCount
                         + "; registered_owned_drops=" + registeredDropCount
+                        + "; inventory_delta=" + inventoryDelta
                         + "; resource=" + matcher.description());
                 } else {
                     phase = Phase.SEEK;
@@ -771,7 +868,9 @@ public final class PrimitiveTaskController {
             }
 
             if (phase == Phase.SEEK) {
-                target = findResourceTarget(client, player, matcher, completedPositions, taskZone);
+                target = requestedTarget != null && completedPositions.isEmpty()
+                    ? requestedTarget
+                    : findResourceTarget(client, player, matcher, completedPositions, taskZone);
                 if (target == null) {
                     finish(client, this, false, "no matching loaded block in approved AABB; verified_broken_blocks="
                         + completedCount + "; resource=" + matcher.description());
@@ -785,7 +884,7 @@ public final class PrimitiveTaskController {
                 lastProgressTick = tick;
             }
 
-            nearbyPlayer = nearestUnsafePlayer(client, player, target);
+            nearbyPlayer = nearestUnsafePlayer(client, player, target, authorizedPlayer);
             if (nearbyPlayer != null) {
                 finish(client, this, false, nearbyPlayerCancellationDetail(nearbyPlayer, player, target));
                 return;
@@ -796,7 +895,10 @@ public final class PrimitiveTaskController {
                 return;
             }
             BlockState current = client.level.getBlockState(target);
-            if (!blockId(current).equals(expectedBlockId) || !matcher.matches(current)) {
+            // BREAK owns the server-change postcondition below. Handling it here would mistake a
+            // successful break for an externally changed target, seek another block, and keep
+            // mining until the whole approved area is exhausted.
+            if (phase != Phase.BREAK && (!blockId(current).equals(expectedBlockId) || !matcher.matches(current))) {
                 completedPositions.add(target.immutable());
                 phase = Phase.SEEK;
                 return;
@@ -880,7 +982,9 @@ public final class PrimitiveTaskController {
                     phaseStartedTick = tick;
                     return;
                 }
-                moveToward(client, player, Vec3.atCenterOf(target), 2.5D);
+                // Move close enough that ordinary block drops are normally picked up
+                // during the server-confirmed break, including a one-block depression.
+                moveToward(client, player, Vec3.atCenterOf(target), 1.85D);
                 if (player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
                     lastProgressPosition = player.position();
                     lastProgressTick = tick;
@@ -915,22 +1019,287 @@ public final class PrimitiveTaskController {
         }
     }
 
+    private final class DropItemTask extends PrimitiveTask {
+        private final String targetName;
+        private final String requestedItemId;
+        private final int requestedCount;
+        private final int baselineCount;
+        private int previousCount;
+        private long lastClickTick;
+        private Vec3 lastProgressPosition;
+        private long lastProgressTick;
+
+        DropItemTask(String id, String targetName, String requestedItemId, int requestedCount, long startedTick) {
+            super(id, "drop_item", startedTick, DROP_TIMEOUT_TICKS);
+            this.targetName = targetName;
+            this.requestedItemId = requestedItemId;
+            this.requestedCount = requestedCount;
+            LocalPlayer player = Minecraft.getInstance().player;
+            this.baselineCount = player == null ? 0 : requestedItemId == null
+                ? totalInventoryCount(player)
+                : inventoryCount(player, requestedItemId);
+            this.previousCount = baselineCount;
+        }
+
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            AbstractClientPlayer target = client.level.players().stream()
+                .filter(candidate -> candidate != player && candidate.isAlive()
+                    && candidate.getGameProfile().name().equalsIgnoreCase(targetName))
+                .findFirst().orElse(null);
+            if (target == null) {
+                finish(client, this, false, "target player is no longer nearby: " + targetName);
+                return;
+            }
+            double distance = player.distanceTo(target);
+            if (distance > 3.2D) {
+                moveToward(client, player, target.position(), 2.5D);
+                if (lastProgressPosition == null || player.position().distanceToSqr(lastProgressPosition) >= 0.16D) {
+                    lastProgressPosition = player.position();
+                    lastProgressTick = tick;
+                } else if (tick - lastProgressTick > 80L) {
+                    finish(client, this, false, "unable to navigate around obstacles to recipient " + targetName);
+                }
+                return;
+            }
+            clearMovement(client);
+            if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+                finish(client, this, false, "drop_item requires normal inventory menu with empty cursor");
+                return;
+            }
+            int currentCount = requestedItemId == null ? totalInventoryCount(player) : inventoryCount(player, requestedItemId);
+            int dropped = baselineCount - currentCount;
+            if (dropped >= requestedCount) {
+                finish(client, this, true, "verified_dropped_count=" + dropped + "; recipient=" + targetName
+                    + "; itemId=" + (requestedItemId == null ? "automatic" : requestedItemId));
+                return;
+            }
+            if (currentCount < previousCount) {
+                previousCount = currentCount;
+                lastClickTick = tick;
+                return;
+            }
+            if (tick - lastClickTick < 3L) return;
+            int slot = findInventoryItemSlot(player, requestedItemId);
+            if (slot < 0) {
+                finish(client, this, false, "item exhausted after verified_dropped_count=" + dropped + "; requested=" + requestedCount);
+                return;
+            }
+            lookAt(player, target.getX(), target.getEyeY(), target.getZ());
+            client.gameMode.handleContainerInput(
+                player.inventoryMenu.containerId,
+                inventoryMenuSlot(slot),
+                0,
+                ContainerInput.THROW,
+                player
+            );
+            lastClickTick = tick;
+        }
+    }
+
+    private final class PlaceBlockTask extends PrimitiveTask {
+        private enum Phase { PREPARE, WAIT_SWAP, PLACE, CROUCH_READY, VERIFY }
+
+        private final String requestedItemId;
+        private final int requestedCount;
+        private final ApprovedZone taskZone;
+        private final Set<BlockPos> completedPositions = new HashSet<>();
+        private Phase phase = Phase.PREPARE;
+        private long phaseStartedTick;
+        private PlaceableCandidate material;
+        private PlacementPlan placement;
+        private int sourceSlot = -1;
+        private int hotbarSlot = -1;
+        private int swapStateId = -1;
+        private StackFingerprint candidateFingerprint;
+        private StackFingerprint displacedFingerprint;
+        private int completedCount;
+        private int stableTicks;
+        private String lastInteraction = "none";
+
+        PlaceBlockTask(String id, String requestedItemId, int requestedCount, ApprovedZone taskZone, long startedTick) {
+            super(id, "place_block", startedTick, PLACE_TIMEOUT_TICKS);
+            this.requestedItemId = requestedItemId;
+            this.requestedCount = requestedCount;
+            this.taskZone = taskZone;
+        }
+
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            if (!taskZone.dimension().equals(client.level.dimension().identifier().toString())) {
+                finish(client, this, false, "left approved placement dimension");
+                return;
+            }
+            if (completedCount >= requestedCount) {
+                finish(client, this, true, "verified_placed_blocks=" + completedCount
+                    + "; requested_item=" + (requestedItemId == null ? "automatic_safe_block" : requestedItemId));
+                return;
+            }
+
+            if (phase == Phase.WAIT_SWAP) {
+                if (tick - phaseStartedTick >= 2L
+                    && player.inventoryMenu.getStateId() != swapStateId
+                    && candidateFingerprint.matches(player.getInventory().getItem(hotbarSlot))
+                    && displacedFingerprint.matches(player.getInventory().getItem(sourceSlot))) {
+                    selectHotbar(player, hotbarSlot);
+                    phase = Phase.PLACE;
+                    phaseStartedTick = tick;
+                    return;
+                }
+                if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
+                    finish(client, this, false, "server did not confirm placement material swap");
+                }
+                return;
+            }
+
+            if (phase == Phase.VERIFY) {
+                BlockState observed = client.level.getBlockState(placement.target());
+                if (observed.is(material.item().getBlock()) && !observed.canBeReplaced()
+                    && client.level.getBlockEntity(placement.target()) == null) {
+                    stableTicks++;
+                    if (stableTicks >= 2) {
+                        completedPositions.add(placement.target().immutable());
+                        completedCount++;
+                        stableTicks = 0;
+                        placement = null;
+                        material = null;
+                        phase = Phase.PREPARE;
+                        client.options.keyShift.setDown(false);
+                    }
+                    return;
+                }
+                stableTicks = 0;
+                if (!observed.canBeReplaced() || client.level.getBlockEntity(placement.target()) != null) {
+                    finish(client, this, false, "server reported unexpected block after placement; target="
+                        + placement.target().toShortString() + "; observed=" + blockId(observed));
+                    return;
+                }
+                if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
+                    finish(client, this, false, "server did not confirm place_block postcondition; target="
+                        + placement.target().toShortString() + "; interaction=" + lastInteraction);
+                }
+                return;
+            }
+
+            if (phase == Phase.PREPARE) {
+                material = findPlaceableCandidate(client, player, requestedItemId);
+                if (material == null) {
+                    finish(client, this, false, "safe placement material exhausted; verified_placed_blocks=" + completedCount);
+                    return;
+                }
+                if (!Inventory.isHotbarSlot(material.inventorySlot())) {
+                    if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+                        finish(client, this, false, "placement material swap requires normal inventory with empty cursor");
+                        return;
+                    }
+                    sourceSlot = material.inventorySlot();
+                    hotbarSlot = chooseUseSwapDestination(player);
+                    candidateFingerprint = StackFingerprint.of(material.stack());
+                    displacedFingerprint = StackFingerprint.of(player.getInventory().getItem(hotbarSlot));
+                    swapStateId = player.inventoryMenu.getStateId();
+                    client.gameMode.handleContainerInput(
+                        player.inventoryMenu.containerId,
+                        inventoryMenuSlot(sourceSlot),
+                        hotbarSlot,
+                        ContainerInput.SWAP,
+                        player
+                    );
+                    phase = Phase.WAIT_SWAP;
+                    phaseStartedTick = tick;
+                    return;
+                }
+                selectHotbar(player, material.inventorySlot());
+                phase = Phase.PLACE;
+            }
+
+            if (phase == Phase.PLACE) {
+                ItemStack selected = player.getInventory().getSelectedItem();
+                if (selected.isEmpty() || !(selected.getItem() instanceof BlockItem selectedItem)
+                    || selectedItem != material.item()) {
+                    phase = Phase.PREPARE;
+                    return;
+                }
+                placement = findSimplePlacement(client, player, selectedItem, taskZone, completedPositions);
+                if (placement == null) {
+                    finish(client, this, false, "no safe reachable replaceable target in approved placement AABB; verified_placed_blocks="
+                        + completedCount);
+                    return;
+                }
+                lookAt(player, placement.hit().getLocation().x, placement.hit().getLocation().y, placement.hit().getLocation().z);
+                client.options.keyShift.setDown(true);
+                phase = Phase.CROUCH_READY;
+                phaseStartedTick = tick;
+                return;
+            }
+
+            if (phase == Phase.CROUCH_READY) {
+                if (tick <= phaseStartedTick) return;
+                ItemStack selected = player.getInventory().getSelectedItem();
+                if (selected.isEmpty() || selected.getItem() != material.item()) {
+                    client.options.keyShift.setDown(false);
+                    phase = Phase.PREPARE;
+                    return;
+                }
+                if (!taskZone.contains(placement.target())
+                    || !client.level.getBlockState(placement.target()).canBeReplaced()
+                    || client.level.getBlockEntity(placement.target()) != null) {
+                    finish(client, this, false, "placement target changed before interaction");
+                    return;
+                }
+                InteractionResult interaction = client.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, placement.hit());
+                lastInteraction = interaction.getClass().getSimpleName();
+                if (!interaction.consumesAction()) {
+                    finish(client, this, false, "placement interaction rejected: " + lastInteraction);
+                    return;
+                }
+                player.swing(InteractionHand.MAIN_HAND);
+                phase = Phase.VERIFY;
+                phaseStartedTick = tick;
+                stableTicks = 0;
+            }
+        }
+
+        @Override
+        void cleanup(Minecraft client) {
+            if (client != null) client.options.keyShift.setDown(false);
+            super.cleanup(client);
+        }
+    }
+
     private final class CraftItemTask extends PrimitiveTask {
-        private enum Phase { PLACE_RECIPE, WAIT_RESULT, WAIT_INVENTORY }
+        private enum Phase { SEEK_TABLE, MOVE_TABLE, OPEN_TABLE, WAIT_MENU, PLACE_RECIPE, WAIT_RESULT, WAIT_INVENTORY }
 
         private final String targetItemId;
         private final int requestedCount;
+        private final boolean requiresTable;
+        private final ApprovedZone taskZone;
         private RecipeDisplayEntry recipe;
         private final int baselineCount;
         private int previousCount;
-        private Phase phase = Phase.PLACE_RECIPE;
+        private Phase phase;
         private long phaseStartedTick;
+        private BlockPos craftingTable;
+        private Vec3 lastProgressPosition;
+        private long lastProgressTick;
 
-        CraftItemTask(String id, String targetItemId, int requestedCount, RecipeDisplayEntry recipe, long startedTick) {
+        CraftItemTask(
+            String id,
+            String targetItemId,
+            int requestedCount,
+            RecipeDisplayEntry recipe,
+            boolean requiresTable,
+            ApprovedZone taskZone,
+            long startedTick
+        ) {
             super(id, "craft_item", startedTick, CRAFT_TIMEOUT_TICKS);
             this.targetItemId = targetItemId;
             this.requestedCount = requestedCount;
             this.recipe = recipe;
+            this.requiresTable = requiresTable;
+            this.taskZone = taskZone;
+            phase = requiresTable ? Phase.SEEK_TABLE : Phase.PLACE_RECIPE;
             LocalPlayer player = Minecraft.getInstance().player;
             baselineCount = player == null ? 0 : inventoryCount(player, targetItemId);
             previousCount = baselineCount;
@@ -939,38 +1308,111 @@ public final class PrimitiveTaskController {
         @Override
         void tick(Minecraft client) {
             LocalPlayer player = client.player;
-            if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
-                finish(client, this, false, "2x2 inventory crafting context changed");
-                return;
-            }
             int currentCount = inventoryCount(player, targetItemId);
             if (currentCount - baselineCount >= requestedCount) {
                 finish(client, this, true, "verified_crafted_count=" + (currentCount - baselineCount)
-                    + "; itemId=" + targetItemId);
+                    + "; itemId=" + targetItemId + "; grid=" + (requiresTable ? "3x3" : "2x2"));
+                return;
+            }
+
+            if (requiresTable && phase == Phase.SEEK_TABLE) {
+                if (!taskZone.dimension().equals(client.level.dimension().identifier().toString())) {
+                    finish(client, this, false, "left approved crafting-table dimension");
+                    return;
+                }
+                craftingTable = findCraftingTable(client, player, taskZone);
+                if (craftingTable == null) {
+                    finish(client, this, false, "no loaded crafting table inside approved AABB within 8 blocks");
+                    return;
+                }
+                phase = Phase.MOVE_TABLE;
+                phaseStartedTick = tick;
+                lastProgressPosition = player.position();
+                lastProgressTick = tick;
+            }
+
+            if (requiresTable && phase == Phase.MOVE_TABLE) {
+                if (!taskZone.contains(craftingTable) || !client.level.getBlockState(craftingTable).is(Blocks.CRAFTING_TABLE)) {
+                    finish(client, this, false, "crafting table changed or left approved AABB");
+                    return;
+                }
+                if (player.isWithinBlockInteractionRange(craftingTable, 0.0D)) {
+                    clearMovement(client);
+                    phase = Phase.OPEN_TABLE;
+                } else {
+                    moveToward(client, player, Vec3.atCenterOf(craftingTable), 2.5D);
+                    if (player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
+                        lastProgressPosition = player.position();
+                        lastProgressTick = tick;
+                    } else if (tick - lastProgressTick > 60L) {
+                        finish(client, this, false, "unable to reach approved crafting table " + craftingTable.toShortString());
+                    }
+                    return;
+                }
+            }
+
+            if (requiresTable && phase == Phase.OPEN_TABLE) {
+                if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+                    finish(client, this, false, "cannot open crafting table while another menu/cursor is active");
+                    return;
+                }
+                Vec3 hitLocation = Vec3.atCenterOf(craftingTable).add(0.0D, 0.5D, 0.0D);
+                BlockHitResult hit = new BlockHitResult(hitLocation, Direction.UP, craftingTable, false);
+                lookAt(player, hitLocation.x, hitLocation.y, hitLocation.z);
+                InteractionResult interaction = client.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
+                if (!interaction.consumesAction()) {
+                    finish(client, this, false, "server rejected crafting table interaction: " + interaction.getClass().getSimpleName());
+                    return;
+                }
+                player.swing(InteractionHand.MAIN_HAND);
+                phase = Phase.WAIT_MENU;
+                phaseStartedTick = tick;
+                return;
+            }
+
+            if (requiresTable && phase == Phase.WAIT_MENU) {
+                if (player.containerMenu instanceof CraftingMenu) {
+                    phase = Phase.PLACE_RECIPE;
+                    phaseStartedTick = tick;
+                    return;
+                }
+                if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
+                    finish(client, this, false, "server did not open 3x3 crafting menu");
+                }
+                return;
+            }
+
+            boolean validMenu = requiresTable
+                ? player.containerMenu instanceof CraftingMenu && player.containerMenu.getCarried().isEmpty()
+                : player.containerMenu == player.inventoryMenu && player.inventoryMenu.getCarried().isEmpty();
+            if (!validMenu) {
+                finish(client, this, false, (requiresTable ? "3x3 table" : "2x2 inventory") + " crafting context changed");
                 return;
             }
 
             if (phase == Phase.PLACE_RECIPE) {
-                RecipeDisplayEntry currentRecipe = findCraftableTwoByTwoRecipe(client, player, targetItemId);
+                RecipeDisplayEntry currentRecipe = findCraftableRecipe(client, player, targetItemId, requiresTable ? 3 : 2);
                 if (currentRecipe == null) {
-                    finish(client, this, false, "ingredients exhausted or unlocked 2x2 recipe unavailable; verified_crafted_count="
+                    finish(client, this, false, "ingredients exhausted or unlocked recipe unavailable; verified_crafted_count="
                         + (currentCount - baselineCount));
                     return;
                 }
                 recipe = currentRecipe;
                 previousCount = currentCount;
-                client.gameMode.handlePlaceRecipe(player.inventoryMenu.containerId, recipe.id(), false);
+                client.gameMode.handlePlaceRecipe(player.containerMenu.containerId, recipe.id(), false);
                 phase = Phase.WAIT_RESULT;
                 phaseStartedTick = tick;
                 return;
             }
 
             if (phase == Phase.WAIT_RESULT) {
-                ItemStack result = player.inventoryMenu.getResultSlot().getItem();
+                ItemStack result = requiresTable
+                    ? ((CraftingMenu) player.containerMenu).getResultSlot().getItem()
+                    : player.inventoryMenu.getResultSlot().getItem();
                 if (!result.isEmpty() && itemId(result).equals(targetItemId)) {
                     client.gameMode.handleContainerInput(
-                        player.inventoryMenu.containerId,
-                        InventoryMenu.RESULT_SLOT,
+                        player.containerMenu.containerId,
+                        requiresTable ? CraftingMenu.RESULT_SLOT : InventoryMenu.RESULT_SLOT,
                         0,
                         ContainerInput.QUICK_MOVE,
                         player
@@ -980,7 +1422,7 @@ public final class PrimitiveTaskController {
                     return;
                 }
                 if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
-                    finish(client, this, false, "server did not populate 2x2 result slot for " + targetItemId);
+                    finish(client, this, false, "server did not populate crafting result slot for " + targetItemId);
                 }
                 return;
             }
@@ -995,6 +1437,15 @@ public final class PrimitiveTaskController {
                     finish(client, this, false, "server did not confirm crafted result transfer for " + targetItemId);
                 }
             }
+        }
+
+        @Override
+        void cleanup(Minecraft client) {
+            if (requiresTable && client != null && client.player != null
+                && client.player.containerMenu instanceof CraftingMenu) {
+                client.player.closeContainer();
+            }
+            super.cleanup(client);
         }
     }
 
@@ -1126,6 +1577,16 @@ public final class PrimitiveTaskController {
             : inventorySlot;
     }
 
+    private static int findInventoryItemSlot(LocalPlayer player, String requestedItemId) {
+        List<ItemStack> items = player.getInventory().getNonEquipmentItems();
+        for (int slot = 0; slot < items.size() && slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = items.get(slot);
+            if (stack.isEmpty()) continue;
+            if (requestedItemId == null || requestedItemId.equals(itemId(stack))) return slot;
+        }
+        return -1;
+    }
+
     private static int armorMenuSlot(EquipmentSlot slot) {
         return switch (slot) {
             case HEAD -> InventoryMenu.ARMOR_SLOT_START;
@@ -1134,6 +1595,103 @@ public final class PrimitiveTaskController {
             case FEET -> InventoryMenu.ARMOR_SLOT_START + 3;
             default -> throw new IllegalArgumentException("not an armor slot: " + slot);
         };
+    }
+
+    private static PlaceableCandidate findPlaceableCandidate(
+        Minecraft client,
+        LocalPlayer player,
+        String requestedItemId
+    ) {
+        List<ItemStack> items = player.getInventory().getNonEquipmentItems();
+        PlaceableCandidate best = null;
+        for (int slot = 0; slot < items.size() && slot < Inventory.INVENTORY_SIZE; slot++) {
+            ItemStack stack = items.get(slot);
+            if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) continue;
+            String id = itemId(stack);
+            if (requestedItemId != null && !requestedItemId.equals(id)) continue;
+            if (!ordinaryPlacementMaterial(client, player, blockItem)) continue;
+            PlaceableCandidate candidate = new PlaceableCandidate(slot, id, blockItem, stack);
+            if (best == null
+                || (Inventory.isHotbarSlot(slot) && !Inventory.isHotbarSlot(best.inventorySlot()))
+                || (Inventory.isHotbarSlot(slot) == Inventory.isHotbarSlot(best.inventorySlot())
+                    && stack.getCount() > best.stack().getCount())) {
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private static boolean ordinaryPlacementMaterial(Minecraft client, LocalPlayer player, BlockItem item) {
+        Block block = item.getBlock();
+        BlockState state = block.defaultBlockState();
+        if (state.hasBlockEntity() || !state.isCollisionShapeFullBlock(client.level, player.blockPosition())) return false;
+        String path = BuiltInRegistries.BLOCK.getKey(block).getPath();
+        return Set.of(
+            "dirt", "coarse_dirt", "rooted_dirt", "grass_block", "stone", "cobblestone",
+            "granite", "diorite", "andesite", "deepslate", "cobbled_deepslate", "tuff",
+            "calcite", "netherrack", "end_stone", "bricks", "mud_bricks", "crafting_table"
+        ).contains(path)
+            || path.endsWith("_bricks")
+            || path.endsWith("_log")
+            || path.endsWith("_wood")
+            || path.endsWith("_planks")
+            || path.endsWith("_wool")
+            || path.endsWith("_log")
+            || path.endsWith("_wood");
+    }
+
+    private static PlacementPlan findSimplePlacement(
+        Minecraft client,
+        LocalPlayer player,
+        BlockItem item,
+        ApprovedZone zone,
+        Set<BlockPos> excluded
+    ) {
+        BlockPos center = player.blockPosition();
+        List<BlockPos> candidates = new ArrayList<>();
+        for (int dy = -1; dy <= 1; dy++) {
+            for (int dx = -3; dx <= 3; dx++) {
+                for (int dz = -3; dz <= 3; dz++) {
+                    if (Math.abs(dx) + Math.abs(dz) < 1) continue;
+                    candidates.add(center.offset(dx, dy, dz));
+                }
+            }
+        }
+        candidates.sort(Comparator
+            .comparingInt((BlockPos position) -> Math.abs(position.getY() - center.getY()))
+            .thenComparingDouble(position -> player.distanceToSqr(Vec3.atCenterOf(position))));
+        ItemStack selected = player.getInventory().getSelectedItem();
+        for (BlockPos target : candidates) {
+            if (excluded.contains(target) || !zone.contains(target) || !client.level.isLoaded(target)) continue;
+            BlockState before = client.level.getBlockState(target);
+            if (!before.canBeReplaced() || client.level.getBlockEntity(target) != null) continue;
+            for (Direction face : List.of(Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, Direction.DOWN)) {
+                BlockPos support = target.relative(face.getOpposite());
+                if (!client.level.isLoaded(support) || !player.isWithinBlockInteractionRange(support, 0.0D)) continue;
+                BlockState supportState = client.level.getBlockState(support);
+                if (supportState.canBeReplaced() || client.level.getBlockEntity(support) != null
+                    || !supportState.isFaceSturdy(client.level, support, face)) continue;
+                Vec3 hitLocation = Vec3.atCenterOf(support).add(
+                    face.getStepX() * 0.5D,
+                    face.getStepY() * 0.5D,
+                    face.getStepZ() * 0.5D
+                );
+                BlockHitResult hit = new BlockHitResult(hitLocation, face, support, false);
+                BlockPlaceContext context = item.updatePlacementContext(new BlockPlaceContext(
+                    player,
+                    InteractionHand.MAIN_HAND,
+                    selected,
+                    hit
+                ));
+                if (context == null || !context.canPlace() || !context.getClickedPos().equals(target)) continue;
+                BlockState predicted = item.getBlock().getStateForPlacement(context);
+                if (predicted == null || !predicted.canSurvive(client.level, target)
+                    || !client.level.isUnobstructed(predicted, target, CollisionContext.placementContext(player))) continue;
+                if (!player.mayUseItemAt(support, face, selected)) continue;
+                return new PlacementPlan(target.immutable(), support.immutable(), face, hit);
+            }
+        }
+        return null;
     }
 
     private static ItemCandidate bestArmorCandidate(LocalPlayer player, EquipmentSlot slot) {
@@ -1351,6 +1909,10 @@ public final class PrimitiveTaskController {
         return selected.isEmpty() ? "none" : itemId(selected) + "@" + player.getInventory().getSelectedSlot();
     }
 
+    private record PlaceableCandidate(int inventorySlot, String itemId, BlockItem item, ItemStack stack) { }
+
+    private record PlacementPlan(BlockPos target, BlockPos support, Direction face, BlockHitResult hit) { }
+
     private record ItemCandidate(int inventorySlot, String itemId, ItemStack stack, double score) { }
 
     private record StackFingerprint(boolean empty, ItemStack expected) {
@@ -1449,8 +2011,13 @@ public final class PrimitiveTaskController {
         for (BlockPos mutable : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
             BlockPos position = mutable.immutable();
             if (excluded.contains(position) || !client.level.isLoaded(position)) continue;
+            // Never remove the vertical support column directly below the bot. Falling into the
+            // freshly mined hole can strand the pathing loop and is unlike deliberate human play.
+            if (position.getX() == center.getX() && position.getZ() == center.getZ()
+                && position.getY() <= center.getY()) continue;
             BlockState state = client.level.getBlockState(position);
-            if (state.isAir() || state.getDestroySpeed(client.level, position) < 0.0F || !matcher.matches(state)) continue;
+            if (state.isAir() || state.getDestroySpeed(client.level, position) < 0.0F
+                || !matcher.matches(state) || !hasExposedFace(client, position)) continue;
             if (client.level.getBlockEntity(position) != null) continue;
             double distance = player.distanceToSqr(Vec3.atCenterOf(position));
             if (distance < bestDistance) {
@@ -1461,11 +2028,23 @@ public final class PrimitiveTaskController {
         return best;
     }
 
-    private AbstractClientPlayer nearestUnsafePlayer(Minecraft client, LocalPlayer player, BlockPos target) {
+    private static boolean hasExposedFace(Minecraft client, BlockPos position) {
+        for (Direction direction : Direction.values()) {
+            BlockPos adjacent = position.relative(direction);
+            if (!client.level.isLoaded(adjacent)) continue;
+            BlockState neighbor = client.level.getBlockState(adjacent);
+            if (neighbor.isAir() || neighbor.getCollisionShape(client.level, adjacent).isEmpty()) return true;
+        }
+        return false;
+    }
+
+    private AbstractClientPlayer nearestUnsafePlayer(Minecraft client, LocalPlayer player, BlockPos target, String authorizedPlayer) {
         if (minimumPlayerDistance <= 0.0D) return null;
         Vec3 targetCenter = target == null ? null : Vec3.atCenterOf(target);
         return client.level.players().stream()
             .filter(candidate -> candidate != player && candidate.isAlive())
+            .filter(candidate -> authorizedPlayer == null
+                || !candidate.getGameProfile().name().equalsIgnoreCase(authorizedPlayer))
             .filter(candidate -> candidate.distanceTo(player) < minimumPlayerDistance
                 || (targetCenter != null && candidate.position().distanceTo(targetCenter) < minimumPlayerDistance))
             .min(Comparator.comparingDouble(candidate -> Math.min(
@@ -1523,20 +2102,27 @@ public final class PrimitiveTaskController {
         }
     }
 
-    private static RecipeDisplayEntry findCraftableTwoByTwoRecipe(
+    private static RecipeDisplayEntry findCraftableRecipe(
         Minecraft client,
         LocalPlayer player,
-        String targetItemId
+        String targetItemId,
+        int maximumGrid
     ) {
         StackedItemContents contents = new StackedItemContents();
         player.getInventory().fillStackedContents(contents);
         for (RecipeCollection collection : player.getRecipeBook().getCollections()) {
             for (RecipeDisplayEntry entry : collection.getRecipes()) {
                 RecipeDisplay display = entry.display();
-                boolean twoByTwo = display instanceof ShapedCraftingRecipeDisplay shaped
-                    ? shaped.width() <= 2 && shaped.height() <= 2
-                    : display instanceof ShapelessCraftingRecipeDisplay shapeless && shapeless.ingredients().size() <= 4;
-                if (!twoByTwo || !entry.canCraft(contents)) continue;
+                boolean fits = display instanceof ShapedCraftingRecipeDisplay shaped
+                    ? shaped.width() <= maximumGrid && shaped.height() <= maximumGrid
+                    : display instanceof ShapelessCraftingRecipeDisplay shapeless
+                        && shapeless.ingredients().size() <= maximumGrid * maximumGrid;
+                boolean requiresExactGrid = maximumGrid == 2
+                    ? display instanceof ShapedCraftingRecipeDisplay shaped && shaped.width() <= 2 && shaped.height() <= 2
+                        || display instanceof ShapelessCraftingRecipeDisplay shapeless && shapeless.ingredients().size() <= 4
+                    : display instanceof ShapedCraftingRecipeDisplay shaped && (shaped.width() > 2 || shaped.height() > 2)
+                        || display instanceof ShapelessCraftingRecipeDisplay shapeless && shapeless.ingredients().size() > 4;
+                if (!fits || !requiresExactGrid || !entry.canCraft(contents)) continue;
                 boolean target = entry.resultItems(SlotDisplayContext.fromLevel(client.level)).stream()
                     .anyMatch(stack -> !stack.isEmpty() && itemId(stack).equals(targetItemId));
                 if (target) return entry;
@@ -1545,7 +2131,29 @@ public final class PrimitiveTaskController {
         return null;
     }
 
-    private static void moveToward(Minecraft client, LocalPlayer player, Vec3 target, double stopDistance) {
+    private static BlockPos findCraftingTable(Minecraft client, LocalPlayer player, ApprovedZone zone) {
+        BlockPos center = player.blockPosition();
+        int radius = 8;
+        int minX = Math.max(zone.min().getX(), center.getX() - radius);
+        int minY = Math.max(zone.min().getY(), center.getY() - 3);
+        int minZ = Math.max(zone.min().getZ(), center.getZ() - radius);
+        int maxX = Math.min(zone.max().getX(), center.getX() + radius);
+        int maxY = Math.min(zone.max().getY(), center.getY() + 3);
+        int maxZ = Math.min(zone.max().getZ(), center.getZ() + radius);
+        BlockPos best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        for (BlockPos cursor : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
+            if (!client.level.isLoaded(cursor) || !client.level.getBlockState(cursor).is(Blocks.CRAFTING_TABLE)) continue;
+            double distance = player.distanceToSqr(Vec3.atCenterOf(cursor));
+            if (distance < bestDistance) {
+                best = cursor.immutable();
+                bestDistance = distance;
+            }
+        }
+        return best;
+    }
+
+    private void moveToward(Minecraft client, LocalPlayer player, Vec3 target, double stopDistance) {
         double dx = target.x - player.getX();
         double dz = target.z - player.getZ();
         double horizontal = Math.sqrt(dx * dx + dz * dz);
@@ -1553,10 +2161,43 @@ public final class PrimitiveTaskController {
             clearMovement(client);
             return;
         }
+        clearMovement(client);
         lookAt(player, target.x, target.y, target.z);
+        double forwardX = dx / Math.max(0.001D, horizontal);
+        double forwardZ = dz / Math.max(0.001D, horizontal);
+        AABB forward = player.getBoundingBox().move(forwardX * 0.5D, 0.0D, forwardZ * 0.5D);
+        boolean clearAhead = client.level.noCollision(player, forward);
+        boolean supportedAhead = hasSafeLandingBelow(client, player, forward);
+        if (clearAhead && supportedAhead && !player.horizontalCollision) {
+            client.options.keyUp.setDown(true);
+            client.options.keySprint.setDown(horizontal > 5.0D);
+            return;
+        }
+        boolean jumpClear = client.level.noCollision(player, forward.move(0.0D, 1.0D, 0.0D));
+        if (!clearAhead && jumpClear && player.onGround()) {
+            client.options.keyUp.setDown(true);
+            client.options.keyJump.setDown(true);
+            return;
+        }
+        double leftX = -forwardZ;
+        double leftZ = forwardX;
+        AABB left = player.getBoundingBox().move(forwardX * 0.2D + leftX * 0.7D, 0.0D, forwardZ * 0.2D + leftZ * 0.7D);
+        AABB right = player.getBoundingBox().move(forwardX * 0.2D - leftX * 0.7D, 0.0D, forwardZ * 0.2D - leftZ * 0.7D);
+        boolean leftSafe = client.level.noCollision(player, left) && hasSafeLandingBelow(client, player, left);
+        boolean rightSafe = client.level.noCollision(player, right) && hasSafeLandingBelow(client, player, right);
         client.options.keyUp.setDown(true);
-        client.options.keySprint.setDown(horizontal > 5.0D);
-        client.options.keyJump.setDown(player.horizontalCollision);
+        if (leftSafe && (!rightSafe || (tick / 20L) % 2L == 0L)) client.options.keyLeft.setDown(true);
+        else if (rightSafe) client.options.keyRight.setDown(true);
+        else {
+            client.options.keyUp.setDown(false);
+            client.options.keyJump.setDown(player.onGround());
+        }
+    }
+
+    private static boolean hasSafeLandingBelow(Minecraft client, LocalPlayer player, AABB projected) {
+        // Accept level ground and a single-block descent, but reject deeper ledges.
+        return !client.level.noCollision(player, projected.move(0.0D, -0.7D, 0.0D))
+            || !client.level.noCollision(player, projected.move(0.0D, -1.7D, 0.0D));
     }
 
     private static void lookAt(LocalPlayer player, double x, double y, double z) {

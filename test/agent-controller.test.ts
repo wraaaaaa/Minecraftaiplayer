@@ -40,11 +40,33 @@ test('玩家消息经过模型、策略、真实动作接口并写入专属记�
   const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
   await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice-uuid' }, 'CialloAI 跟着我', world)
   assert.deepEqual(actions, [{ type: 'follow_player', target: 'Alice' }])
-  assert.deepEqual(chats, ['我跟着你。'])
+  assert.deepEqual(chats, ['@Alice 我跟着你。'])
   const saved = await memory.load()
   const alice = saved.players['uuid:alice-uuid']
   assert.ok(alice?.facts.includes('Alice 喜欢结伴探索'))
   assert.deepEqual(saved.events.map(event => event.type), ['player_message', 'fact', 'bot_reply'])
+  await logger.flush()
+})
+
+test('复合工具计划按顺序执行并在全部后置条件成功后完成', async () => {
+  const suffix = `${process.pid}-${Date.now()}-tool-plan`
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const provider: LlmProvider = { complete: async () => ({
+    text: '{"reply":"我分两步过去并看向你。","actions":[{"type":"come_to_player"},{"type":"look_at_player"}]}',
+    model: 'mock', requestedEffort: 'low', effectiveEffort: 'low'
+  }) }
+  const actions: AgentAction[] = []
+  const executor = { execute: async (action: AgentAction) => { actions.push(action); return { ok: true, detail: `verified_${action.type}` } }, chat: async () => {} }
+  const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
+  await controller.handlePlayerMessage({ name: 'Alice' }, '先过来再看着我', world)
+  assert.deepEqual(actions, [
+    { type: 'come_to_player', target: 'Alice' },
+    { type: 'look_at_player', target: 'Alice' }
+  ])
+  assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
   await logger.flush()
 })
 
@@ -59,7 +81,7 @@ test('模型超时时在游戏内返回明确提示', async () => {
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
   const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
   await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice-timeout' }, '你好', world)
-  assert.deepEqual(chats, ['我这次思考超时了，这项任务没有执行；请再说一次。'])
+  assert.deepEqual(chats, ['@Alice 我这次思考超时了，这项任务没有执行；请再说一次。'])
   await logger.flush()
 })
 
@@ -72,6 +94,7 @@ test('多人同时下令时只串行调用模型并按 owner、距离执行', as
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
   const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
   const order: string[] = []
+  const replies: string[] = []
   let active = 0; let maximumActive = 0
   const provider: LlmProvider = { complete: async request => {
     active++; maximumActive = Math.max(maximumActive, active)
@@ -79,7 +102,7 @@ test('多人同时下令时只串行调用模型并按 owner、距离执行', as
     await delay(15); active--
     return { text: '{"reply":"收到","action":{"type":"none"}}', model: 'mock', requestedEffort: 'low', effectiveEffort: 'low' }
   } }
-  const executor = { execute: async () => ({ ok: true, detail: '完成' }), chat: async () => {} }
+  const executor = { execute: async () => ({ ok: true, detail: '完成' }), chat: async (message: string) => { replies.push(message) } }
   const controller = new AgentController({ config: testConfig, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
   const priorityWorld: WorldState = { ...world, nearbyPlayers: [{ name: 'Alice', distance: 2 }, { name: 'Bob', distance: 5 }, { name: 'wraaaaaa', distance: 30 }] }
   await Promise.all([
@@ -89,6 +112,7 @@ test('多人同时下令时只串行调用模型并按 owner、距离执行', as
   ])
   assert.deepEqual(order, ['owner 的任务', 'Alice 的任务', 'Bob 的任务'])
   assert.equal(maximumActive, 1)
+  assert.deepEqual(replies.map(reply => reply.match(/^@\w+/u)?.[0]), ['@wraaaaaa', '@Alice', '@Bob'])
   await logger.flush()
 })
 
@@ -158,7 +182,7 @@ test('采集任务只有在自有掉落实际进入背包后才完成', async ()
 
   assert.deepEqual(actions, [
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 4 },
+    { type: 'gather_resource', resource: 'wood', count: 4, authorizedPlayer: 'Alice' },
     { type: 'collect_own_drops', count: 4, radius: 16 }
   ])
   assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
@@ -217,7 +241,7 @@ test('安全空闲时模型只能在批准区域串行执行一个自主发展�
   assert.deepEqual(actions, [
     { type: 'wait_safe' },
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 2 },
+    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa' },
     { type: 'collect_own_drops', count: 2, radius: 16 }
   ])
   await logger.flush()
@@ -311,7 +335,7 @@ test('动作执行期间的停止不会让旧任务继续写结果或再次回�
   await original
 
   assert.deepEqual(actions, [{ type: 'follow_player', target: 'Alice' }, { type: 'stop' }])
-  assert.deepEqual(chats, ['已停止当前动作，正在执行的任务已取消。'])
+  assert.deepEqual(chats, ['@Alice 已停止当前动作，正在执行的任务已取消。'])
   assert.deepEqual((await tasks.load()).tasks.map(task => task.status), ['failed', 'completed'])
   await logger.flush()
 })
@@ -381,5 +405,82 @@ test('客户端在动作中断线时任务重新排队且不会在同一断线�
   const saved = await tasks.load()
   assert.equal(saved.tasks[0]?.status, 'queued')
   assert.equal(saved.tasks[0]?.lastTransitionReason, 'client_disconnected_during_action')
+  await logger.flush()
+})
+
+test('自主移动尚未结束时下一次心跳不会用安全挂机取消它', async () => {
+  const suffix = `${process.pid}-${Date.now()}-movement-lifecycle`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = {
+    ...DEFAULT_AUTONOMY_CONFIG,
+    developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
+  }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const actions: AgentAction[] = []
+  const controller = new AgentController({
+    config: testConfig,
+    persona,
+    prompts,
+    provider: { complete: async () => { throw new Error('movement heartbeat must not call model') } },
+    memory,
+    experience,
+    policy: new PolicyEngine(rules),
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: 'done' } }, chat: async () => {} },
+    logger,
+    tasks,
+    secrets: new SecretGuard([])
+  })
+
+  await controller.proactiveTick({ ...world, activePrimitive: 'movement', environment: { isNight: false, safeToIdle: true } })
+
+  assert.deepEqual(actions, [])
+  await logger.flush()
+})
+
+test('采集掉落实体已被自动拾取时以背包增量判定成功，不重复收集', async () => {
+  const suffix = `${process.pid}-${Date.now()}-gather-auto-collected`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = {
+    ...DEFAULT_AUTONOMY_CONFIG,
+    commandArbitrationMs: 0,
+    developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
+  }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const actions: AgentAction[] = []
+  const controller = new AgentController({
+    config: testConfig,
+    persona,
+    prompts,
+    provider: { complete: async () => ({ text: '{"reply":"","action":{"type":"gather_resource","resource":"stone","count":1}}', model: 'mock', requestedEffort: 'low', effectiveEffort: 'low' }) },
+    memory,
+    experience,
+    policy: new PolicyEngine(rules),
+    executor: {
+      execute: async action => {
+        actions.push(action)
+        return action.type === 'gather_resource'
+          ? { ok: true, detail: 'verified_broken_blocks=1; registered_owned_drops=1; inventory_delta=1; resource=stone' }
+          : { ok: true, detail: 'verified' }
+      },
+      chat: async () => {}
+    },
+    logger,
+    tasks,
+    secrets: new SecretGuard([])
+  })
+
+  await controller.handlePlayerMessage({ name: 'Alice' }, '采集一块石头', { ...world, nearbyPlayers: [] })
+
+  assert.deepEqual(actions, [
+    { type: 'prepare_for', purpose: 'mining' },
+    { type: 'gather_resource', resource: 'stone', count: 1, authorizedPlayer: 'Alice' }
+  ])
+  assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
   await logger.flush()
 })

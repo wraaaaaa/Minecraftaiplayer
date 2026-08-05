@@ -39,3 +39,18 @@ test('把玩家语义的破坏和挖掘动作归一化为受保护采集', () =>
     'break_natural_block 缺少 resource 或 block'
   )
 })
+
+test('模型可以返回有上限且逐步规范化的工具计划', () => {
+  const decision = parseAgentDecision(JSON.stringify({
+    reply: '我分步完成。',
+    actions: [
+      { type: 'come_to_player' },
+      { type: 'drop_item', itemId: 'minecraft:baked_potato', count: 2 }
+    ]
+  }), { currentPlayerName: 'Alice' })
+  assert.deepEqual(decision.actions, [
+    { type: 'come_to_player', target: 'Alice' },
+    { type: 'drop_item', itemId: 'minecraft:baked_potato', count: 2, target: 'Alice' }
+  ])
+  assert.deepEqual(decision.action, { type: 'come_to_player', target: 'Alice' })
+})

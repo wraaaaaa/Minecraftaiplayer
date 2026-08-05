@@ -193,7 +193,9 @@ async function loadKnownSecrets(root, envFile, issues) {
 }
 
 function trackedFiles(root) {
-  const output = runGit(root, ['ls-files', '-z'], { binary: true }).stdout
+  // Include non-ignored untracked files: newly created source/tests are exactly
+  // where a pre-commit secret or encoding leak can otherwise evade the audit.
+  const output = runGit(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { binary: true }).stdout
   return splitNull(output)
 }
 

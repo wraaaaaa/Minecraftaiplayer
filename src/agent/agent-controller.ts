@@ -10,12 +10,15 @@ import type { SecretGuard } from '../security/secret-guard.js'
 import type { TaskRecord, TaskStore } from '../tasks/task-store.js'
 import { assessAction, refusalFor } from './capability-assessor.js'
 import { parseAgentDecision } from './decision.js'
+import { inferBasicDecision } from './basic-command.js'
+import { planAutonomousDevelopment } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt } from './prompt.js'
 import type { WorldState } from './world-state.js'
 
 export interface ActionExecutor {
   execute(action: AgentAction): Promise<{ ok: boolean; detail: string }>
   chat(message: string): Promise<void>
+  snapshot?(): WorldState
 }
 
 function urgencyFor(message: string): number {
@@ -35,17 +38,25 @@ function isTransientClientDisconnect(detail: string): boolean {
   return /(?:Fabric.*(?:未连接|断开)|bridge.*(?:not connected|disconnected|closed)|客户端桥.*(?:未连接|断开)|连接已断开)/iu.test(detail)
 }
 
+function gatherWasAutoCollected(detail: string): boolean {
+  const verifiedBroken = Number(detail.match(/verified_broken_blocks=(\d+)/u)?.[1] ?? 0)
+  const inventoryDelta = Number(detail.match(/inventory_delta=(\d+)/u)?.[1] ?? 0)
+  // A drop entity may be observed and then picked up before the follow-up collector
+  // starts. The confirmed inventory increase is then the authoritative postcondition.
+  return verifiedBroken > 0 && inventoryDelta >= verifiedBroken
+}
+
 function requiredPreparation(message: string, action: AgentAction): 'mining' | 'combat' | 'end_combat' | undefined {
   if (action.type === 'none' || action.type === 'stop' || action.type === 'wait_safe' || action.type === 'prepare_for' || action.type === 'equip_best') return undefined
   if (/(?:末地|末影龙|end\b|ender\s*dragon)/iu.test(message)) return 'end_combat'
-  if (action.type === 'gather_resource' || /(?:采集|挖矿|挖掘|矿洞|mine|mining)/iu.test(message)) return 'mining'
-  if (action.type === 'attack_hostile' || /(?:打怪|战斗|攻击|守卫|保护|combat|fight)/iu.test(message)) return 'combat'
+  if (action.type === 'gather_resource') return 'mining'
+  if (action.type === 'attack_hostile') return 'combat'
   return undefined
 }
 
 const AUTONOMOUS_ACTION_TYPES = new Set<AgentAction['type']>([
-  'none', 'wait_safe', 'eat_best_food', 'equip_best', 'attack_hostile', 'collect_own_drops',
-  'gather_resource', 'craft_item', 'use_item', 'seek_shelter', 'build_shelter', 'prepare_for'
+  'none', 'wait_safe', 'wander', 'return_to_zone', 'eat_best_food', 'equip_best', 'attack_hostile', 'collect_own_drops',
+  'gather_resource', 'craft_item', 'place_block', 'use_item', 'seek_shelter', 'build_shelter', 'prepare_for'
 ])
 
 export class AgentController {
@@ -138,12 +149,33 @@ export class AgentController {
       }
       return
     }
+    // Movement actions are asynchronous in the Fabric client. Do not let the next
+    // proactive heartbeat cancel a route that is still making progress.
+    if (world.activePrimitive === 'movement') return
+
+    const now = Date.now()
+    const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
+    if (now - this.#lastProactiveAt >= developmentIntervalMs) {
+      const planned = planAutonomousDevelopment(this.#config, world)
+      if (planned) {
+        this.#lastProactiveAt = now
+        const assessment = assessAction(this.#config, planned, world, { requesterName: autonomy.ownerName })
+        if (assessment.status === 'ready') {
+          const policy = this.#policy.authorize(planned)
+          if (policy.allowed) {
+            const result = await this.#executeAutonomousAction(planned)
+            this.#logger.info('自主发展步骤已执行', { action: planned.type, ok: result.ok, detail: this.#secrets.sanitizeForPersistence(result.detail), survey: world.blockSurvey?.classification ?? 'missing' })
+            return
+          }
+        } else {
+          this.#logger.info('自主发展步骤因当前条件暂缓', { action: planned.type, reasons: assessment.reasons })
+        }
+      }
+    }
     if (autonomy.safeIdleEnabled) {
       const waiting = await this.#executeProactive({ type: 'wait_safe' })
       if (!waiting.ok) return
     }
-
-    const now = Date.now()
     if (!this.#config.chat.proactiveEnabled || now - this.#lastInboundAt < this.#config.chat.proactiveIdleMs || now - this.#lastProactiveAt < this.#config.chat.proactiveMinIntervalMs) return
     this.#lastProactiveAt = now
     try {
@@ -169,7 +201,7 @@ export class AgentController {
 
       let actionSucceeded = true
       if (decision.action.type !== 'none' && decision.action.type !== 'wait_safe') {
-        const assessment = assessAction(this.#config, decision.action, world)
+        const assessment = assessAction(this.#config, decision.action, world, { requesterName: autonomy.ownerName })
         const preparationAction = decision.action.type === 'prepare_for' || decision.action.type === 'equip_best'
         if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
           this.#logger.info('空闲自主动作因当前条件不满足而跳过', { action: decision.action.type, reasons: assessment.reasons })
@@ -212,8 +244,12 @@ export class AgentController {
         if (!prepared.ok) return prepared
         if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return { ok: false, detail: 'player_task_preempted' }
       }
-      let result = await this.#executor.execute(action)
+      const executionAction: AgentAction = action.type === 'gather_resource'
+        ? { ...action, authorizedPlayer: autonomyConfig(this.#config).ownerName }
+        : action
+      let result = await this.#executor.execute(executionAction)
       if (!result.ok || action.type !== 'gather_resource') return result
+      if (gatherWasAutoCollected(result.detail)) return result
       if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return { ok: false, detail: 'player_task_preempted' }
       const gathered = result.detail
       result = await this.#executor.execute({ type: 'collect_own_drops', count: action.count, radius: 16 })
@@ -263,14 +299,19 @@ export class AgentController {
     }
 
     try {
-      const context = await this.#memory.contextFor(identity)
-      const experiences = await this.#experience.relevant(message)
-      const response = await this.#provider.complete({
-        system: this.#secrets.sanitizeForModel(buildSystemPrompt(this.#persona, this.#prompts)),
-        user: this.#secrets.sanitizeForModel(buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } }))
-      })
+      let decision = inferBasicDecision(message, this.#latestWorld, identity.name)
+      let decisionModel = 'local-deterministic'
+      if (!decision) {
+        const context = await this.#memory.contextFor(identity)
+        const experiences = await this.#experience.relevant(message)
+        const response = await this.#provider.complete({
+          system: this.#secrets.sanitizeForModel(buildSystemPrompt(this.#persona, this.#prompts)),
+          user: this.#secrets.sanitizeForModel(buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } }))
+        })
+        decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
+        decisionModel = response.model
+      }
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-      const decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
       if (decision.validationError) {
         const refusal = `这项指令现在无法执行。原因：${decision.validationError}。请换成当前动作接口支持的目标，或先补齐必要条件。`
         await this.#markFailed(task, decision.validationError)
@@ -278,67 +319,85 @@ export class AgentController {
         return
       }
 
-      const assessment = assessAction(this.#config, decision.action, this.#latestWorld)
-      const preparationAction = decision.action.type === 'prepare_for' || decision.action.type === 'equip_best'
-      if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
-        const refusal = refusalFor(assessment)
-        await this.#markFailed(task, assessment.reasons.join('；') || '能力评估未通过')
-        await this.#bestEffortReply(identity, refusal)
-        return
-      }
+      const actions = decision.actions?.length ? decision.actions : [decision.action]
+      const completedDetails: string[] = []
+      for (let index = 0; index < actions.length; index++) {
+        const action = actions[index]!
+        const currentWorld = this.#executor.snapshot?.() ?? this.#latestWorld
+        this.#latestWorld = currentWorld
+        const assessment = assessAction(this.#config, action, currentWorld, { requesterName: identity.name })
+        const preparationAction = action.type === 'prepare_for' || action.type === 'equip_best'
+        if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
+          const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${assessment.reasons.join('；') || '能力评估未通过'}`
+          await this.#markFailed(task, detail)
+          await this.#bestEffortReply(identity, `${refusalFor(assessment)}（计划停在第 ${index + 1}/${actions.length} 步）`)
+          return
+        }
 
-      const policy = this.#policy.authorize(decision.action)
-      if (!policy.allowed) {
-        const refusal = `我不能执行这项操作。原因：${policy.reason}。这是本地行为准则的硬性限制。`
-        await this.#markFailed(task, policy.reason)
-        await this.#bestEffortReply(identity, refusal)
-        return
-      }
+        const policy = this.#policy.authorize(action)
+        if (!policy.allowed) {
+          const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${policy.reason}`
+          await this.#markFailed(task, detail)
+          await this.#bestEffortReply(identity, `我不能执行计划的第 ${index + 1}/${actions.length} 步。原因：${policy.reason}。这是本地行为准则的硬性限制。`)
+          return
+        }
 
-
-      const preparationPurpose = requiredPreparation(message, decision.action)
-      if (preparationPurpose) {
-        if (this.#proactiveActionRunning) await this.#executor.execute({ type: 'stop' })
-        const preparationResult = await this.#executor.execute({ type: 'prepare_for', purpose: preparationPurpose })
-        if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-        if (!preparationResult.ok) {
-          const safeDetail = this.#secrets.sanitizeForPersistence(preparationResult.detail)
-          if (isTransientClientDisconnect(safeDetail)) {
-            await this.#requeueForDisconnect(task, 'client_disconnected_during_preparation')
+        const preparationPurpose = requiredPreparation(message, action)
+        if (preparationPurpose) {
+          if (this.#proactiveActionRunning) await this.#executor.execute({ type: 'stop' })
+          const preparationResult = await this.#executor.execute({ type: 'prepare_for', purpose: preparationPurpose })
+          if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
+          if (!preparationResult.ok) {
+            const safeDetail = this.#secrets.sanitizeForPersistence(preparationResult.detail)
+            if (isTransientClientDisconnect(safeDetail)) {
+              await this.#requeueForDisconnect(task, actions.length === 1
+                ? 'client_disconnected_during_preparation'
+                : `client_disconnected_during_plan_preparation_${index + 1}`)
+              return
+            }
+            await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步准备失败：${safeDetail}`)
+            await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先核对装备、耐久、食物和当前计划步骤；条件不足时停止后续步骤。', tags: ['plan', action.type, preparationPurpose] })
+            await this.#bestEffortReply(identity, `计划在第 ${index + 1}/${actions.length} 步前停止。装备与物资准备没有通过：${safeDetail}。`)
             return
           }
-          await this.#markFailed(task, safeDetail || '装备与物资准备未通过')
-          await this.#bestEffortExperience({ task: JSON.stringify({ type: 'prepare_for', purpose: preparationPurpose }), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先核对装备、耐久、食物和任务危险度；条件不足时详细拒绝，不带病冒险。', tags: ['prepare_for', preparationPurpose] })
-          const failure = `这项任务暂时不能开始。装备与物资准备没有通过，实际原因：${safeDetail}。补齐条件后我可以重新尝试。`
-          await this.#bestEffortReply(identity, failure)
-          return
+        } else if (this.#proactiveActionRunning) {
+          await this.#executor.execute({ type: 'stop' })
         }
-      } else if (this.#proactiveActionRunning) {
-        await this.#executor.execute({ type: 'stop' })
-      }
 
-      if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-      let actionResult = await this.#executor.execute(decision.action)
-      if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-      if (actionResult.ok && decision.action.type === 'gather_resource') {
-        const gatheredDetail = actionResult.detail
-        actionResult = await this.#executor.execute({ type: 'collect_own_drops', count: decision.action.count, radius: 16 })
         if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
-        if (actionResult.ok) actionResult = { ok: true, detail: `${gatheredDetail}; ${actionResult.detail}` }
-        else actionResult = { ok: false, detail: `方块已采下，但自有掉落没有全部进入背包：${actionResult.detail}` }
-      }
-      if (!actionResult.ok) {
-        const safeDetail = this.#secrets.sanitizeForPersistence(actionResult.detail)
-        if (isTransientClientDisconnect(safeDetail)) {
-          await this.#requeueForDisconnect(task, 'client_disconnected_during_action')
+        const executionAction: AgentAction = action.type === 'gather_resource'
+          ? { ...action, authorizedPlayer: identity.name }
+          : action
+        let actionResult = await this.#executor.execute(executionAction)
+        if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
+        if (actionResult.ok && action.type === 'gather_resource') {
+          const gatheredDetail = actionResult.detail
+          if (!gatherWasAutoCollected(gatheredDetail)) {
+            actionResult = await this.#executor.execute({ type: 'collect_own_drops', count: action.count, radius: 16 })
+            if (actionResult.ok) actionResult = { ok: true, detail: `${gatheredDetail}; ${actionResult.detail}` }
+            else actionResult = { ok: false, detail: `方块已采下，但自有掉落没有全部进入背包：${actionResult.detail}` }
+          }
+        }
+        if (!actionResult.ok) {
+          const safeDetail = this.#secrets.sanitizeForPersistence(actionResult.detail)
+          if (isTransientClientDisconnect(safeDetail)) {
+            await this.#requeueForDisconnect(task, actions.length === 1
+              ? 'client_disconnected_during_action'
+              : `client_disconnected_during_plan_step_${index + 1}`)
+            return
+          }
+          await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步 ${action.type} 失败：${safeDetail}`)
+          await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次根据已经完成的步骤和最新背包/世界状态重建剩余计划，不能继续执行后续动作。', tags: ['plan', action.type] })
+          await this.#bestEffortReply(identity, `计划在第 ${index + 1}/${actions.length} 步停止。实际原因：${safeDetail}。前面已验证的步骤不会被谎报为失败。`)
           return
         }
-        await this.#markFailed(task, safeDetail || '游戏动作返回失败')
-        await this.#bestEffortExperience({ task: JSON.stringify(decision.action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先检查游戏状态、装备、材料、距离和安全策略，再决定是否接受任务。', tags: [decision.action.type] })
-        const failure = `这项任务没有完成。实际原因：${safeDetail}。条件改变后我可以重新排队尝试。`
-        await this.#bestEffortReply(identity, failure)
-        return
+        completedDetails.push(`${index + 1}:${action.type}=${actionResult.detail}`)
+        if (index + 1 < actions.length) {
+          await delay(1_100)
+          this.#latestWorld = this.#executor.snapshot?.() ?? this.#latestWorld
+        }
       }
+      const actionResult = { ok: true, detail: completedDetails.join(' | ') }
 
       await this.#tasks.complete(task.id, actionResult.detail)
       if (decision.remember) {
@@ -349,7 +408,7 @@ export class AgentController {
       }
       const reply = decision.reply || actionResult.detail
       if (reply) await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
-      this.#logger.info('任务已完成', { taskId: task.id, player: identity.name, model: response.model, action: decision.action.type })
+      this.#logger.info('任务已完成', { taskId: task.id, player: identity.name, model: decisionModel, actions: actions.map(action => action.type) })
     } catch (error) {
       const detail = this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error))
       this.#logger.error('处理玩家任务失败', { taskId: task.id, player: identity.name, error: detail })
@@ -402,7 +461,10 @@ export class AgentController {
 
   async #bestEffortReply(identity: PlayerIdentity, message: string): Promise<void> {
     try {
-      const sent = await this.#safeChat(message)
+      const trimmed = message.trim()
+      const mention = `@${identity.name}`
+      const addressed = trimmed.toLowerCase().startsWith(mention.toLowerCase()) ? trimmed : `${mention} ${trimmed}`
+      const sent = await this.#safeChat(addressed)
       await this.#memory.recordBotReply(identity, sent)
     } catch (error) {
       this.#logger.warn('任务状态已落盘，但游戏内回复发送失败', { player: identity.name, error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })

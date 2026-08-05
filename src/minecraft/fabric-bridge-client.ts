@@ -42,9 +42,23 @@ type BridgeMessage = {
   sequence?: number
   seq?: number
   observedAt?: number
-  inventory?: Array<{ name?: string; itemId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; enchantments?: Array<{ id?: string; level?: number }> }>
+  inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; enchantments?: Array<{ id?: string; level?: number }> }>
+  blockSurvey?: {
+    radius?: number
+    verticalRadius?: number
+    sampledBlocks?: number
+    solidBlocks?: number
+    blockEntityCount?: number
+    center?: { x?: number; y?: number; z?: number }
+    resources?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
+    artificial?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
+    other?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
+    classification?: string
+    protectedLikely?: boolean
+    reasons?: string[]
+  }
   equipment?: Record<string, { name?: string; itemId?: string; count?: number; durability?: number; maxDurability?: number; enchanted?: boolean } | null> | Array<{ slot?: string; name?: string; itemId?: string; count?: number; durability?: { damage?: number; max?: number; remaining?: number }; enchantments?: Array<{ id?: string; level?: number }> }>
-  nearbyPlayers?: Array<{ name?: string; uuid?: string; distance?: number }>
+  nearbyPlayers?: Array<{ name?: string; uuid?: string; distance?: number; lookingAtBlock?: { blockId?: string; x?: number; y?: number; z?: number; distance?: number } }>
   nearbyHostiles?: Array<{ id?: string; typeId?: string; name?: string; distance?: number; health?: number; targetingBot?: boolean }>
   nearbyItems?: Array<{ id?: string; itemId?: string; count?: number; distance?: number }>
   environment?: { isNight?: boolean; blockLight?: number; skyLight?: number; skyVisible?: boolean; safeToIdle?: boolean; safetyReasons?: string[] }
@@ -219,12 +233,7 @@ export class FabricBridgeClient implements ActionExecutor {
         this.#world.connected = true
         this.#logger.info('Fabric 客户端已进入世界', { name: message.name, uuid: message.uuid })
         void this.#publishStatus('in_world')
-        if (!this.#proactiveTimer) {
-          this.#proactiveTimer = setInterval(() => {
-            if (this.#proactiveHandler) void this.#proactiveHandler(this.snapshot()).catch((error) => this.#logger.warn('空闲任务失败', error))
-          }, 15000)
-          this.#proactiveTimer.unref()
-        }
+        this.#ensureProactiveTimer()
         break
       case 'state': this.#updateState(message); break
       case 'player_chat': this.#handlePlayerChat(message); break
@@ -275,16 +284,35 @@ export class FabricBridgeClient implements ActionExecutor {
       ...(typeof onGround === 'boolean' ? { onGround } : {}),
       ...(typeof message.dimension === 'string' ? { dimension: message.dimension } : {}),
       ...(typeof message.timeOfDay === 'number' ? { timeOfDay: message.timeOfDay } : {}),
-      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}) }] : []),
+      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}) }] : []),
       ...(message.equipment ? { equipment: this.#equipment(message.equipment) } : {}),
-      nearbyPlayers: (message.nearbyPlayers ?? []).flatMap((player) => typeof player.name === 'string' && typeof player.distance === 'number' ? [{ name: player.name, distance: player.distance, ...(typeof player.uuid === 'string' ? { uuid: player.uuid } : {}) }] : []),
+      nearbyPlayers: (message.nearbyPlayers ?? []).flatMap((player) => {
+        if (typeof player.name !== 'string' || typeof player.distance !== 'number') return []
+        const pointed = player.lookingAtBlock
+        const lookingAtBlock = pointed && typeof pointed.blockId === 'string'
+          && typeof pointed.x === 'number' && typeof pointed.y === 'number' && typeof pointed.z === 'number'
+          && typeof pointed.distance === 'number'
+          ? { blockId: pointed.blockId, x: pointed.x, y: pointed.y, z: pointed.z, distance: pointed.distance }
+          : undefined
+        return [{ name: player.name, distance: player.distance, ...(typeof player.uuid === 'string' ? { uuid: player.uuid } : {}), ...(lookingAtBlock ? { lookingAtBlock } : {}) }]
+      }),
       ...((message.nearbyHostiles || message.hostiles) ? { nearbyHostiles: message.nearbyHostiles?.flatMap(entity => typeof entity.id === 'string' && typeof entity.typeId === 'string' && typeof entity.distance === 'number' ? [{ id: entity.id, typeId: entity.typeId, distance: entity.distance, ...(typeof entity.name === 'string' ? { name: entity.name } : {}), ...(typeof entity.health === 'number' ? { health: entity.health } : {}), ...(typeof entity.targetingBot === 'boolean' ? { targetingBot: entity.targetingBot } : {}) }] : []) ?? message.hostiles?.flatMap(entity => typeof entity.entityId === 'number' && typeof entity.typeId === 'string' && typeof entity.distance === 'number' ? [{ id: String(entity.entityId), typeId: entity.typeId, distance: entity.distance, ...(typeof entity.health === 'number' ? { health: entity.health } : {}), ...(typeof (entity.targetingPlayer ?? entity.currentThreat) === 'boolean' ? { targetingBot: entity.targetingPlayer === true || entity.currentThreat === true } : {}) }] : []) ?? [] } : {}),
       ...((message.nearbyItems || message.drops) ? { nearbyItems: message.nearbyItems?.flatMap(entity => typeof entity.id === 'string' && typeof entity.itemId === 'string' && typeof entity.count === 'number' && typeof entity.distance === 'number' ? [{ id: entity.id, itemId: entity.itemId, count: entity.count, distance: entity.distance }] : []) ?? message.drops?.flatMap(entity => typeof entity.entityId === 'number' && typeof entity.itemId === 'string' && typeof entity.count === 'number' && typeof entity.distance === 'number' ? [{ id: String(entity.entityId), itemId: entity.itemId, count: entity.count, distance: entity.distance }] : []) ?? [] } : {}),
+      ...(message.blockSurvey ? { blockSurvey: this.#blockSurvey(message.blockSurvey) } : {}),
       ...(message.environment ? { environment: { ...message.environment, ...(typeof (message.environment.isNight ?? (message.environment as { night?: boolean }).night) === 'boolean' ? { isNight: message.environment.isNight ?? (message.environment as { night?: boolean }).night } : {}), ...(typeof (message.environment.skyVisible ?? (message.environment as { canSeeSky?: boolean }).canSeeSky) === 'boolean' ? { skyVisible: message.environment.skyVisible ?? (message.environment as { canSeeSky?: boolean }).canSeeSky } : {}), ...(typeof message.safeToIdle === 'boolean' ? { safeToIdle: message.safeToIdle } : {}), ...(Array.isArray(message.safetyReasons) ? { safetyReasons: message.safetyReasons } : {}) } } : {}),
       ...(message.home && typeof message.home.dimension === 'string' && typeof message.home.x === 'number' && typeof message.home.y === 'number' && typeof message.home.z === 'number' ? { home: { dimension: message.home.dimension, x: message.home.x, y: message.home.y, z: message.home.z, ...(typeof message.home.doorX === 'number' ? { doorX: message.home.doorX } : {}), ...(typeof message.home.doorY === 'number' ? { doorY: message.home.doorY } : {}), ...(typeof message.home.doorZ === 'number' ? { doorZ: message.home.doorZ } : {}), ...(typeof message.home.persisted === 'boolean' ? { persisted: message.home.persisted } : {}) } } : {}),
       ...(typeof (message.activePrimitive ?? message.survivalMode) === 'string' ? { activePrimitive: message.activePrimitive ?? message.survivalMode } : {})
     }
+    if (this.#world.connected) this.#ensureProactiveTimer()
     void this.#publishStatus(this.#world.connected ? 'in_world' : 'connected')
+  }
+
+  #ensureProactiveTimer(): void {
+    if (this.#proactiveTimer) return
+    this.#proactiveTimer = setInterval(() => {
+      if (this.#proactiveHandler) void this.#proactiveHandler(this.snapshot()).catch((error) => this.#logger.warn('空闲任务失败', error))
+    }, 15000)
+    this.#proactiveTimer.unref()
   }
 
   #equipment(value: NonNullable<BridgeMessage['equipment']>): NonNullable<WorldState['equipment']> {
@@ -292,6 +320,45 @@ export class FabricBridgeClient implements ActionExecutor {
       return Object.fromEntries(value.flatMap(item => typeof item.slot === 'string' && typeof item.itemId === 'string' && typeof item.name === 'string' && typeof item.count === 'number' ? [[item.slot === 'mainhand' ? 'mainHand' : item.slot === 'offhand' ? 'offHand' : item.slot, { itemId: item.itemId, name: item.name, count: item.count, ...(typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.durability?.max === 'number' ? { maxDurability: item.durability.max } : {}), enchanted: (item.enchantments?.length ?? 0) > 0 }]] : []))
     }
     return Object.fromEntries(Object.entries(value).map(([slot, item]) => [slot, item && typeof item.itemId === 'string' && typeof item.name === 'string' && typeof item.count === 'number' ? { itemId: item.itemId, name: item.name, count: item.count, ...(typeof item.durability === 'number' ? { durability: item.durability } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : {}) } : null]))
+  }
+
+  #blockSurvey(value: NonNullable<BridgeMessage['blockSurvey']>): NonNullable<WorldState['blockSurvey']> {
+    const point = (input: { x?: number; y?: number; z?: number } | undefined): { x: number; y: number; z: number } | undefined =>
+      input && typeof input.x === 'number' && typeof input.y === 'number' && typeof input.z === 'number'
+        ? { x: input.x, y: input.y, z: input.z }
+        : undefined
+    const entries = (input: typeof value.resources): NonNullable<WorldState['blockSurvey']>['resources'] =>
+      (input ?? []).flatMap((entry) => {
+        if (typeof entry.blockId !== 'string' || typeof entry.category !== 'string' || typeof entry.count !== 'number' || typeof entry.nearestDistance !== 'number') return []
+        const nearest = point(entry.nearest)
+        return [{
+          blockId: entry.blockId,
+          category: entry.category,
+          count: Math.max(0, Math.floor(entry.count)),
+          nearestDistance: Math.max(0, entry.nearestDistance),
+          ...(nearest ? { nearest } : {})
+        }]
+      })
+    const center = point(value.center) ?? this.#world.position ?? { x: 0, y: 0, z: 0 }
+    const classification = value.classification === 'natural_terrain_likely'
+      || value.classification === 'protected_structure_nearby'
+      || value.classification === 'uncertain'
+      ? value.classification
+      : 'uncertain'
+    return {
+      radius: typeof value.radius === 'number' ? Math.max(0, Math.floor(value.radius)) : 0,
+      verticalRadius: typeof value.verticalRadius === 'number' ? Math.max(0, Math.floor(value.verticalRadius)) : 0,
+      sampledBlocks: typeof value.sampledBlocks === 'number' ? Math.max(0, Math.floor(value.sampledBlocks)) : 0,
+      solidBlocks: typeof value.solidBlocks === 'number' ? Math.max(0, Math.floor(value.solidBlocks)) : 0,
+      blockEntityCount: typeof value.blockEntityCount === 'number' ? Math.max(0, Math.floor(value.blockEntityCount)) : 0,
+      center,
+      resources: entries(value.resources),
+      artificial: entries(value.artificial),
+      other: entries(value.other),
+      classification,
+      protectedLikely: value.protectedLikely === true,
+      reasons: (value.reasons ?? []).filter((reason): reason is string => typeof reason === 'string').slice(0, 16)
+    }
   }
 
   #handlePlayerChat(message: BridgeMessage): void {
@@ -335,7 +402,7 @@ export class FabricBridgeClient implements ActionExecutor {
     const socket = this.#socket
     if (!this.#connected || !socket || socket.destroyed) return Promise.resolve({ ok: false, detail: 'Fabric 客户端桥未连接' })
     const id = randomUUID()
-    const longRunning = ['equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'seek_shelter', 'build_shelter'].includes(action.type)
+    const longRunning = ['equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item', 'seek_shelter', 'build_shelter'].includes(action.type)
     const shelterAction = action.type === 'seek_shelter' || action.type === 'build_shelter'
     const timeoutMs = longRunning ? Math.max(this.#config.server.actionTimeoutMs, shelterAction ? 180_000 : 120_000) : this.#config.server.actionTimeoutMs
     return new Promise((resolve) => {

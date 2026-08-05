@@ -7,13 +7,16 @@ export type AgentAction =
   | { type: 'come_to_player'; target: string }
   | { type: 'look_at_player'; target: string }
   | { type: 'wander'; radius: number }
+  | { type: 'return_to_zone' }
   | { type: 'attack_player'; target: string }
   | { type: 'eat_best_food' }
   | { type: 'equip_best'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
   | { type: 'attack_hostile'; targetId?: string }
   | { type: 'collect_own_drops'; itemId?: string; count: number; radius: number }
-  | { type: 'gather_resource'; resource: string; count: number }
+  | { type: 'gather_resource'; resource: string; count: number; authorizedPlayer?: string; targetBlock?: { x: number; y: number; z: number } }
   | { type: 'craft_item'; itemId: string; count: number }
+  | { type: 'place_block'; itemId?: string; count: number }
+  | { type: 'drop_item'; itemId?: string; count: number; target: string }
   | { type: 'use_item'; itemId?: string }
   | { type: 'seek_shelter' }
   | { type: 'build_shelter' }
@@ -57,6 +60,10 @@ export class PolicyEngine {
       case 'build_shelter':
         if (!this.#rules.wildernessDevelopmentOnly) return { allowed: true, reason: '运行时仍需验证目标方块与区域' }
         return { allowed: true, reason: '仅在 Fabric 验证为安全荒野开发区后允许' }
+      case 'place_block':
+        return { allowed: true, reason: '仅允许在 Fabric 验证的管理员批准区域内放置普通建筑方块' }
+      case 'drop_item':
+        return { allowed: true, reason: '只允许把自身背包物品丢给明确指定且在场的玩家' }
       case 'collect_own_drops':
         if (this.#rules.denyTakingPlayerItems) return { allowed: true, reason: '只允许收集本任务产生并由 Fabric 跟踪的掉落物' }
         return { allowed: true, reason: '允许收集掉落物' }

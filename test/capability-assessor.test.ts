@@ -57,6 +57,9 @@ test('采集和建房必须同时满足批准区域与荒野玩家距离', () =>
   const crowded: WorldState = { connected: true, inventory: [], nearbyPlayers: [{ name: 'Alice', distance: 20 }] }
   const empty: WorldState = { connected: true, inventory: [], nearbyPlayers: [] }
   assert.equal(assessAction(enabled, { type: 'gather_resource', resource: 'wood', count: 1 }, crowded).status, 'blocked')
+  assert.equal(assessAction(enabled, { type: 'gather_resource', resource: 'wood', count: 1 }, crowded, { requesterName: 'Alice' }).status, 'ready')
+  assert.equal(assessAction(enabled, { type: 'gather_resource', resource: 'wood', count: 1 }, { ...crowded, nearbyPlayers: [{ name: 'wraaaaaa', distance: 2 }] }, { requesterName: 'wraaaaaa' }).status, 'ready')
+  assert.equal(assessAction(enabled, { type: 'gather_resource', resource: 'wood', count: 1 }, { ...crowded, nearbyPlayers: [{ name: 'wraaaaaa', distance: 2 }, { name: 'Bob', distance: 10 }] }, { requesterName: 'wraaaaaa' }).status, 'blocked')
   assert.equal(assessAction(enabled, { type: 'build_shelter' }, crowded).status, 'blocked')
   assert.equal(assessAction(enabled, { type: 'gather_resource', resource: 'wood', count: 1 }, empty).status, 'ready')
 })

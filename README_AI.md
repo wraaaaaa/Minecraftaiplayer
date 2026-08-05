@@ -8,15 +8,16 @@
 
 当前工作机有两个目录：
 
-- 主开发仓：`D:\临时工程\minecraft aibot`
-- 旧目录/同步副本：`D:\开发\minecraft aibot`
+- 运行部署目录：含本机忽略配置和实服运行数据，开发与现场测试先在这里完成。
+- Git 本地仓库：只接收经过审计的非隐私源码/测试/示例/文档，用于提交和推送；实际绝对路径不得写入公开文档。
 
 主开发仓才是本轮编辑、验证、提交和推送的来源。不要同时运行两个目录里的 Bot，否则可能发生端口、PID、日志和配置冲突。换电脑后这些绝对路径自然失效，应以 `git rev-parse --show-toplevel` 的结果为准。
 
 远端仓库为 `https://github.com/wraaaaaa/Minecraftaiplayer.git`，默认分支为 `main`。本文不把提交 SHA 或测试数量当作长期不变量；第 2.2 节只保留带日期的本轮验证快照，接手时仍要动态查询：
 
 ```powershell
-Set-Location 'D:\临时工程\minecraft aibot'
+$projectRoot = 'C:\path\to\minecraft-aibot'
+Set-Location -LiteralPath $projectRoot
 git status --short --branch
 git remote -v
 git fetch origin
@@ -63,14 +64,14 @@ npm test
 
 ### 2.2 本轮验证快照（2026-08-05，Asia/Shanghai）
 
-- Node/TypeScript：最终 full `npm test` 为 59 tests、59 pass、0 fail，包含破坏方块别名、旧提示词兼容和当前发令玩家缺省目标回归。`tsc --noEmit` 与生产 build 均成功。
-- Fabric：进食完成判定修改后已完成一次 `clean build`，成功，不只是单文件编译。
-- 审计：暂存新增测试后再次扫描 110 个跟踪文件成功，`--history` 全 Git 对象扫描也成功；均为 0 个秘密、编码、控制/零宽字符或乱码问题。
-- 真实目标服：新 jar 已复制到 `.runtime` 且与构建产物 SHA-256 一致；后台重启后重新连接本机桥并进入 `你的域名.com`，WorldState schema v2 正常。开发区仍关闭，未执行破坏；显式进食修复需要玩家下一条“吃一个土豆”指令完成现场后置条件验收。
+- Node/TypeScript：本轮最终候选版完成 74/74 测试、`tsc --noEmit` 与生产 build；74 只是本日期快照，任何后续修改都必须重跑并以当次输出为准。
+- Fabric：采集、放置和工作台 3×3 合成修改后已完成 `clean build`，成功，不只是单文件编译。
+- 审计：本轮最终结果以第 23.8 节的收尾检查为准；不得沿用旧工作树的秘密或编码扫描结论。
+- 真实目标服：新 jar 已复制到 `.runtime`；后台重启后重新连接本机桥并进入世界，WorldState schema v2 正常。实测从授权区外自动返回、连续自主闲逛、放置原木后采回、工作台 3×3 合成木镐，以及空闲循环主动补充木板。
 - WebUI：完成浏览器回归；发现并修复 checkbox 区域横向溢出。
 - 真实目标服：确认客户端上报 WorldState schema v2；实测生命值约 9.3 且低饱食时触发 `eat_best_food`，进食后饱食恢复到 16。
 - 用户先前已经确认进服和跟随功能正常。
-- 真实服开发区保持关闭，因此 `gather_resource`、`craft_item`、`build_shelter`、`seek_shelter` 尚未完成现场验收。禁止把自动测试或 Gradle build 当成这些世界动作已经通过。
+- `gather_resource`、`place_block` 和 `craft_item` 已完成现场验收；`build_shelter`、`seek_shelter` 仍未完成本轮现场验收。禁止把自动测试或 Gradle build 当成未现场执行动作已经通过。
 
 该快照不包含固定提交 SHA。测试数量不是固定期望；后续 Agent 必须按当前 HEAD 重新查询和运行测试，测试数量随代码变化是正常现象。
 
@@ -82,18 +83,18 @@ npm test
 | EasyAuth | 识别 `/register`、`/login` 提示并发送命令；无提示时约 100 tick 后回退登录 | Fabric 路径没有使用 `easyAuth.loginDelayMs`，当前回退时间是 Java 固定逻辑 |
 | 自动复活 | 死亡后取消当前控制器动作，按配置延迟调用正常客户端复活 | 必须在实际服务器确认死亡界面和插件没有改变流程 |
 | 聊天/回复 | 支持点名、`!`、近距离语境寻址；回复经过出站密钥过滤 | 寻址是规则启发式，不是完整语义理解 |
-| 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁 | 单条复杂指令不会自动拆成任务 DAG；一次模型响应只选一个动作 |
-| 跟随/前往/闲逛 | 真实按键移动和碰撞跳跃 | 结果表示“已开始”，不是已到达；没有可靠寻路 |
+| 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁；单次模型可输出最多 12 步工具计划 | `actions[]` 是当前任务内的顺序计划，不是可跨重启恢复的依赖 DAG |
+| 跟随/前往/闲逛 | 真实按键移动，检查碰撞/落脚点，支持一步下降、跳跃、左右绕行、卡住恢复；空闲时能返回批准区 | 普通动作结果仍表示“已开始”；没有全局 A*，复杂地形可能失败 |
 | 自动进食 | 低血量或低饱食时选择安全食物，必要时从背包换到快捷栏，确认物品实际消耗 | 不会主动寻找或生产食物，也不会处理所有模组食物 |
 | 自动对敌 | 只攻击确认正在威胁 Bot 的敌对生物，检查视线、合法距离和攻击冷却 | 不会追击远处目标；自动排除苦力怕、末影人、猪灵和僵尸猪灵 |
 | 选装备/任务准备 | 按护甲、工具、武器、耐久和附魔选择当前最佳物品；末地任务有最低门槛 | 不会自动附魔、熔炼或取得缺失装备；模组装备评分可能不完整 |
-| 采集 | 在批准 AABB 内寻找已加载目标方块，验证工具、归属边界、玩家距离和方块真实破坏；Node 随后串联收取本次自有掉落 | 只搜索附近已加载区域且使用直线移动；掉落收取失败时整个任务按“已采下但未收全”失败 |
+| 采集 | 在批准 AABB 内只选择有暴露面的已加载资源；玩家“这个方块”使用服务器侧准星射线；验证工具、玩家距离、真实破坏和背包/自有掉落 | 只搜索附近已加载区域；没有矿洞级路径规划；确实未收进背包的掉落仍按部分失败记录 |
 | 拾取自己掉落 | 只追踪并拾取本控制器注册的掉落实体 | 所有权账本在 Java 内存中，客户端重启后丢失；没有来源证据就拒绝 |
-| 合成 | 使用已解锁且当前可合成的玩家背包 2x2 配方，确认背包数量增加 | 不支持工作台 3x3、多级规划、熔炉、酿造、锻造和附魔 |
+| 合成 | 使用已解锁且当前可合成的配方；2x2 走玩家背包，3x3 在批准区工作台完成；本地基础工具计划可串起木材、木板、木棍、工作台和木/石工具 | 仅覆盖基础工具依赖，不支持熔炉、酿造、锻造、附魔或任意长期规划 |
 | 建造住所 | 在批准区内建固定 3x3 小屋，放门、火把、墙和屋顶，逐块确认 | 需要现成材料；不自动合成门/火把；中途失败不会回滚已放方块 |
 | 寻找住所 | 优先已记录的家，其次床，再次测量到的安全位置；回家会验证开门、进入、关门和照明 | 采用保守直线移动，复杂地形可能失败；床只在适当维度和时间交互 |
 | 安全挂机 | 只有安全评估通过才停止移动；夜间或不安全时先寻求住所 | 没有完整逃生规划；火、岩浆、溺水或低血时目前不一定能主动脱险 |
-| 空闲自发展 | 安全等待后可由一次模型请求选择一个受限白名单动作，经能力、策略和开发区检查；玩家任务可抢占 | 不进入持久任务队列，不会拆解资源链；当前尚未在真实服开放开发区现场验收 |
+| 空闲自发展 | 无玩家任务时先用本地确定规则尝试木板、工作台、木棍、放置工作台、木镐、补充木石和区内探索；之后才可能调用受限模型决策；玩家任务可抢占 | 不进入持久任务队列，只覆盖这一条基础开局链，不能分解任意长期目标 |
 | 记忆 | 按玩家 UUID/名称隔离，保存事件和可选长期事实 | 没有自动摘要调度；删除主文件后只能依赖外部备份或上一代 `.bak` |
 | 经验 | 失败动作写入原因和纠正建议，未来按关键词检索进提示词 | 不是训练模型；没有自动验证 `verified` 或更新 `timesApplied` 的闭环 |
 | 皮肤 | 校验标准皮肤 PNG，并可生成其他玩家客户端安装包 | LocalSkin 不会由 Bot 广播；每位观察者都要装包或共同使用在线皮肤站 |
@@ -155,6 +156,8 @@ Node.js AI 控制器
 | `src/agent/addressing.ts` | 点名、强制前缀、距离和会话延续判定 |
 | `src/agent/capability-assessor.ts` | 执行前条件与危险任务装备门槛 |
 | `src/agent/decision.ts` | 模型 JSON 解析、动作白名单和参数归一化 |
+| `src/agent/basic-command.ts` | 高置信度自然命令的本地确定性动作与基础工具顺序计划，避免基本玩法依赖模型抽签 |
+| `src/agent/autonomous-development.ts` | 批准区返回、物资短缺判断、基础制作链和安全闲逛的一步规划器 |
 | `src/agent/prompt.ts` | 组装当前玩家专属记忆、经验和结构化世界状态 |
 | `src/agent/world-state.ts` | Node 内部规范化世界状态类型 |
 | `src/tasks/task-store.ts` | 持久任务队列、原子仲裁、恢复和终态 |
@@ -176,7 +179,7 @@ Node.js AI 控制器
 | `fabric-bridge/.../BridgeConnection.java` | Java 侧回环 JSONL 客户端和重连 |
 | `fabric-bridge/.../WorldStateEncoder.java` | schema v2 背包、装备、环境、敌人、掉落和安全状态 |
 | `fabric-bridge/.../SurvivalController.java` | 确定性进食、威胁识别、合法近战和安全评估 |
-| `fabric-bridge/.../PrimitiveTaskController.java` | 装备、使用物品、采集、自己掉落、2x2 合成 |
+| `fabric-bridge/.../PrimitiveTaskController.java` | 装备、使用物品、采集、自己掉落、普通方块放置、背包 2x2 与工作台 3x3 合成 |
 | `fabric-bridge/.../ShelterController.java` | 固定小屋建造、寻求住所、门/光照验证和家位置持久化 |
 | `fabric-bridge/.../mixin/LivingEntityDamageMixin.java` | 把受击来源送入生存/玩家自卫事件 |
 
@@ -381,9 +384,11 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - 断线发生在服务器已经执行动作、但结果尚未返回时，重试可能重复非幂等动作。当前没有跨重启的动作幂等账本，采集/建造测试必须关注这一点。
 - 任务文件当前不自动裁剪；长期运行需要后续增加归档或保留策略。
 
-### 8.4 当前不是多步骤规划器
+### 8.4 顺序工具计划，不是持久 DAG
 
-每条玩家消息产生一个任务，一次模型调用只返回一个动作。危险任务可自动插入一次 `prepare_for`，但不会把“收集木头、做工作台、做工具、挖矿、熔炼、建房”自动拆成可恢复的依赖图。多条玩家消息会排队；单条复合目标仍可能被拒绝或只完成其中一个动作。
+每条玩家消息产生一个持久任务。模型可返回单个 `action`，也可返回最多 12 个按依赖顺序排列的 `actions[]`；本地基础命令还会确定性生成木板、木棍、工作台、工作台放置、木/石工具和必要采集步骤。`AgentController` 每步都重新读取 Fabric 快照，依次执行能力检查、策略检查、危险准备和服务器后置条件验证，任一步失败即停止后续步骤并记录第 N/总步数。
+
+整个数组仍只属于一个 TaskRecord，未逐步持久化程序计数器；进程在非幂等步骤后断线重试时可能重复动作。因此它不是可跨重启恢复的依赖 DAG，也不会自动把熔炼、附魔、长期采矿、建城或通关目标无限拆解。
 
 ## 9. 模型接入和决策流水线
 
@@ -404,11 +409,11 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 3. 本地安全层先拒绝索取秘密/本地配置的请求，不调用模型。
 4. 加载当前玩家记忆、相关失败经验和最新结构化世界状态。
 5. 系统提示和用户载荷再次脱敏后调用模型。
-6. 解析唯一 JSON 对象；回复限制为单行 240 字，动作类型和参数本地归一化。
-7. `CapabilityAssessor` 检查客户端、目标、物资、配置和危险度。
-8. `PolicyEngine` 执行不可绕过的财产与自卫规则。
-9. 挖矿、战斗或末地相关任务先执行 `prepare_for`。
-10. Fabric 客户端执行动作并返回后置条件结果。
+6. 解析唯一 JSON 对象；回复限制为单行 240 字，`action` 或最多 12 个 `actions[]` 的类型和参数本地归一化。
+7. 对计划每一步重新读取最新 Fabric 世界快照。
+8. `CapabilityAssessor` 检查客户端、目标、物资、配置和危险度；`PolicyEngine` 执行不可绕过的财产与自卫规则。
+9. 当前步骤若为挖矿、战斗或末地相关任务，先执行 `prepare_for`。
+10. Fabric 客户端执行当前步骤并返回后置条件结果；成功才进入下一步。
 11. 失败写经验；成功写任务终态和模型选择的可选稳定事实。
 12. 回复再经过聊天出站密钥过滤。
 
@@ -427,9 +432,11 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - `gather_resource`
 - `break_block`（仅模型兼容入口，Node 会转换为 `gather_resource`）
 - `craft_item`
+- `place_block`
+- `drop_item`
 - `seek_shelter`、`build_shelter`、`wait_safe`
 
-`attack_player` 只给本地自卫链路使用，默认模型合约不公开它。`break_block`、`mine_block`、`break_natural_block` 在 `parseAgentDecision` 中只读取 `block/resource/blockId` 和 `count`，统一归一化为 `gather_resource`；模型给出的坐标和 `ownership` 都不会进入执行动作。`buildSystemPrompt` 会在自定义 `actionContract` 之后追加同样的兼容规则，因此升级用户即使保留忽略的旧版 `config/prompts.json`，模型也不会再以“动作列表没有破坏方块”为由拒绝。授权仍由 capability、policy 和 Fabric 开发区验证完成。`open_container` 虽有内部类型和策略分支，但 Fabric 执行器没有实现，也未对模型公开。
+`attack_player` 只给本地自卫链路使用，默认模型合约不公开它。`return_to_zone` 只由自主规划器产生，也不允许模型选择。`break_block`、`mine_block`、`break_natural_block` 在 `parseAgentDecision` 中只读取 `block/resource/blockId` 和 `count`，统一归一化为 `gather_resource`；模型给出的坐标和 `ownership` 都不会进入执行动作。“挖这个方块”的坐标只来自可信聊天身份对应玩家的 `nearbyPlayers[].lookingAtBlock`。`drop_item` 必须带明确玩家目标，Fabric 走近后使用正常背包 THROW，并验证 Bot 背包数量减少。`open_container` 虽有内部类型和策略分支，但 Fabric 执行器没有实现，也未对模型公开。
 
 玩家任务解析会把可信聊天身份 `identity.name` 作为 `follow_player`、`come_to_player`、`look_at_player` 漏写 `target` 时的缺省目标，因此“来这里”不会因模型少一个字段失败。该回填不用于 `attack_player`，攻击仍必须显式目标并通过短时自卫策略。
 
@@ -511,9 +518,9 @@ Primitive 与 Shelter 互斥；显式生存动作也不与它们并发。自动�
 `craft_item`：
 
 - 只使用已解锁的客户端 recipe book 配方。
-- 只支持宽高不超过 2x2 的 shaped 配方，或最多四种输入的 shapeless 配方。
-- 需要正常玩家背包菜单和空鼠标游标。
-- 通过正常放置配方与 quick-move，观察目标物品数量增加后成功。
+- 宽高不超过 2x2 的 shaped 配方或最多四种输入的 shapeless 配方使用正常玩家背包菜单。
+- 需要 3x3 的配方必须在批准开发区内找到 8 格范围的已加载工作台，正常走近并通过 `useItemOn` 打开真实 `CraftingMenu`；不允许远程或虚构工作台。
+- 两类配方都要求已解锁、当前材料足够且鼠标游标为空，通过 recipe book/quick-move 完成，观察目标物品数量增加后才成功并关闭菜单。
 
 ### 10.4 `ShelterController`
 
@@ -575,11 +582,12 @@ Fabric 每 15 秒触发一次 Node 主动 tick。没有排队/运行任务且 `a
 1. 低血或低饱食：`eat_best_food`。
 2. 有正在以 Bot 为目标的敌对生物且血量高于 critical：`attack_hostile`。
 3. 夜间或当前不安全：`seek_shelter`；失败后仅在允许建造且有开发区时尝试 `build_shelter`。
-4. 安全时：`wait_safe`，停止移动并警戒。
-5. 满足 `chat.proactiveEnabled`、`proactiveIdleMs` 和 `proactiveMinIntervalMs` 后，调用一次模型的 `safe_idle_self_development` 决策。
-6. 空闲模型一次最多选择一个动作：`none/wait_safe/eat_best_food/equip_best/prepare_for/attack_hostile/collect_own_drops/gather_resource/craft_item/use_item/seek_shelter/build_shelter`。
-7. 动作仍须通过相同的 capability 与 policy 检查。空闲模型禁止跟随、接近、注视或攻击玩家，也不能越出批准区采集/建造。
-8. 空闲采集会先按需要准备工具，采下后自动收取本次自有掉落；失败原因写经验。只有动作成功且期间没有玩家任务时，才可发送模型的可选自然回复。
+4. 若 `world.activePrimitive=movement`，本轮直接返回，不能用 `wait_safe` 清除上一轮移动。
+5. 到达确定性发展间隔后，先运行 `planAutonomousDevelopment`：区外 `return_to_zone`，区内按短缺选择木板、工作台、木棍、放置工作台、木镐、木/石采集或 `wander`。管理员 owner 在附近可监督这条主动采集，其他玩家仍阻止。
+6. 没有确定性步骤时才 `wait_safe`；随后在满足主动聊天间隔时调用一次受限模型决策。
+7. 空闲模型一次最多选择一个动作：`none/wait_safe/wander/eat_best_food/equip_best/prepare_for/attack_hostile/collect_own_drops/gather_resource/craft_item/place_block/use_item/seek_shelter/build_shelter`。
+8. 动作仍须通过相同的 capability 与 policy 检查。空闲模型禁止跟随、接近、注视或攻击玩家，也不能越出批准区采集/建造。
+9. 空闲采集会先按需要准备工具；若 `inventory_delta >= verified_broken_blocks`，说明掉落已自动拾取，不再重复启动收集器，否则继续追踪本任务自有掉落。失败原因写经验。
 
 玩家任务优先于空闲自发展：模型决策前后都会查看队列，玩家任务到达时会向正在运行的主动动作发送 `stop`；准备后和采集后也再次检查是否被抢占。`player_task_preempted` 不写成学习失败。
 
@@ -728,7 +736,7 @@ WebUI 进程本身独立于 Bot；关闭浏览器标签不会停止 WebUI或 Bot
 
 ### 15.1 模组同步
 
-本机服务器要求 mod 的历史来源目录是 `D:\开发\进服必须mod`，但真实路径只应写入忽略的 `config/mods.json` 或 WebUI，不要写入公共示例。未来服务器增加 mod 时：
+服务器要求 mod 的真实来源目录只应写入被忽略的 `config/mods.json` 或 WebUI，不要写入公共示例或文档。未来服务器增加 mod 时：
 
 1. 更新本地 mod 来源目录。
 2. 在 WebUI 执行同步，或运行 `npm run sync:mods`。
@@ -864,7 +872,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-fabric-clien
 
 11. 放置/选择天然测试资源，验证区外、玩家靠近、方块实体和错误工具均拒绝。
 12. 验证方块真实改变、掉落 provenance、只拾取自己掉落和背包数量后置条件。
-13. 用简单 2x2 配方验证真实合成；工作台配方应明确拒绝。
+13. 用简单 2x2 配方验证背包合成；放置工作台后用 3x3 配方验证真实菜单合成。区外、工作台过远或材料不足时应明确拒绝。
 14. 提供 23 同种方块、门和火把，验证固定小屋、门上下半、关门、光照和家文件。
 15. 重启客户端后执行 seek，确认家文件加载、开门、进入、关门和安全结果。
 16. 在施工中途断线测试重复风险和部分建筑残留，记录但不要自动破坏清理。
@@ -978,8 +986,10 @@ git push origin main
 | [Voyager](https://github.com/MineDojo/Voyager) | 自动课程、可检索技能库、环境反馈/执行错误/自验证循环、任务分解 | 示例测试栈是 Fabric 1.19、GPT-4、额外 Python/Mineflayer 环境，不能作为 26.2 模组客户端；其任意代码技能不符合本项目服务器安全边界 | 借鉴持久任务图与“技能模板+前置/后置条件+经验修正”，技能必须来自本地审核白名单，不允许模型直接生成并执行宿主代码 |
 | [Mindcraft](https://github.com/mindcraft-bots/mindcraft) | 多模型配置、Mineflayer 技能组合、多人协作思路 | 上游说明当前支持到 1.21.11，并明确警告启用模型写/执行代码会有提示注入风险；仍不是 26.2 Fabric 模组客户端 | 只借鉴模型/技能调度结构。禁止移植 `allow_insecure_coding` 类能力，模型输出继续限制为当前 JSON 动作契约 |
 | [Mineflayer](https://github.com/PrismarineJS/mineflayer) | 成熟的方块/实体/背包/合成 API，以及 pathfinder、auto-eat、tool、PVP 等插件生态 | 上游当前公开支持到 1.21.11；无真实 Fabric 模组容器与服务器同模组握手能力 | 保留只读协议探针和测试参考，不替换正式 `fabric_bridge`；可将插件的行为拆成 Java 端可验证原语 |
+| [Pendulum](https://modrinth.com/mod/pendulum) | MCP JSON-RPC、80+ Minecraft API、45 个 Baritone 函数和脚本组合 | 官方版本表仅把 1.20.1/1.21.1 标为可用，26.1.2 仍在开发，未提供 26.2 Fabric 构建；直接执行 JS 还会扩大远程代码执行面 | 借鉴“结构化工具目录 + 组合调用”，不下载不兼容 jar，不允许模型执行任意 JS |
+| [FundamentalLabs minecraft-mcp](https://github.com/FundamentalLabs/minecraft-mcp) | Mineflayer MCP 工具中的 `goTo/mine/craft/smelt/drop/give/sleep` 技能分层 | 正式路线需要真实 Fabric 26.2 模组握手，Mineflayer MCP 不能替代；引入 MCP 传输本身也不会自动解决动作后置条件 | 借鉴工具命名、参数和技能编排，底层继续映射到本项目 `AgentAction` 与 Fabric 原语 |
 
-选择原则：路径规划优先研究 Baritone；采集状态机参考 collectblock；长期任务/经验参考 Voyager；模型技能编排参考 Mindcraft。任何方案都必须经过 `AgentAction → capability → policy → Fabric 后置条件`，不能让第三方库绕开财产保护、开发区、玩家距离、停止抢占和任务恢复。可选依赖默认关闭，安装失败不能阻断现有中国网络下的核心启动链。
+选择原则：路径规划优先研究 Baritone；采集状态机参考 collectblock；长期任务/经验参考 Voyager；MCP 工具目录参考 Pendulum 与 minecraft-mcp；模型技能编排参考 Mindcraft。当前实现采用 MCP 的核心模式——类型化工具、结构化参数、组合计划、逐步结果——但没有伪装成一个已对外提供标准 MCP transport 的服务器。任何未来 MCP/第三方方案都必须经过 `AgentAction → capability → policy → Fabric 后置条件`，不能绕开财产保护、开发区、玩家距离、停止抢占和任务恢复。可选依赖默认关闭，安装失败不能阻断中国网络下的核心启动链。
 
 按优先级继续：
 
@@ -1014,3 +1024,71 @@ git push origin main
 - [ ] 只暂存审查过的文件，提交前检查 cached diff。
 - [ ] 推送 `origin/main` 成功后，再以 `--ff-only` 同步干净的旧目录。
 - [ ] 未实现功能保留为限制/待办，没有写成已完成。
+
+## 23. 2026-08-05 基础工具计划与自主移动交接
+
+### 23.1 工作范围和隐私边界
+
+- 运行部署目录与 Git 本地仓库是两个工作副本；同步只能复制受 Git 跟踪/明确新增的源码、测试、示例和文档。
+- 运行目录的 `config/bot.json`、`.env`、`data`、`logs`、`.runtime` 含本机部署数据并由 Git 忽略。不得把实际服务器地址、开发区坐标、API Key、EasyAuth 密码、PID、记忆或日志同步到公开仓库。
+- 最新用户指令授权在完成验证后把非隐私改动同步到本地仓库、提交并推送 `origin/main`；它取代本节旧版本曾记录的“禁止提前推送”阶段性约束。
+
+### 23.2 新状态数据
+
+`WorldStateEncoder` 每 5 秒最多扫描一次，以 Bot 方块坐标为中心，水平半径 8、垂直半径 5，只读取已加载位置。结果写入 JSONL state 的 `blockSurvey`，Node 经 `FabricBridgeClient.#blockSurvey` 严格校验后进入 `WorldState`：
+
+- `resources[]`：按 tag/ID 识别 logs、leaves、stone、soil、surface、coal/iron/copper/gold ore；每项有 `blockId/category/count/nearestDistance/nearest`。
+- `artificial[]`：方块实体，或名称含 planks、bricks、door、fence、stairs、slab、glass、concrete、terracotta、wool、carpet、bed、chest、barrel、furnace、crafting_table、redstone、rail、torch、lantern、ladder、bookshelf 的方块。
+- `protectedLikely=true`：发现方块实体或至少 4 个疑似建筑方块；分类为 `protected_structure_nearby`。有自然资源且未触发保护启发式时为 `natural_terrain_likely`，否则 `uncertain`。
+- 背包方块物品增加 `placeableBlockId`，供 Node 在执行前判断是否具备可放置材料。
+
+这只是保守启发式，不是方块所有权证明。管理员批准 AABB 是唯一世界修改授权；区外不得因扫描“看起来天然”就破坏。
+
+### 23.3 确定性基础命令
+
+`src/agent/basic-command.ts` 在 LLM 之前识别高置信度中文/英文命令：进食、安全白名单方块放置、2×2/3×3 合成、明确/模糊采集。支持阿拉伯数字和一至十九中文数量，常用资源别名、动态原木树种到木板 ID，以及依据 `blockSurvey` 和背包短缺为“采集材料”选择木材或石材。命中时日志模型名为 `local-deterministic`；未命中才构建记忆/经验上下文并调用 LLM。
+
+`buildSystemPrompt` 无论本机 `prompts.json` 是否为旧版，都会追加 `place_block` 和 `blockSurvey` 规则。`config/prompts.example.json` 与本机 `config/prompts.json` 已同步动作合同。
+
+### 23.4 `place_block` 原语
+
+链路：`AgentAction` → decision parser → capability → policy → Fabric JSONL → `PrimitiveTaskController.PlaceBlockTask`。参数为可选 `itemId` 与 `count`（1–16）。
+
+Java 只接受安全白名单材料：泥土类、石头/圆石/深板岩等基础石材、木板、羊毛、原木/木头，以及用于基础发展链的工作台；拒绝其他方块实体、非满方块、重力/特殊交互物。每个目标必须在批准区内、已加载、可替换、无方块实体，具有稳定支撑面；使用 `BlockPlaceContext` 验证 `canPlace/canSurvive/isUnobstructed/mayUseItemAt`。背包材料按服务器确认的 SWAP 移至快捷栏，按住潜行避免打开交互方块，通过 `gameMode.useItemOn` 放置，连续观察服务端目标方块为预期 block 两 tick 后计数。超时、材料耗尽、保护插件拒绝或目标变化均失败。
+
+### 23.5 采集关键修复
+
+- 玩家明确下令时，Node 内部附加 `authorizedPlayer`；模型解析器不能提供此字段。能力层和 Java 只豁免当前发令玩家本人，其他玩家仍受 `wildernessMinPlayerDistance` 保护，主动采集没有豁免。
+- `findResourceTarget` 不再选择 Bot 当前 X/Z 支撑柱中位于脚下或更低的方块，并要求普通搜索目标至少有一个暴露面，避免穿过表层建筑挖到不可见地下资源。玩家准星明确指定的单块目标走独立验证路径。
+- 旧状态机在 `BREAK` 之后先执行通用“目标变化”检查，导致每次真实成功都被当成外部变化、继续找下一个方块，最终挖空批准区后报告 `verified_broken_blocks=0`。现在 `BREAK` 阶段优先消费服务器方块变化后置条件，计数一次后进入掉落观察。
+- `GatherResourceTask` 记录任务开始时背包总物品数。完成结果包含 `verified_broken_blocks`、`registered_owned_drops` 和 `inventory_delta`：若背包增量已不少于确认破坏数，即使此前观察到掉落实体，也说明实体随后已自动拾取，Node 不再错误启动第二次收集；否则仍串联 provenance 收取。
+
+### 23.6 主动发展和重连
+
+`src/agent/autonomous-development.ts` 在 Bot 位于批准区外时先生成内部 `return_to_zone`；回到区内后依次处理原木转木板、工作台、木棍、工作台放置、木镐、木/石短缺，资源足够则 `wander radius=4`。Fabric 把目标限制在 AABB 内。`activePrimitive=movement` 时下一次心跳直接返回，不会再被 `wait_safe` 立即取消。
+
+Node 每轮仍先处理生存、危险和持久玩家队列。确定性发展间隔夹在 15–60 秒之间，不消耗模型；只有没有确定性步骤且主动聊天时间条件满足时才调用模型。玩家任务可抢占。
+
+修复了桥重连遗漏：旧实现只在 `joined_world` 消息启动主动 timer；Java 客户端仍在世界时 Node 重启只会重新握手并发送 state，不会再次发 joined_world，导致恢复的 queued 任务永不继续。现在任一 `connected:true` state 都调用幂等的 `#ensureProactiveTimer()`。
+
+### 23.7 多人回复
+
+TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一在所有成功、拒绝、失败、超时和停止回复前添加 `@<issuer.name>`（已有同名 mention 时不重复），再经过出站密钥过滤和聊天冷却。并发测试验证回复顺序为 owner `wraaaaaa`、近处 Alice、远处 Bob，且三条分别携带姓名。
+
+### 23.8 本轮验证证据
+
+- TypeScript：`npm run check` 成功。
+- Node：最终候选工作树 `npm test` 为 74 tests、74 pass、0 fail；数量只代表本快照，后续以当次输出为准。
+- Fabric：Java 25 下 `gradlew.bat clean build --no-daemon` 成功，新 jar 已复制到 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-0.1.0.jar`。
+- 生产与审计：`npm run build` 成功；`npm run audit` 扫描 110 个跟踪文件，0 个秘密、编码、乱码、控制字符或 JSON 问题；`git diff --check` 成功。
+- 真实服扫描和动作验证只记录动作后置条件，不在公开文档保存服务器地址或实际测试坐标。
+- 第一次采集暴露并复现连续挖掘状态机 bug；测试区产生的旧圆石掉落属于此授权测试遗留物。
+- 最新修复后实测：Bot 从批准区外自动返回；自主 `wander` 连续真实移动；`verified_placed_blocks=1` 放置橡木原木，随后 `verified_broken_blocks=1; registered_owned_drops=1; inventory_delta=1` 将其采回；净原木数保持不变。
+- 3x3 链路复测：先在背包 2x2 合成 4 木棍，再放置 1 个工作台，最后打开真实工作台菜单合成 1 把 `minecraft:wooden_pickaxe`，结果为 `verified_crafted_count=1; ...; grid=3x3`。最终工作台位于批准区内，Bot 仍在批准区。
+- `wander` 实测使位置在批准 AABB 内变化，没有越界。
+- 收尾回归发现“工作台已放在附近但背包为空时仍重复合成工作台”；规划条件现同时检查背包和 `blockSurvey`，只有两者都没有工作台才制作。新增测试验证附近已有工作台时直接规划木镐，并验证背包工作台会先放入批准区。
+- 完整后台重启后运行时重新达到 `in_world`，桥 `connected=true`，扫描仍为 `natural_terrain_likely`，Bot 坐标仍在批准区；当前测试目录运行的是本轮 Node 构建和与最新 Fabric 构建 SHA-256 一致的 jar。
+
+### 23.9 尚未完成
+
+本轮已证明附近基础采集、背包 2×2 与工作台 3×3 合成、安全白名单方块放置、批准区返回/探索和当前任务内顺序工具计划可行，但尚未达到完整“人类朋友式生存”：全局 A*、熔炼、容器、农业/狩猎、持久长期任务图、完整装备制造/附魔、跨区域探索和可恢复建筑计划仍待实现。当前碰撞感知绕行能处理普通障碍，但在洞穴、悬崖、水体和复杂模组地形上仍不等同 Baritone。继续开发应优先实现可替换的路径规划层和持久多阶段计划，不得用提示词把未实现能力描述成已完成。

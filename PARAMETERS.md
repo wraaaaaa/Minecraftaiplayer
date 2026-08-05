@@ -90,7 +90,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 | `proactiveIdleMs` | `180000` | 最后一次玩家消息后至少等待多久才调用一次空闲决策。 |
 | `proactiveMinIntervalMs` | `300000` | 两次空闲决策的最小间隔；同时控制主动聊天频率和模型 API 消耗。 |
 
-空闲决策只允许 `none`、`wait_safe`、进食/装备/确认威胁战斗、收取自有掉落、批准区采集、2×2 合成、使用物品、住所和准备类动作；程序硬性拒绝空闲时跟随、接近、注视或攻击玩家。每轮只执行一个主动作，采集前自动 `prepare_for:mining`，成功破坏后自动串联 `collect_own_drops`。玩家任务到达会用 `stop` 抢占空闲动作；失败会写入 `experience.json`。这不是跨多个阶段自动通关的规划器。
+空闲决策只允许 `none`、`wait_safe`、进食/装备/确认威胁战斗、收取自有掉落、批准区采集、2×2/工作台 3×3 合成、安全白名单方块放置、使用物品、住所和准备类动作；程序硬性拒绝空闲时跟随、接近、注视或攻击玩家。每轮只执行一个主动作，采集前自动 `prepare_for:mining`，成功破坏后自动串联 `collect_own_drops`。玩家任务到达会用 `stop` 抢占空闲动作；失败会写入 `experience.json`。本地开局规则能串起木板、工作台、木棍、工作台放置和木镐，但它不是任意目标的自动通关规划器。
 
 行为准则另存 `config/behavior-rules.json`，它是模型输出之后的程序级硬限制，不应只依赖提示词。
 
@@ -139,9 +139,11 @@ WebUI 可查看玩家档案、最近事件、经验摘要，并直接导出两�
 
 ### 动作能力与住所前置条件
 
-- 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`wander`、聊天与 `stop`。移动是轻量键位控制，不保证复杂地形绕路。
+- 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`wander`、聊天与 `stop`；内部自主动作还有 `return_to_zone`。Fabric 会检查前方碰撞、落脚点和一步下落，尝试跳跃/左右绕行，并在持续无进展后停止；这仍不是全局 A*。
 - 生存/战斗：`eat_best_food`、`equip_best`、`prepare_for`、`attack_hostile`，以及仅在程序记录的短时自卫窗口内允许的 `attack_player`。不会盲目攻击中立或高风险目标。
-- 物品/生产：`use_item`、`gather_resource`、模型兼容入口 `break_block`、`collect_own_drops`、`craft_item`。`break_block` 使用 `block/count`，进入执行器前必定转换为 `gather_resource(resource/count)`，不能携带坐标或自行声明归属。采集需要 `autonomy.autoGather:true`、已启用的 `developmentZone` 和玩家安全距离；合成只支持已解锁的玩家 2×2 配方。不支持任意坐标直接破坏、玩家/未知归属容器、工作台 3×3、熔炼或自动多阶段资源链。
+- 物品/生产：`use_item`、`gather_resource`、模型兼容入口 `break_block`、`collect_own_drops`、`craft_item`、`place_block`、`drop_item`。模型可给 `actions[]`（最多 12 步），Node 按顺序对每步重新做能力/策略/服务端后置条件验证，失败即停止。`break_block` 使用 `block/count`，进入执行器前必定转换为 `gather_resource(resource/count)`，不能携带模型猜测坐标或自行声明归属；“这个方块”只接受 `nearbyPlayers[].lookingAtBlock`。普通采集只选有暴露面的方块。合成只使用已解锁且材料充足的配方：2×2 走玩家背包；3×3 要求批准区内 8 格存在已加载工作台。不支持玩家/未知归属容器、熔炼或任意长期任务 DAG。
+
+`place_block.itemId` 可省略以自动选择安全材料，`count` 范围 1–16；当前 Java 白名单包括泥土类、基础石材、木板、羊毛、原木/木头和工作台。所有候选位置必须在 `developmentZone` 内，并通过已加载、可替换、稳定支撑、碰撞、方块实体及服务端 `mayUseItemAt` 检查。`craft_item.itemId` 是目标物品 ID，`count` 是目标新增数量；3×3 的工作台搜索半径为 8 格，工作台本身也必须在同一批准区内。
 - 安全/住所：`seek_shelter`、`build_shelter`、`wait_safe`。寻找住所会依次尝试同维度已记录住所、主世界未占用床附近的安全位置、实测安全点；找到床不会自动睡觉。
 
 固定住所外壳为 3×3、三格高，使用现有 3×3 稳定地面。背包必须预先具备：一个 `DoorBlock` 且可手动开关、一支普通 `minecraft:torch`、至少 23 个同一种安全实心满方块，并保持普通背包界面和空鼠标游标。整个施工目标必须在批准开发区内；候选空间需可替换、无方块实体和占位实体，门位不得受红石供电，8 格内不得有敌对威胁，其他玩家必须在 `wildernessMinPlayerDistance` 之外。门、火把和外壳全部走正常多人放置，并在服务端同步状态稳定后才计为完成；住所最终还要验证外壳、门关闭、内部光照和安全落脚点，成功后才写 `autonomy-state.json`。材料不足、移动卡住、保护插件拒绝、玩家靠近、断线或持久化失败都会明确返回失败。
@@ -190,3 +192,22 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 - 远端：`https://github.com/wraaaaaa/Minecraftaiplayer.git`，分支 `main`。
 
 任何功能、参数、迁移方式、测试结果或推送步骤发生变化时，必须同步更新三份文档中受影响的部分。推送前运行测试、无效字符扫描、敏感信息扫描，并确认 `.env`、`data`、`logs`、`.runtime` 仍被忽略。
+
+## 11. 2026-08-05 新状态与动作参数
+
+| 名称 | 存储/来源 | 含义 |
+| --- | --- | --- |
+| `world.blockSurvey` | 运行时 `data/runtime-status.json`，由 Fabric 自动生成，不手工配置 | 半径 8、上下 5 格的附近方块摘要；含资源、人造启发式、最近坐标和保护分类，5 秒缓存。 |
+| `inventory[].placeableBlockId` | 同上 | 该背包物品若是 `BlockItem`，对应可放置方块 ID；用于放置能力预检。 |
+| `place_block.itemId` | 动作参数，可省略 | 指定普通实心方块物品；省略时 Fabric 从安全白名单材料中选择。 |
+| `place_block.count` | 动作参数，默认 1 | 单次 1–16 个，每个都必须在批准区并由服务器确认。 |
+| `gather_resource.authorizedPlayer` | Node 内部临时字段，不写配置、不允许模型指定 | 仅对明确玩家命令豁免该发令人自身的荒野距离；其他玩家和主动采集不豁免。 |
+| `nearbyPlayers[].lookingAtBlock` | 运行时 `data/runtime-status.json`，Fabric 服务器侧射线检测 | 玩家眼睛前方 6 格内实际指向的方块 ID、坐标和距离；“挖掉这个方块”只使用此值。 |
+| `actions[]` | 单次模型 JSON，可省略 | 最多 12 个 `AgentAction`，按数组顺序逐步执行；不是持久化任务 DAG。 |
+| `drop_item.itemId/count/target` | 动作参数 | Bot 走到明确指定的附近玩家，使用正常背包 `THROW` 操作，并以自身背包数量减少作为完成条件。 |
+| `world.activePrimitive` | 运行时状态 | `movement` 表示异步路线仍在进行；主动心跳在它完成前不会执行 `wait_safe` 清掉按键。 |
+| 主动发展间隔 | 由 `chat.proactiveMinIntervalMs` 派生 | 确定性自发展实际限制在 15–60 秒；不调用模型。主动聊天仍遵循完整配置间隔。 |
+
+`developmentZone` 现在同时约束 `gather_resource`、`place_block`、`build_shelter`、自主 `wander` 和内部 `return_to_zone`。Bot 被跟随任务带出区域后，空闲循环先返回区域再发展。玩家命令的采集可以由发令玩家近距离监督，但其他玩家仍会阻止采集；建房仍不豁免任何附近玩家。WebUI 保存坐标后必须完整重启 Minecraft 客户端，因为 AABB 通过启动环境变量传给 Java。
+
+本机真实 `config/bot.json` 可填写授权测试区，但文件被 Git 忽略，文档与公开仓库不记录实际坐标。公开的 `config/bot.example.json` 必须保持 `developmentZone.enabled:false` 和零坐标，使用者按自己的可丢弃场地填写。

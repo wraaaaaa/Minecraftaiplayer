@@ -148,6 +148,8 @@ export class MinecraftClient implements ActionExecutor {
         bot.pathfinder.setGoal(new goals.GoalNear(targetX, Math.floor(base.y), targetZ, 1))
         return { ok: true, detail: '开始小范围安全闲逛' }
       }
+      case 'return_to_zone':
+        return { ok: false, detail: 'Mineflayer 兼容适配器不掌握 Fabric 管理员批准区域；请使用 Fabric 26.2 桥接客户端。' }
       case 'attack_player': {
         const entity = bot.players[action.target]?.entity
         if (!entity) return { ok: false, detail: `附近找不到攻击者 ${action.target}` }
@@ -162,6 +164,8 @@ export class MinecraftClient implements ActionExecutor {
       case 'collect_own_drops':
       case 'gather_resource':
       case 'craft_item':
+      case 'place_block':
+      case 'drop_item':
       case 'use_item':
       case 'seek_shelter':
       case 'build_shelter':
