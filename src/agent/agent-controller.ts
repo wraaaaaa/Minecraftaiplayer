@@ -16,6 +16,10 @@ import { inferBasicDecision } from './basic-command.js'
 import { planSurvivalProgression } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt } from './prompt.js'
 import type { WorldState } from './world-state.js'
+import type { PromptWorkspace } from '../prompts/prompt-workspace.js'
+import type { ContextCompressor } from '../memory/context-compressor.js'
+import type { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
+import { agentWorkspaceConfig } from '../config/types.js'
 
 export interface ActionExecutor {
   execute(action: AgentAction): Promise<{ ok: boolean; detail: string }>
@@ -102,6 +106,9 @@ export class AgentController {
   readonly #secrets: SecretGuard
   readonly #diagnostics: DiagnosticStore | undefined
   readonly #progression: ProgressionStore | undefined
+  readonly #promptWorkspace: PromptWorkspace | undefined
+  readonly #contextCompressor: ContextCompressor | undefined
+  readonly #selfImprovement: SelfImprovementManager | undefined
   #latestWorld: WorldState = { connected: false, inventory: [], nearbyPlayers: [] }
   #draining: Promise<void> | undefined
   #proactiveRun: Promise<void> | undefined
@@ -112,7 +119,7 @@ export class AgentController {
   #cancellationEpoch = 0
   #drainPausedForDisconnect = false
 
-  constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore }) {
+  constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore; promptWorkspace?: PromptWorkspace; contextCompressor?: ContextCompressor; selfImprovement?: SelfImprovementManager }) {
     this.#config = options.config
     this.#persona = options.persona
     this.#prompts = options.prompts
@@ -126,11 +133,16 @@ export class AgentController {
     this.#secrets = options.secrets
     this.#diagnostics = options.diagnostics
     this.#progression = options.progression
+    this.#promptWorkspace = options.promptWorkspace
+    this.#contextCompressor = options.contextCompressor
+    this.#selfImprovement = options.selfImprovement
   }
 
   async initialize(): Promise<void> {
     await this.#tasks.load()
     await this.#progression?.load()
+    await this.#promptWorkspace?.initialize()
+    await this.#selfImprovement?.initialize()
     const recovered = await this.#tasks.recoverRunning('controller_reconnect_recovery')
     if (recovered > 0) this.#logger.warn('已恢复连接中断时遗留的运行任务', { recovered })
   }
@@ -140,6 +152,7 @@ export class AgentController {
     this.#latestWorld = world
     const safeMessage = this.#secrets.sanitizeForPersistence(message).slice(0, 1000)
     await this.#memory.recordPlayerMessage(identity, safeMessage)
+    await this.#promptWorkspace?.ensurePlayerProfile(identity)
     if (isImmediateStop(safeMessage)) {
       await this.#handleImmediateStop(identity, safeMessage)
       return
@@ -185,13 +198,15 @@ export class AgentController {
       return
     }
     if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false)) {
-      const shelter = await this.#executeProactive({ type: 'seek_shelter' })
-      if (shelter.ok) return
-      if (autonomy.autoBuildShelter && (autonomy.developmentZone?.enabled || autonomy.allowVerifiedWilderness) && canBuildSafeShelter(world)) {
-        const buildAction: AgentAction = autonomy.developmentZone?.enabled
-          ? { type: 'build_shelter' }
-          : { type: 'build_shelter', verifiedWilderness: true }
-        await this.#executeProactive(buildAction)
+      // Without a recorded home, repeatedly scanning for an imaginary shelter only produces the
+      // same failure and prevents resource progression. Keep developing until a real home can be
+      // built; only then use seek_shelter as a high-priority return action.
+      if (world.home) {
+        const shelter = await this.#executeProactive({ type: 'seek_shelter' })
+        if (shelter.ok) return
+      }
+      if (!world.home && autonomy.autoBuildShelter && autonomy.allowVerifiedWilderness && canBuildSafeShelter(world)) {
+        await this.#executeProactive({ type: 'build_shelter', verifiedWilderness: true })
         return
       }
     }
@@ -231,6 +246,7 @@ export class AgentController {
               title: result.ok ? '自主发展动作已启动或完成' : '自主发展动作失败', summary: `${planned.stage}: ${planned.action.type}`,
               detail: result.detail, metadata: { source: 'local-deterministic', stage: planned.stage, action: planned.action.type }
             })
+            if (!result.ok && !/player_task_preempted/u.test(result.detail)) void this.#learnFromFailure(planned.action, result.detail, planned.reason)
             return
           }
           await this.#progression?.noteResult(planned.action.type, false, policy.reason)
@@ -251,11 +267,11 @@ export class AgentController {
     this.#lastProactiveAt = now
     try {
       const response = await this.#provider.complete({
-        system: this.#secrets.sanitizeForModel(buildSystemPrompt(this.#persona, this.#prompts)),
+        system: this.#secrets.sanitizeForModel(await this.#systemPrompt()),
         user: this.#secrets.sanitizeForModel(JSON.stringify({
           mode: 'safe_idle_self_development',
           instruction: this.#prompts.proactiveInstruction,
-          hardRules: '只可选择安全自主动作；不得跟随、接近、注视或攻击玩家，不得离开批准开发区采集/建造。没有确实可完成的进展时输出 none。',
+          hardRules: '只可选择安全自主动作；不得跟随、接近、注视或攻击玩家。采集和建造由 Fabric 逐目标判断天然地形、玩家结构、危险源和撤退路径，不使用人工坐标框。没有确实可完成的进展时输出 none。',
           structuredGameState: world
         }))
       })
@@ -304,9 +320,10 @@ export class AgentController {
                 context: 'safe_idle_self_development',
                 outcome: 'failure',
                 lesson: this.#secrets.sanitizeForPersistence(result.detail),
-                correction: '下次先检查批准区域、物资、配方、距离和真实后置条件；不能安全完成时保持等待。',
+                correction: '下次先检查目标环境、物资、配方、距离和真实后置条件；不能安全完成时保持等待。',
                 tags: ['proactive', decision.action.type]
               })
+              void this.#learnFromFailure(decision.action, result.detail, 'safe_idle_self_development')
             }
           }
         }
@@ -330,7 +347,7 @@ export class AgentController {
         if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return { ok: false, detail: 'player_task_preempted' }
       }
       const autonomy = autonomyConfig(this.#config)
-      const useDynamicWilderness = autonomy.allowVerifiedWilderness && !autonomy.developmentZone?.enabled
+      const useDynamicWilderness = autonomy.allowVerifiedWilderness
       const executionAction: AgentAction = action.type === 'gather_resource'
         ? { ...action, authorizedPlayer: autonomy.ownerName, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
         : action.type === 'craft_item' || action.type === 'place_block' || action.type === 'excavate_tunnel' || action.type === 'build_nether_portal' || action.type === 'build_shelter'
@@ -396,11 +413,35 @@ export class AgentController {
       let decision = inferBasicDecision(message, this.#latestWorld, identity.name)
       let decisionModel = 'local-deterministic'
       if (!decision) {
-        const context = await this.#memory.contextFor(identity)
+        const workspaceConfig = agentWorkspaceConfig(this.#config)
+        let context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
         const experiences = await this.#experience.relevant(message)
+        let systemPrompt = await this.#systemPrompt(identity)
+        let playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
+        if (this.#contextCompressor) {
+          try {
+            const compression = await this.#contextCompressor.maybeCompress(identity, systemPrompt.length + playerRequest.length)
+            if (compression.compressed > 0) {
+              await this.#diagnose({
+                type: 'memory', level: 'info', title: '上下文已自动压缩',
+                summary: `已压缩 ${compression.compressed} 条较旧事件，并保留最近 ${workspaceConfig.retainRecentEvents} 条。`,
+                detail: `before_chars=${compression.beforeChars}; after_chars=${compression.afterChars}`,
+                taskId: task.id, playerName: identity.name
+              })
+              context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
+              systemPrompt = await this.#systemPrompt(identity)
+              playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
+            }
+          } catch (error) {
+            await this.#diagnose({
+              type: 'failure', level: 'warning', title: '上下文压缩已安全跳过', summary: '继续使用未压缩的最近上下文。',
+              detail: error instanceof Error ? error.message : String(error), taskId: task.id, playerName: identity.name
+            })
+          }
+        }
         const response = await this.#provider.complete({
-          system: this.#secrets.sanitizeForModel(buildSystemPrompt(this.#persona, this.#prompts)),
-          user: this.#secrets.sanitizeForModel(buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } }))
+          system: this.#secrets.sanitizeForModel(systemPrompt),
+          user: this.#secrets.sanitizeForModel(playerRequest)
         })
         decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
         decisionModel = response.model
@@ -461,6 +502,7 @@ export class AgentController {
             }
             await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步准备失败：${safeDetail}`)
             await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先核对装备、耐久、食物和当前计划步骤；条件不足时停止后续步骤。', tags: ['plan', action.type, preparationPurpose] })
+            void this.#learnFromFailure({ type: 'prepare_for', purpose: preparationPurpose }, safeDetail, message)
             await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
             return
           }
@@ -470,7 +512,7 @@ export class AgentController {
 
         if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
         const autonomy = autonomyConfig(this.#config)
-        const useDynamicWilderness = autonomy.allowVerifiedWilderness && !autonomy.developmentZone?.enabled
+        const useDynamicWilderness = autonomy.allowVerifiedWilderness
         const executionAction: AgentAction = action.type === 'gather_resource'
           ? { ...action, authorizedPlayer: identity.name, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
           : action.type === 'craft_item' || action.type === 'place_block' || action.type === 'excavate_tunnel' || action.type === 'build_nether_portal' || action.type === 'build_shelter'
@@ -496,6 +538,7 @@ export class AgentController {
           }
           await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步 ${action.type} 失败：${safeDetail}`)
           await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次根据已经完成的步骤和最新背包/世界状态重建剩余计划，不能继续执行后续动作。', tags: ['plan', action.type] })
+          void this.#learnFromFailure(action, safeDetail, message)
           await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
           return
         }
@@ -521,6 +564,7 @@ export class AgentController {
         const fact = this.#secrets.sanitizeForPersistence(decision.remember)
         if (fact && !fact.includes('[REDACTED]')) {
           await this.#memory.rememberFact(identity, fact).catch(error => this.#logger.warn('任务已完成，但长期事实写入失败', error))
+          await this.#promptWorkspace?.appendPlayerFact(identity, fact).catch(error => this.#logger.warn('长期事实已写入统一记忆，但 USER.md 更新失败', error))
         }
       }
       const completedFallback = actions.every(action => action.type === 'none') ? '我在听。' : '好了。'
@@ -619,6 +663,32 @@ export class AgentController {
     await this.#diagnostics.append(safe).catch(error => {
       this.#logger.warn('本机诊断时间线写入失败', { error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })
     })
+  }
+
+  async #systemPrompt(identity?: PlayerIdentity): Promise<string> {
+    return this.#promptWorkspace
+      ? await this.#promptWorkspace.buildSystemPrompt(this.#persona, identity)
+      : buildSystemPrompt(this.#persona, this.#prompts)
+  }
+
+  async #learnFromFailure(action: AgentAction, detail: string, taskContext: string): Promise<void> {
+    if (!this.#selfImprovement) return
+    try {
+      const outcome = await this.#selfImprovement.learnFromFailure({ action, detail, taskContext })
+      if (outcome.status !== 'learned' && outcome.status !== 'rejected') return
+      await this.#diagnose({
+        type: 'self_improvement', level: outcome.status === 'learned' ? 'success' : 'warning',
+        title: outcome.status === 'learned' ? 'AI 已生成受限自我改进' : '自我改进建议被沙箱拒绝',
+        summary: outcome.status === 'learned' ? `失败签名 ${outcome.signature} 已写入可回滚学习区。` : `失败签名 ${outcome.signature} 未通过安全校验。`,
+        ...(outcome.guidance ? { detail: outcome.guidance } : {}),
+        metadata: { action: action.type, count: outcome.count ?? 0, researchSources: outcome.researchSources?.length ?? 0 }
+      })
+    } catch (error) {
+      await this.#diagnose({
+        type: 'self_improvement', level: 'warning', title: '自我改进本轮已跳过', summary: action.type,
+        detail: error instanceof Error ? error.message : String(error), metadata: { action: action.type }
+      })
+    }
   }
 
   async #safeChat(message: string): Promise<string> {

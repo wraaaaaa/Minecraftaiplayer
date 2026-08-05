@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import type { BehaviorRules, BotConfig, Persona, PromptTemplates, ReasoningEffort } from './types.js'
+import { agentWorkspaceConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
 import { parseJsonDocument } from '../core/json.js'
 
 const VALID_EFFORTS = new Set<ReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
@@ -86,6 +86,27 @@ export function validateConfig(config: BotConfig): void {
   if (path.resolve(config.storage.memoryFile) === path.resolve(config.storage.experienceFile)) {
     throw new Error('记忆文件与经验文件必须分开')
   }
+  const workspace = agentWorkspaceConfig(config)
+  requireString(workspace.promptDirectory, 'agentWorkspace.promptDirectory')
+  requireString(workspace.playerProfilesDirectory, 'agentWorkspace.playerProfilesDirectory')
+  if (path.resolve(workspace.promptDirectory) === path.resolve(workspace.playerProfilesDirectory)) throw new Error('系统提示词目录与玩家画像目录必须分开')
+  if (!Number.isInteger(workspace.contextBudgetChars) || workspace.contextBudgetChars < 8_000 || workspace.contextBudgetChars > 500_000) throw new Error('agentWorkspace.contextBudgetChars 必须是 8000-500000 的整数')
+  if (!Number.isFinite(workspace.compressionTriggerRatio) || workspace.compressionTriggerRatio < 0.5 || workspace.compressionTriggerRatio > 0.95) throw new Error('agentWorkspace.compressionTriggerRatio 必须在 0.5-0.95 之间')
+  if (!Number.isInteger(workspace.retainRecentEvents) || workspace.retainRecentEvents < 4 || workspace.retainRecentEvents > 64) throw new Error('agentWorkspace.retainRecentEvents 必须是 4-64 的整数')
+  const improvement = workspace.selfImprovement
+  for (const key of ['enabled', 'allowPromptEdits', 'allowBehaviorPatches'] as const) {
+    if (typeof improvement[key] !== 'boolean') throw new Error(`agentWorkspace.selfImprovement.${key} 必须是布尔值`)
+  }
+  if (!Number.isInteger(improvement.minimumRepeatedFailures) || improvement.minimumRepeatedFailures < 2 || improvement.minimumRepeatedFailures > 10) throw new Error('minimumRepeatedFailures 必须是 2-10 的整数')
+  if (!['baidu', 'searxng', 'disabled'].includes(improvement.researchProvider)) throw new Error('researchProvider 只能是 baidu、searxng 或 disabled')
+  if (!Number.isInteger(improvement.researchTimeoutMs) || improvement.researchTimeoutMs < 1000 || improvement.researchTimeoutMs > 60_000) throw new Error('researchTimeoutMs 必须是 1000-60000 的整数')
+  if (improvement.researchProvider !== 'disabled') {
+    requireString(improvement.researchEndpoint, 'agentWorkspace.selfImprovement.researchEndpoint')
+    const researchUrl = new URL(improvement.researchEndpoint)
+    const localOrLan = ['localhost', '127.0.0.1', '::1'].includes(researchUrl.hostname)
+      || /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(researchUrl.hostname)
+    if (researchUrl.protocol !== 'https:' && !localOrLan) throw new Error('研究端点必须使用 HTTPS；本机或局域网 SearXNG 可使用 HTTP')
+  }
   if (typeof config.easyAuth?.registerIfNeeded !== 'boolean') throw new Error('easyAuth.registerIfNeeded 必须是布尔值')
   if (config.autonomy !== undefined) {
     requireString(config.autonomy.ownerName, 'autonomy.ownerName')
@@ -110,16 +131,8 @@ export function validateConfig(config: BotConfig): void {
       if (config.autonomy[name] !== undefined && typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
     if (config.autonomy.longTermGoal !== undefined && config.autonomy.longTermGoal !== 'reach_end') throw new Error('autonomy.longTermGoal 当前只能是 reach_end')
-    const zone = config.autonomy.developmentZone
-    if (zone !== undefined) {
-      if (typeof zone.enabled !== 'boolean') throw new Error('autonomy.developmentZone.enabled 必须是布尔值')
-      requireString(zone.dimension, 'autonomy.developmentZone.dimension')
-      for (const coordinate of ['minX', 'minY', 'minZ', 'maxX', 'maxY', 'maxZ'] as const) {
-        if (!Number.isInteger(zone[coordinate]) || Math.abs(zone[coordinate]) > 30_000_000) throw new Error(`autonomy.developmentZone.${coordinate} 必须是有效方块坐标整数`)
-      }
-      if (zone.minX > zone.maxX || zone.minY > zone.maxY || zone.minZ > zone.maxZ) throw new Error('autonomy.developmentZone 最小坐标不能大于最大坐标')
-      if (zone.maxX - zone.minX > 256 || zone.maxY - zone.minY > 128 || zone.maxZ - zone.minZ > 256) throw new Error('autonomy.developmentZone 范围过大；单边最大 256 格，高度最大 128 格')
-    }
+    // developmentZone is deliberately not validated. It is a removed legacy field,
+    // ignored by autonomyConfig(), and must never block startup or grant permission.
   }
   requireString(config.promptsFile, 'promptsFile')
 }

@@ -182,6 +182,17 @@ final class LocalPathNavigator {
         return consecutivePlanFailures;
     }
 
+    /** Graph node that represents the player's real collision-supported feet position. */
+    BlockPos standingBlockPos(Minecraft client, LocalPlayer player) {
+        // When the server says the player is stably grounded/in water, blockPosition is the real
+        // feet cell. Re-projecting the current AABB to the block centre can falsely reject that
+        // cell in a narrow tunnel (the player may legitimately stand near an edge) and select the
+        // floor below, making the excavator repeatedly target the player's current Y as a climb.
+        if (player != null && (player.onGround() || player.isInWater())) return player.blockPosition();
+        BlockPos resolved = nearestStandableStart(client, player);
+        return resolved == null ? player.blockPosition() : resolved;
+    }
+
     String diagnoseDirectStep(Minecraft client, LocalPlayer player, BlockPos goal) {
         if (client == null || client.level == null || player == null || goal == null) return "missing_world_or_goal";
         BlockPos start = nearestStandableStart(client, player);

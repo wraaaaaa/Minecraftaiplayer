@@ -332,24 +332,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         primitives.setMinimumPlayerDistance(minimumPlayerDistance);
         advanced.setMinimumPlayerDistance(minimumPlayerDistance);
         shelter.setMinimumPlayerDistance(minimumPlayerDistance);
-        if (!Boolean.parseBoolean(environment("MCAI_DEVELOPMENT_ZONE_ENABLED", "false"))) {
-            primitives.clearApprovedZone();
-            shelter.clearApprovedZone();
-            return;
-        }
-        String dimension = environment("MCAI_DEVELOPMENT_ZONE_DIMENSION", "minecraft:overworld");
-        BlockPos minimum = new BlockPos(
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_X", 0),
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_Y", 0),
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MIN_Z", 0)
-        );
-        BlockPos maximum = new BlockPos(
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_X", 0),
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_Y", 0),
-            (int) environmentNumber("MCAI_DEVELOPMENT_ZONE_MAX_Z", 0)
-        );
-        primitives.setApprovedZone(dimension, minimum, maximum);
-        shelter.setApprovedZone(dimension, minimum, maximum);
+        // Manual AABB authorization was removed. Model intent is evaluated from live world state,
+        // while PrimitiveTaskController/WildernessGuard still validate every world mutation.
+        primitives.clearApprovedZone();
+        shelter.clearApprovedZone();
     }
 
     private boolean handleDeath(Minecraft client, LocalPlayer player) {
@@ -548,7 +534,14 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         long baseline = "eat_best_food".equals(type)
             ? survival.completedFoodConsumptionCount()
             : survival.successfulAttackCount();
-        pendingSurvivalAction = new PendingSurvivalAction(id, type, tick, baseline);
+        pendingSurvivalAction = new PendingSurvivalAction(
+            id,
+            type,
+            tick,
+            baseline,
+            player.getFoodData().getFoodLevel(),
+            player.getHealth()
+        );
         survival.tick(client);
     }
 
@@ -558,7 +551,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         long observed = "eat_best_food".equals(pending.type())
             ? survival.completedFoodConsumptionCount()
             : survival.successfulAttackCount();
-        if (observed > pending.baseline()) {
+        LocalPlayer player = Minecraft.getInstance().player;
+        boolean survivalValueImproved = "eat_best_food".equals(pending.type())
+            && player != null
+            && (player.getFoodData().getFoodLevel() > pending.baselineFood()
+                || player.getHealth() > pending.baselineHealth());
+        if (observed > pending.baseline() || survivalValueImproved) {
             pendingSurvivalAction = null;
             sendActionResult(
                 pending.id(),
@@ -574,6 +572,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             || (elapsed >= 20L && "attack_hostile".equals(pending.type())
                 && survival.mode() != SurvivalController.Mode.COMBAT)) {
             pendingSurvivalAction = null;
+            if ("eat_best_food".equals(pending.type())) survival.cancelFoodUse(Minecraft.getInstance());
             sendActionResult(pending.id(), false, "未观察到动作完成后置条件："
                 + survival.snapshot().detail() + "; elapsed_ticks=" + elapsed);
         }
@@ -639,43 +638,20 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 yield new ActionResult(true, target == null ? "已按服务器定位栏方位开始寻找最高优先玩家" : "已开始前往 " + targetName);
             }
             case "wander" -> {
-                PrimitiveTaskController.ApprovedZone zone = primitives.approvedZone();
-                if (zone == null) yield new ActionResult(false, "refused: no explicit approved exploration AABB");
-                if (!zone.dimension().equals(client.level.dimension().identifier().toString())) {
-                    yield new ActionResult(false, "refused: approved exploration zone belongs to another dimension");
-                }
-                if (!zone.contains(player.blockPosition())) {
-                    yield new ActionResult(false, "refused: bot is outside approved exploration AABB");
-                }
                 double radius = Math.max(2, Math.min(8, number(action, "radius", 6)));
-                double angle = Math.random() * Math.PI * 2;
-                double targetX = Math.max(zone.min().getX() + 0.5D, Math.min(zone.max().getX() + 0.5D,
-                    player.getX() + Math.cos(angle) * radius));
-                double targetZ = Math.max(zone.min().getZ() + 0.5D, Math.min(zone.max().getZ() + 0.5D,
-                    player.getZ() + Math.sin(angle) * radius));
-                if (!setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player)) {
-                    yield new ActionResult(false, "no collision-safe loaded route for approved-zone exploration");
+                boolean started = false;
+                for (int attempt = 0; attempt < 12 && !started; attempt++) {
+                    double angle = Math.random() * Math.PI * 2;
+                    double distance = radius * (0.55D + Math.random() * 0.45D);
+                    double targetX = player.getX() + Math.cos(angle) * distance;
+                    double targetZ = player.getZ() + Math.sin(angle) * distance;
+                    started = setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player);
                 }
-                yield new ActionResult(true, "started approved-zone environment exploration");
+                if (!started) yield new ActionResult(false, "no collision-safe loaded route selected from twelve environment-aware candidates");
+                yield new ActionResult(true, "started environment-aware short exploration");
             }
             case "return_to_zone" -> {
-                PrimitiveTaskController.ApprovedZone zone = primitives.approvedZone();
-                if (zone == null) yield new ActionResult(false, "refused: no explicit approved development AABB");
-                if (!zone.dimension().equals(client.level.dimension().identifier().toString())) {
-                    yield new ActionResult(false, "refused: approved development zone belongs to another dimension");
-                }
-                if (zone.contains(player.blockPosition())) {
-                    movement = null;
-                    clearMovement(client);
-                    yield new ActionResult(true, "already inside approved development AABB");
-                }
-                double targetX = (zone.min().getX() + zone.max().getX() + 1.0D) / 2.0D;
-                double targetZ = (zone.min().getZ() + zone.max().getZ() + 1.0D) / 2.0D;
-                double targetY = Math.max(zone.min().getY(), Math.min(zone.max().getY(), player.getY()));
-                if (!setMovement(new MovementTarget(null, targetX, targetY, targetZ, false, 1.2), player)) {
-                    yield new ActionResult(false, "no collision-safe loaded route from current position toward approved development AABB");
-                }
-                yield new ActionResult(true, "started returning to approved development AABB");
+                yield new ActionResult(false, "manual development zones were removed; use explore_frontier, seek_shelter, or come_to_player");
             }
             case "attack_player" -> {
                 String targetName = string(action, "target");
@@ -906,5 +882,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private record ActionResult(boolean ok, String detail) { }
     private record MovementTarget(String playerName, double x, double y, double z, boolean follow, double stopDistance) { }
-    private record PendingSurvivalAction(String id, String type, int startedTick, long baseline) { }
+    private record PendingSurvivalAction(
+        String id,
+        String type,
+        int startedTick,
+        long baseline,
+        int baselineFood,
+        float baselineHealth
+    ) { }
 }

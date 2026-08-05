@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { AtomicJsonFile } from '../core/atomic-json-file.js'
 
-export type DiagnosticEventType = 'request' | 'decision' | 'step' | 'result' | 'failure' | 'lifecycle'
+export type DiagnosticEventType = 'request' | 'decision' | 'step' | 'result' | 'failure' | 'lifecycle' | 'memory' | 'self_improvement'
 export type DiagnosticLevel = 'info' | 'success' | 'warning' | 'error'
 
 export interface DiagnosticEvent {

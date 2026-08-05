@@ -14,6 +14,10 @@ import { DiagnosticStore } from '../diagnostics/diagnostic-store.js'
 import { SecretGuard } from '../security/secret-guard.js'
 import path from 'node:path'
 import { ProgressionStore } from '../progression/progression-store.js'
+import { agentWorkspaceConfig } from '../config/types.js'
+import { PromptWorkspace } from '../prompts/prompt-workspace.js'
+import { ContextCompressor } from '../memory/context-compressor.js'
+import { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -34,11 +38,23 @@ export class BotRuntime {
     const diagnostics = new DiagnosticStore('data/diagnostics.json')
     const progression = new ProgressionStore(config.storage.progressionFile ?? 'data/progression.json')
     const secrets = new SecretGuard([apiKey, easyAuthPassword, config.server.host, path.resolve('.')])
+    const workspaceConfig = agentWorkspaceConfig(config)
+    const promptWorkspace = new PromptWorkspace({
+      promptDirectory: workspaceConfig.promptDirectory,
+      playerProfilesDirectory: workspaceConfig.playerProfilesDirectory
+    })
     const status = new RuntimeStatusStore()
-    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load()])
+    const provider = createLlmProvider(config.model, apiKey, this.#logger)
+    const contextCompressor = new ContextCompressor({ config: workspaceConfig, provider, memory, workspace: promptWorkspace, secrets })
+    const selfImprovement = new SelfImprovementManager({ config: workspaceConfig.selfImprovement, provider, workspace: promptWorkspace, secrets })
+    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize()])
+    const existingMemory = await memory.load()
+    await Promise.all(Object.values(existingMemory.players).map(player => promptWorkspace.ensurePlayerProfile(
+      { name: player.currentName, ...(player.uuid ? { uuid: player.uuid } : {}) },
+      player
+    )))
     const serverLabel = `${config.server.host}:${config.server.port}`
     await status.report('starting', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
-    const provider = createLlmProvider(config.model, apiKey, this.#logger)
     while (!this.#stopping) {
       const policy = new PolicyEngine(rules)
       const client = config.server.adapter === 'fabric_bridge'
@@ -46,7 +62,7 @@ export class BotRuntime {
         : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, secrets, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
       await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
-      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets, diagnostics, progression })
+      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets, diagnostics, progression, promptWorkspace, contextCompressor, selfImprovement })
       await controller.initialize()
       client.setMessageHandler((identity, message, world) => controller.handlePlayerMessage(identity, message, world))
       client.setProactiveHandler((world) => controller.proactiveTick(world))

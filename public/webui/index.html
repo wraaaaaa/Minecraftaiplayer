@@ -27,8 +27,7 @@
       <a href="#model">大模型</a>
       <a href="#chat">聊天与自主</a>
       <a href="#autonomy">自主生存与任务</a>
-      <a href="#persona">AI 人设</a>
-      <a href="#prompts">提示词</a>
+      <a href="#persona">提示词与玩家画像</a>
       <a href="#policy">行为安全</a>
       <a href="#mods">服务器模组</a>
       <a href="#skin">皮肤</a>
@@ -125,7 +124,7 @@
       </section>
 
       <section id="chat" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>空闲时会不会乱动或刷屏？</summary><p>空闲时间和最小间隔共同限制 AI 决策；动作还会经过开发区、财产、距离和真实后置条件检查。关闭“允许空闲 AI 决策与偶尔聊天”会停用模型驱动的空闲发展，但本地进食、防卫和安全挂机仍由下方总开关控制。</p></details></div>
+        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>空闲时会不会乱动或刷屏？</summary><p>空闲时间和最小间隔共同限制 AI 决策；动作还会经过环境、财产、危险源和真实后置条件检查。关闭“允许空闲 AI 决策与偶尔聊天”会停用模型驱动的空闲发展，但本地进食、防卫和安全挂机仍由下方总开关控制。</p></details></div>
         <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>远距离且无对话语境时要求点名</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>允许空闲 AI 决策与偶尔聊天</label></div>
         <div class="form-grid three"><label>回复前缀<input id="replyPrefix" type="text"></label><label>聊天冷却（毫秒）<input id="cooldownMs" type="number" min="0"></label><label>进入空闲决策（毫秒）<input id="proactiveIdleMs" type="number" min="1000"></label><label>空闲决策最小间隔（毫秒）<input id="proactiveMinIntervalMs" type="number" min="1000"></label></div>
       </section>
@@ -187,37 +186,50 @@
               <label class="switch"><input id="protectOwner" type="checkbox"><span></span>跟随时保护最高优先玩家</label>
               <label class="switch"><input id="allowVerifiedWilderness" type="checkbox"><span></span>允许 Fabric 动态验证荒野</label>
             </div>
-            <p class="safety-note">这些开关只代表允许规划对应能力，不会绕过行为准则。采集和建造仍必须通过可信荒野、玩家财产与未知归属检查；证据不足时 Bot 应拒绝并说明原因。</p>
-            <div class="development-zone">
-              <div class="development-zone-heading">
-                <div><h3>管理员批准的开发区域（可选）</h3><p>启用后强制把采集和建造限制在固定坐标；关闭时只有勾选“动态验证荒野”才可发展，Fabric 会逐次排除建筑、容器、危险流体和附近玩家。</p></div>
-                <label class="switch"><input id="developmentZoneEnabled" type="checkbox"><span></span>启用批准区域</label>
-              </div>
-              <div class="form-grid two">
-                <label class="span-two">维度 ID<input id="developmentDimension" type="text" placeholder="minecraft:overworld"><small>必须与游戏状态中的完整维度 ID 一致。</small></label>
-              </div>
-              <div class="coordinate-grid">
-                <label>最小 X<input id="developmentMinX" type="number" min="-30000000" max="30000000" step="1"></label>
-                <label>最小 Y<input id="developmentMinY" type="number" min="-30000000" max="30000000" step="1"></label>
-                <label>最小 Z<input id="developmentMinZ" type="number" min="-30000000" max="30000000" step="1"></label>
-                <label>最大 X<input id="developmentMaxX" type="number" min="-30000000" max="30000000" step="1"></label>
-                <label>最大 Y<input id="developmentMaxY" type="number" min="-30000000" max="30000000" step="1"></label>
-                <label>最大 Z<input id="developmentMaxZ" type="number" min="-30000000" max="30000000" step="1"></label>
-              </div>
-              <small class="zone-limit">最小坐标不能大于最大坐标；X/Z 单边最多 256 格，高度最多 128 格。</small>
-            </div>
+            <p class="safety-note">人工坐标开发区已经取消。AI 根据结构化环境自行选择探索、采集和放置意图；Fabric 仍会对每个目标逐格验证天然性、玩家结构、容器、危险流体、碰撞和撤退路线，文字提示词不能绕过硬检查。</p>
           </article>
         </div>
       </section>
 
       <section id="persona" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">PERSONA</p><h2>AI 人设</h2></div><details><summary>如何写人设？</summary><p>描述“它是谁”和“怎么说话”，目标写希望长期坚持的方向，边界写绝对不能做的事。每行一个目标或边界。</p></details></div>
-        <div class="form-grid two"><label>角色名称<input id="personaName" type="text"></label><label>说话风格<input id="speakingStyle" type="text"></label><label class="span-two">角色描述<textarea id="personaDescription" rows="3"></textarea></label><label>长期目标（每行一个）<textarea id="personaGoals" rows="6"></textarea></label><label>角色边界（每行一个）<textarea id="personaBoundaries" rows="6"></textarea></label></div>
-      </section>
-
-      <section id="prompts" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">PROMPT TEMPLATES</p><h2>提示词与记忆规则</h2></div><details><summary>这些内容何时使用？</summary><p>每次处理玩家聊天和空闲决策时都会读取这里。身份模板支持 {{name}}、{{description}}、{{speakingStyle}}、{{goals}}、{{boundaries}} 占位符；每行一条能力或记忆规则。</p></details></div>
-        <div class="form-grid two"><label class="span-two">身份模板<textarea id="promptIdentity" rows="5"></textarea></label><label>能力与安全规则（每行一条）<textarea id="promptCapabilities" rows="8"></textarea></label><label>记忆与经验规则（每行一条）<textarea id="promptMemory" rows="8"></textarea></label><label class="span-two">动作输出契约<textarea id="promptContract" rows="5"></textarea></label><label class="span-two">空闲自主提示<textarea id="promptProactive" rows="4"></textarea></label></div>
+        <div class="section-heading"><div><p class="eyebrow">OPENCLAW-STYLE AGENT WORKSPACE</p><h2>身份、人设与自我进化</h2></div><details open><summary>文件怎样生效？</summary><p>下方内容与 <code>data/agent-prompts</code> 中同名文件双向对应，每次模型决策都会重新读取。SOUL.md 是核心人设；rules.md 只是最高文字规则，真正安全边界仍由本地策略、秘密沙箱与 Fabric 逐目标验证执行。</p></details></div>
+        <div class="prompt-file-grid">
+          <label>rules.md（规则说明）<textarea id="agentRules" rows="16" spellcheck="false"></textarea></label>
+          <label>IDENTITY.md（身份基线）<textarea id="agentIdentity" rows="16" spellcheck="false"></textarea></label>
+          <label>SOUL.md（核心人设）<textarea id="agentSoul" rows="18" spellcheck="false"></textarea></label>
+          <label>TOOLS.md（工具与自动学习区）<textarea id="agentTools" rows="18" spellcheck="false"></textarea></label>
+          <label class="span-two">MEMORY.md（记忆与压缩规范）<textarea id="agentMemory" rows="18" spellcheck="false"></textarea></label>
+        </div>
+        <div class="autonomy-card workspace-settings">
+          <h3>上下文压缩与自我改进沙箱</h3>
+          <div class="form-grid three">
+            <label>运行时提示词目录<input id="promptDirectory" type="text"><small>必须位于项目 data 目录内。</small></label>
+            <label>玩家画像目录<input id="playerProfilesDirectory" type="text"><small>每位玩家单独一个 USER.md。</small></label>
+            <label>上下文预算（字符）<input id="contextBudgetChars" type="number" min="8000" max="500000"></label>
+            <label>触发压缩比例<input id="compressionTriggerRatio" type="number" min="0.5" max="0.95" step="0.01"></label>
+            <label>原样保留最近事件<input id="retainRecentEvents" type="number" min="4" max="64"></label>
+            <label>重复失败达到次数<input id="minimumRepeatedFailures" type="number" min="2" max="10"></label>
+            <label>研究来源<select id="researchProvider"><option value="baidu">百度（中国大陆默认）</option><option value="searxng">自建 SearXNG</option><option value="disabled">禁用联网研究</option></select></label>
+            <label class="span-two">研究端点<input id="researchEndpoint" type="url"><small>百度默认 https://www.baidu.com/s；SearXNG 可使用本机或局域网 HTTP。</small></label>
+            <label>研究超时（毫秒）<input id="researchTimeoutMs" type="number" min="1000" max="60000"></label>
+          </div>
+          <div class="toggle-row">
+            <label class="switch"><input id="selfImprovementEnabled" type="checkbox"><span></span>启用重复失败研究与自我改进</label>
+            <label class="switch"><input id="allowPromptEdits" type="checkbox"><span></span>允许 AI 更新 TOOLS.md 托管区</label>
+            <label class="switch"><input id="allowBehaviorPatches" type="checkbox"><span></span>允许声明式行为补丁</label>
+          </div>
+          <p class="safety-note">AI 无权自动修改 rules.md、IDENTITY.md、SOUL.md、密钥、连接配置、启动脚本或可执行源码；“非关键代码”以经过校验、可关闭、可回滚的 behavior-patches.json 声明式策略实现。</p>
+          <h3>当前声明式行为补丁</h3><pre id="behaviorPatchView">暂无补丁</pre>
+        </div>
+        <div class="autonomy-card player-profile-editor">
+          <div class="section-heading"><div><h3>逐玩家 USER.md</h3><p class="muted">UUID 优先、玩家名兜底；新玩家首次发来有效消息时自动创建。</p></div><button id="savePlayerProfileButton" class="button ghost" type="button">保存当前玩家画像</button></div>
+          <label>选择玩家<select id="playerProfileSelect" class="ui-only"><option value="">暂无玩家画像</option></select></label>
+          <label>USER.md<textarea id="playerProfileContent" class="ui-only" rows="18" spellcheck="false" placeholder="选择玩家后显示其独立画像"></textarea></label>
+        </div>
+        <div hidden aria-hidden="true">
+          <input id="personaName"><input id="speakingStyle"><textarea id="personaDescription"></textarea><textarea id="personaGoals"></textarea><textarea id="personaBoundaries"></textarea>
+          <textarea id="promptIdentity"></textarea><textarea id="promptCapabilities"></textarea><textarea id="promptMemory"></textarea><textarea id="promptContract"></textarea><textarea id="promptProactive"></textarea>
+        </div>
       </section>
 
       <section id="policy" class="panel">

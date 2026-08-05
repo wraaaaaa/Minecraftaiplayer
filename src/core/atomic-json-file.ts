@@ -52,8 +52,31 @@ export class AtomicJsonFile<T> {
       await rename(temporary, this.#file)
     } catch (error) {
       if (process.platform !== 'win32') throw error
-      await rm(this.#file, { force: true })
-      await rename(temporary, this.#file)
+      // Windows may briefly deny unlink/rename while the WebUI is polling the file or an
+      // antivirus scanner has an open handle. Retrying keeps the atomic temp+backup contract and
+      // prevents a read-only dashboard from permanently stopping runtime-state persistence.
+      let lastError: unknown = error
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        try {
+          await rm(this.#file, { force: true })
+          await rename(temporary, this.#file)
+          return
+        } catch (retryError) {
+          lastError = retryError
+          const code = (retryError as NodeJS.ErrnoException).code
+          if (!['EBUSY', 'EPERM', 'EACCES', 'ENOENT'].includes(code ?? '')) throw retryError
+          await new Promise(resolve => setTimeout(resolve, Math.min(25 * (attempt + 1), 250)))
+        }
+      }
+      // Some Windows scanners keep FILE_SHARE_DELETE disabled for seconds at a time. The backup
+      // above still makes this recoverable, so use an in-place replacement as the bounded final
+      // fallback instead of dropping every subsequent status update forever.
+      try {
+        await writeFile(this.#file, body, 'utf8')
+        await rm(temporary, { force: true })
+      } catch {
+        throw lastError
+      }
     }
   }
 }

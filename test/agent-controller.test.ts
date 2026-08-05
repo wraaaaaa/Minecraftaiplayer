@@ -209,7 +209,7 @@ test('采集任务只有在自有掉落实际进入背包后才完成', async ()
 
   assert.deepEqual(actions, [
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 4, authorizedPlayer: 'Alice' },
+    { type: 'gather_resource', resource: 'wood', count: 4, authorizedPlayer: 'Alice', verifiedWilderness: true },
     { type: 'collect_own_drops', count: 4, radius: 16 }
   ])
   assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
@@ -242,11 +242,11 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
 
   await Promise.all([controller.proactiveTick(unsafeNight), controller.proactiveTick(unsafeNight)])
 
-  assert.deepEqual(actions, [{ type: 'seek_shelter' }, { type: 'wait_safe' }])
+  assert.deepEqual(actions, [{ type: 'wait_safe' }])
   await logger.flush()
 })
 
-test('安全空闲时模型只能在批准区域串行执行一个自主发展动作', async () => {
+test('安全空闲时模型只能串行执行一个经过逐目标验证的自主发展动作', async () => {
   const suffix = `${process.pid}-${Date.now()}-idle-development`
   const testConfig = structuredClone(config)
   testConfig.chat = { ...testConfig.chat, proactiveEnabled: true, proactiveIdleMs: 0, proactiveMinIntervalMs: 0 }
@@ -268,7 +268,7 @@ test('安全空闲时模型只能在批准区域串行执行一个自主发展�
   assert.deepEqual(actions, [
     { type: 'wait_safe' },
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa' },
+    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa', verifiedWilderness: true },
     { type: 'collect_own_drops', count: 2, radius: 16 }
   ])
   await logger.flush()
@@ -507,7 +507,7 @@ test('采集掉落实体已被自动拾取时以背包增量判定成功，不�
 
   assert.deepEqual(actions, [
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'stone', count: 1, authorizedPlayer: 'Alice' }
+    { type: 'gather_resource', resource: 'stone', count: 1, authorizedPlayer: 'Alice', verifiedWilderness: true }
   ])
   assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
   await logger.flush()
@@ -545,7 +545,7 @@ test('采集途中已自动拾取一部分时只追踪剩余掉落', async () =>
 
   assert.deepEqual(actions, [
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'stone', count: 4, authorizedPlayer: 'Alice' },
+    { type: 'gather_resource', resource: 'stone', count: 4, authorizedPlayer: 'Alice', verifiedWilderness: true },
     { type: 'collect_own_drops', count: 2, radius: 16 }
   ])
   assert.equal((await tasks.load()).tasks[0]?.status, 'completed')

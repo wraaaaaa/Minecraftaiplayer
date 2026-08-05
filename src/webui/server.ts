@@ -4,7 +4,7 @@ import { access, copyFile, mkdir, readFile, writeFile, rename } from 'node:fs/pr
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
-import { DEFAULT_AUTONOMY_CONFIG, type BehaviorRules, type BotConfig, type ModsConfig, type Persona, type PromptTemplates, type SkinConfig } from '../config/types.js'
+import { agentWorkspaceConfig, DEFAULT_AGENT_WORKSPACE_CONFIG, DEFAULT_AUTONOMY_CONFIG, type BehaviorRules, type BotConfig, type ModsConfig, type Persona, type PromptTemplates, type SkinConfig } from '../config/types.js'
 import { Logger } from '../core/logger.js'
 import { parseJsonDocument } from '../core/json.js'
 import { createLlmProvider } from '../llm/provider-factory.js'
@@ -16,6 +16,7 @@ import type { ExperienceDocument } from '../experience/experience-store.js'
 import type { TaskDocument } from '../tasks/task-store.js'
 import type { DiagnosticDocument } from '../diagnostics/diagnostic-store.js'
 import type { ProgressionDocument } from '../progression/progression-store.js'
+import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prompts/prompt-workspace.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -24,7 +25,6 @@ const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY'] as const
-const DEFAULT_DEVELOPMENT_ZONE = Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
 
 type WebUiBotConfig = BotConfig
 
@@ -136,6 +136,14 @@ function validatePrompts(value: unknown): asserts value is PromptTemplates {
   }
 }
 
+function validatePromptDocuments(value: unknown): asserts value is PromptDocuments {
+  const candidate = object(value, 'agentPrompts')
+  for (const name of PROMPT_DOCUMENTS) {
+    if (typeof candidate[name] !== 'string' || !candidate[name].trim()) throw new Error(`${name} 必须是非空 Markdown`)
+    if ((candidate[name] as string).length > 128_000) throw new Error(`${name} 超过 128000 字符限制`)
+  }
+}
+
 function validateSkin(value: unknown): asserts value is SkinConfig {
   const candidate = object(value, 'skin')
   if (typeof candidate.enabled !== 'boolean') throw new Error('skin.enabled 必须是布尔值')
@@ -147,6 +155,7 @@ function validateSkin(value: unknown): asserts value is SkinConfig {
 }
 
 function ensureProjectPaths(config: WebUiBotConfig): void {
+  const workspace = agentWorkspaceConfig(config)
   const checks: Array<[string, string]> = [
     [config.personaFile, path.join(projectRoot, 'config')],
     [config.promptsFile, path.join(projectRoot, 'config')],
@@ -157,6 +166,8 @@ function ensureProjectPaths(config: WebUiBotConfig): void {
     [config.storage.autonomyFile ?? 'data/autonomy-state.json', path.join(projectRoot, 'data')],
     [config.storage.progressionFile ?? 'data/progression.json', path.join(projectRoot, 'data')],
     [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', path.join(projectRoot, 'data')],
+    [workspace.promptDirectory, path.join(projectRoot, 'data')],
+    [workspace.playerProfilesDirectory, path.join(projectRoot, 'data')],
     [config.logging.file, path.join(projectRoot, 'logs')]
   ]
   for (const [configured, allowedRoot] of checks) {
@@ -164,6 +175,11 @@ function ensureProjectPaths(config: WebUiBotConfig): void {
     if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`WebUI 不允许把文件写到项目范围外：${configured}`)
   }
   if (!['127.0.0.1', 'localhost', '::1'].includes(config.server.bridgeHost)) throw new Error('Fabric 桥必须绑定本机回环地址')
+}
+
+function promptWorkspace(config: WebUiBotConfig): PromptWorkspace {
+  const workspace = agentWorkspaceConfig(config)
+  return new PromptWorkspace({ promptDirectory: workspace.promptDirectory, playerProfilesDirectory: workspace.playerProfilesDirectory })
 }
 
 function ensureSkinPaths(skin: SkinConfig): void {
@@ -207,22 +223,29 @@ async function secretState(): Promise<Record<string, boolean>> {
 
 async function snapshot(): Promise<unknown> {
   const storedConfig = await readJson<WebUiBotConfig>(files.config, files.configExample)
+  const storedAutonomy = { ...storedConfig.autonomy }
+  delete storedAutonomy.developmentZone
   const config: WebUiBotConfig = {
     ...storedConfig,
     storage: { ...storedConfig.storage, taskFile: storedConfig.storage.taskFile ?? 'data/tasks.json', autonomyFile: storedConfig.storage.autonomyFile ?? 'data/autonomy-state.json', progressionFile: storedConfig.storage.progressionFile ?? 'data/progression.json', ownedBlocksFile: storedConfig.storage.ownedBlocksFile ?? 'data/owned-blocks.json' },
+    agentWorkspace: { ...DEFAULT_AGENT_WORKSPACE_CONFIG, ...storedConfig.agentWorkspace, selfImprovement: { ...DEFAULT_AGENT_WORKSPACE_CONFIG.selfImprovement, ...storedConfig.agentWorkspace?.selfImprovement } },
     autonomy: {
       ...DEFAULT_AUTONOMY_CONFIG,
-      ...storedConfig.autonomy,
-      developmentZone: { ...DEFAULT_DEVELOPMENT_ZONE, ...storedConfig.autonomy?.developmentZone }
+      ...storedAutonomy
     }
   }
+  const workspace = promptWorkspace(config)
+  await workspace.initialize()
   const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
   const experienceFile = path.resolve(projectRoot, config.storage.experienceFile)
   const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
   const progressionFile = path.resolve(projectRoot, config.storage.progressionFile ?? 'data/progression.json')
-  const [persona, prompts, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
+  const [persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
     readJson<Persona>(files.persona, files.personaExample),
     readJson<PromptTemplates>(files.prompts, files.promptsExample),
+    workspace.readDocuments(),
+    workspace.listPlayerProfiles(),
+    workspace.readBehaviorPatches(),
     readJson<SkinConfig>(files.skin, files.skinExample),
     readJson<BehaviorRules>(files.rules),
     readJson<ModsConfig>(files.mods, files.modsExample),
@@ -235,7 +258,7 @@ async function snapshot(): Promise<unknown> {
     readJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
-  return { config, persona, prompts, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
 }
 
 async function centralChatSnapshot(): Promise<unknown> {
@@ -340,16 +363,25 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     validateConfig(payload.config as BotConfig)
     validatePersona(payload.persona)
     validatePrompts(payload.prompts)
+    validatePromptDocuments(payload.agentPrompts)
     validateSkin(payload.skin)
     validateRules(payload.rules)
     validateMods(payload.mods)
     ensureProjectPaths(payload.config as WebUiBotConfig)
     ensureSkinPaths(payload.skin as SkinConfig)
+    const workspace = promptWorkspace(payload.config as WebUiBotConfig)
     await Promise.all([
       writeJson(files.config, payload.config), writeJson(files.persona, payload.persona), writeJson(files.prompts, payload.prompts), writeJson(files.skin, payload.skin),
-      writeJson(files.rules, payload.rules), writeJson(files.mods, payload.mods)
+      writeJson(files.rules, payload.rules), writeJson(files.mods, payload.mods), workspace.writeDocuments(payload.agentPrompts)
     ])
     return json(response, 200, { ok: true })
+  }
+  if (request.method === 'PUT' && pathname === '/api/player-profile') {
+    const payload = object(await body(request), 'playerProfile')
+    if (typeof payload.id !== 'string' || typeof payload.content !== 'string') throw new Error('玩家画像 id/content 无效')
+    const config = await readJson<WebUiBotConfig>(files.config, files.configExample)
+    const saved = await promptWorkspace(config).writePlayerProfile(payload.id, payload.content)
+    return json(response, 200, { ok: true, profile: saved })
   }
   if (request.method === 'PUT' && pathname === '/api/secrets') {
     await updateSecrets(await body(request))

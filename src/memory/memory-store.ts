@@ -19,6 +19,7 @@ export interface PlayerMemory {
   lastSeenAt: string
   facts: string[]
   conversationSummary: string
+  lastCompressedAt?: string
 }
 
 export interface MemoryDocument {
@@ -29,11 +30,19 @@ export interface MemoryDocument {
   players: Record<string, PlayerMemory>
   events: MemoryEvent[]
   globalSummary: string
+  compressionCount?: number
 }
 
 export interface PlayerIdentity {
   name: string
   uuid?: string
+}
+
+export interface MemoryCompressionCandidate {
+  player: PlayerMemory
+  olderEvents: MemoryEvent[]
+  recentEvents: MemoryEvent[]
+  globalSummary: string
 }
 
 function now(): string { return new Date().toISOString() }
@@ -123,6 +132,36 @@ export class MemoryStore {
     const memory = await this.#file.load()
     const recentEvents = memory.events.filter((event) => !event.playerKey || event.playerKey === player.key).slice(-recentLimit)
     return { player, recentEvents, globalSummary: memory.globalSummary }
+  }
+
+  async compressionCandidate(identity: PlayerIdentity, keepRecent: number): Promise<MemoryCompressionCandidate> {
+    const player = await this.observePlayer(identity)
+    const memory = await this.#file.load()
+    const relevant = memory.events.filter(event => !event.playerKey || event.playerKey === player.key)
+    const split = Math.max(0, relevant.length - Math.max(1, keepRecent))
+    return {
+      player,
+      olderEvents: relevant.slice(0, split),
+      recentEvents: relevant.slice(split),
+      globalSummary: memory.globalSummary
+    }
+  }
+
+  async compactPlayer(identity: PlayerIdentity, value: { conversationSummary: string; globalSummary: string; compressedEventIds: string[] }): Promise<void> {
+    const key = playerKey(identity)
+    const ids = new Set(value.compressedEventIds)
+    if (ids.size === 0) return
+    await this.observePlayer(identity)
+    await this.#file.update(memory => {
+      const player = memory.players[key]
+      if (!player) return
+      player.conversationSummary = value.conversationSummary.trim().slice(0, 8_000)
+      player.lastCompressedAt = now()
+      memory.globalSummary = value.globalSummary.trim().slice(0, 8_000)
+      memory.events = memory.events.filter(event => !ids.has(event.id))
+      memory.compressionCount = (memory.compressionCount ?? 0) + 1
+      memory.updatedAt = now()
+    })
   }
 
   async #append(event: Omit<MemoryEvent, 'id' | 'at'>): Promise<void> {

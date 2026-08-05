@@ -63,7 +63,7 @@ test('Fabric FOOD 组件标记的模组熟食计入自主储备', () => {
   })
 })
 
-test('自主发展会把背包工作台放进批准区', () => {
+test('自主发展会把背包工作台放进逐目标验证的荒野工作点', () => {
   assert.deepEqual(planAutonomousDevelopment(config, surveyed([
     { name: '工作台', itemId: 'minecraft:crafting_table', placeableBlockId: 'minecraft:crafting_table', count: 1 },
     { name: '橡木木板', itemId: 'minecraft:oak_planks', count: 3 },
@@ -71,9 +71,9 @@ test('自主发展会把背包工作台放进批准区', () => {
   ])), { type: 'place_block', itemId: 'minecraft:crafting_table', count: 1 })
 })
 
-test('批准区外不产生自主移动或破坏动作', () => {
+test('废弃的人工开发区坐标不再限制自主发展', () => {
   const world = surveyed(); world.position = { x: 100, y: 64, z: 100 }; world.blockSurvey!.center = world.position
-  assert.deepEqual(planAutonomousDevelopment(config, world), { type: 'return_to_zone' })
+  assert.deepEqual(planAutonomousDevelopment(config, world), { type: 'gather_resource', resource: 'wood', count: 2 })
 })
 
 test('动态荒野验证发现玩家结构后先离开，不会无限重试同一制作动作', () => {

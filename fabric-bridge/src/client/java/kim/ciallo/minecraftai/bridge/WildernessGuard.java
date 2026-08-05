@@ -116,6 +116,19 @@ public final class WildernessGuard {
         ).contains(path) || path.endsWith("_ore") || path.equals("obsidian") && naturalObsidianEvidence(client, position);
     }
 
+    /** Candidate-level placement guard; unlike assess(), it does not reject harmless mining near a structure. */
+    public static boolean safePlacementArea(Minecraft client, BlockPos center, int radius) {
+        if (client == null || client.level == null || !client.level.isLoaded(center)) return false;
+        int scan = Math.max(2, Math.min(8, radius));
+        for (BlockPos cursor : BlockPos.betweenClosed(center.offset(-scan, -3, -scan), center.offset(scan, 4, scan))) {
+            if (!client.level.isLoaded(cursor)) return false;
+            String id = blockId(client.level.getBlockState(cursor));
+            if (OwnedBlockRegistry.isOwned(client, cursor, id)) continue;
+            if (client.level.getBlockEntity(cursor) != null || looksPlayerBuilt(id)) return false;
+        }
+        return true;
+    }
+
     private static boolean naturalObsidianEvidence(Minecraft client, BlockPos position) {
         for (Direction direction : Direction.values()) {
             BlockPos neighbor = position.relative(direction);

@@ -273,23 +273,17 @@ public final class PrimitiveTaskController {
         ApprovedZone taskZone = approvedZone;
         boolean dynamicNaturalOnly = taskZone == null && verifiedWilderness;
         if (taskZone == null && verifiedWilderness) {
-            WildernessGuard.Assessment assessment = WildernessGuard.assess(
-                client, player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
-                minimumPlayerDistance, authorizedPlayer
-            );
-            if (!assessment.allowed()) {
-                results.add(new TaskResult(id, false, "refused: dynamic wilderness verification failed: " + String.join(",", assessment.reasons())));
-                return null;
-            }
+            // Natural extraction is authorized per target below. Nearby structures do not make
+            // every natural ore/log illegal, and no manual coordinate box is required.
             taskZone = WildernessGuard.workZone(client, player.blockPosition(), 16, 24);
         }
         if (taskZone == null) {
-            results.add(new TaskResult(id, false, "refused: no explicit approved resource AABB or verified wilderness evidence"));
+            results.add(new TaskResult(id, false, "refused: dynamic environment verification was not authorized"));
             return null;
         }
         String dimension = client.level.dimension().identifier().toString();
         if (!taskZone.dimension().equals(dimension)) {
-            results.add(new TaskResult(id, false, "refused: approved zone belongs to another dimension"));
+            results.add(new TaskResult(id, false, "refused: verified work window belongs to another dimension"));
             return null;
         }
         if (authorizedPlayer != null && !authorizedPlayer.matches("[A-Za-z0-9_]{1,16}")) {
@@ -316,7 +310,7 @@ public final class PrimitiveTaskController {
             }
             requestedTarget = new BlockPos(target.get("x").getAsInt(), target.get("y").getAsInt(), target.get("z").getAsInt());
             if (count != 1 || !taskZone.contains(requestedTarget)) {
-                results.add(new TaskResult(id, false, "targeted break must be one block inside approved AABB"));
+                results.add(new TaskResult(id, false, "targeted break must be one block inside the verified task window"));
                 return null;
             }
             if (!client.level.isLoaded(requestedTarget)
@@ -349,18 +343,10 @@ public final class PrimitiveTaskController {
         }
         ApprovedZone taskZone = approvedZone;
         if (requiresTable && taskZone == null && booleanValue(action, "verifiedWilderness", false)) {
-            WildernessGuard.Assessment assessment = WildernessGuard.assess(
-                client, player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
-                minimumPlayerDistance, null
-            );
-            if (assessment.allowed()) taskZone = WildernessGuard.workZone(client, player.blockPosition(), 8, 8);
-            else {
-                results.add(new TaskResult(id, false, "3x3 crafting wilderness verification failed: " + String.join(",", assessment.reasons())));
-                return null;
-            }
+            taskZone = WildernessGuard.workZone(client, player.blockPosition(), 8, 8);
         }
         if (requiresTable && taskZone == null) {
-            results.add(new TaskResult(id, false, "3x3 crafting requires an approved AABB or verified wilderness containing a crafting table"));
+            results.add(new TaskResult(id, false, "3x3 crafting requires dynamic environment authorization and a bot-owned crafting table"));
             return null;
         }
         return new CraftItemTask(id, targetItemId, count, recipe, requiresTable, taskZone, tick);
@@ -369,23 +355,15 @@ public final class PrimitiveTaskController {
     private PlaceBlockTask createPlaceTask(String id, JsonObject action, Minecraft client) {
         ApprovedZone taskZone = approvedZone;
         if (taskZone == null && booleanValue(action, "verifiedWilderness", false)) {
-            WildernessGuard.Assessment assessment = WildernessGuard.assess(
-                client, client.player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
-                minimumPlayerDistance, null
-            );
-            if (!assessment.allowed()) {
-                results.add(new TaskResult(id, false, "refused: dynamic wilderness verification failed: " + String.join(",", assessment.reasons())));
-                return null;
-            }
             taskZone = WildernessGuard.workZone(client, client.player.blockPosition(), 8, 8);
         }
         if (taskZone == null) {
-            results.add(new TaskResult(id, false, "refused: no explicit approved placement AABB or verified wilderness evidence"));
+            results.add(new TaskResult(id, false, "refused: dynamic placement verification was not authorized"));
             return null;
         }
         String dimension = client.level.dimension().identifier().toString();
         if (!taskZone.dimension().equals(dimension)) {
-            results.add(new TaskResult(id, false, "refused: approved zone belongs to another dimension"));
+            results.add(new TaskResult(id, false, "refused: verified placement work window belongs to another dimension"));
             return null;
         }
         String requestedItemId = optionalId(action, "itemId");
@@ -885,7 +863,7 @@ public final class PrimitiveTaskController {
         void tick(Minecraft client) {
             LocalPlayer player = client.player;
             if (!taskZone.dimension().equals(client.level.dimension().identifier().toString())) {
-                finish(client, this, false, "left approved resource dimension");
+                finish(client, this, false, "left verified resource work dimension");
                 return;
             }
             AbstractClientPlayer nearbyPlayer = nearestUnsafePlayer(client, player, target, authorizedPlayer);
@@ -924,7 +902,7 @@ public final class PrimitiveTaskController {
                     ? requestedTarget
                     : findResourceTarget(client, player, matcher, completedPositions, taskZone);
                 if (target == null) {
-                    finish(client, this, false, "no matching loaded block in approved AABB; verified_broken_blocks="
+                    finish(client, this, false, "no matching safe loaded block in verified work window; verified_broken_blocks="
                         + completedCount + "; resource=" + matcher.description());
                     return;
                 }
@@ -948,13 +926,13 @@ public final class PrimitiveTaskController {
             }
 
             if (!taskZone.contains(target)) {
-                finish(client, this, false, "target escaped approved resource AABB");
+                finish(client, this, false, "target escaped verified resource work window");
                 return;
             }
             BlockState current = client.level.getBlockState(target);
             // BREAK owns the server-change postcondition below. Handling it here would mistake a
             // successful break for an externally changed target, seek another block, and keep
-            // mining until the whole approved area is exhausted.
+            // mining until the whole dynamically verified work window is exhausted.
             if (phase != Phase.BREAK && (!blockId(current).equals(expectedBlockId) || !matcher.matches(current))) {
                 completedPositions.add(target.immutable());
                 phase = Phase.SEEK;
@@ -1043,14 +1021,14 @@ public final class PrimitiveTaskController {
                 // during the server-confirmed break, including a one-block depression.
                 if (!navigator.drive(client, player, Vec3.atCenterOf(target), 1.85D, false, tick)
                     && navigator.consecutivePlanFailures() >= 3) {
-                    finish(client, this, false, "no collision-safe route to approved resource block " + target.toShortString());
+                    finish(client, this, false, "no collision-safe route to verified resource block " + target.toShortString());
                     return;
                 }
                 if (player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
                     lastProgressPosition = player.position();
                     lastProgressTick = tick;
                 } else if (tick - lastProgressTick > 60L) {
-                    finish(client, this, false, "unable to reach approved resource block " + target.toShortString());
+                    finish(client, this, false, "unable to reach verified resource block " + target.toShortString());
                 }
                 return;
             }
@@ -1194,7 +1172,7 @@ public final class PrimitiveTaskController {
         void tick(Minecraft client) {
             LocalPlayer player = client.player;
             if (!taskZone.dimension().equals(client.level.dimension().identifier().toString())) {
-                finish(client, this, false, "left approved placement dimension");
+                finish(client, this, false, "left verified placement work dimension");
                 return;
             }
             if (completedCount >= requestedCount) {
@@ -1290,7 +1268,7 @@ public final class PrimitiveTaskController {
                 }
                 placement = findSimplePlacement(client, player, selectedItem, taskZone, completedPositions);
                 if (placement == null) {
-                    finish(client, this, false, "no safe reachable replaceable target in approved placement AABB; verified_placed_blocks="
+                    finish(client, this, false, "no safe reachable replaceable target in verified placement work window; verified_placed_blocks="
                         + completedCount);
                     return;
                 }
@@ -1384,12 +1362,12 @@ public final class PrimitiveTaskController {
 
             if (requiresTable && phase == Phase.SEEK_TABLE) {
                 if (!taskZone.dimension().equals(client.level.dimension().identifier().toString())) {
-                    finish(client, this, false, "left approved crafting-table dimension");
+                    finish(client, this, false, "left verified crafting-table work dimension");
                     return;
                 }
                 craftingTable = findCraftingTable(client, player, taskZone);
                 if (craftingTable == null) {
-                    finish(client, this, false, "no loaded crafting table inside approved AABB within 8 blocks");
+                    finish(client, this, false, "no bot-owned loaded crafting table in the verified work window within 8 blocks");
                     return;
                 }
                 phase = Phase.MOVE_TABLE;
@@ -1400,7 +1378,7 @@ public final class PrimitiveTaskController {
 
             if (requiresTable && phase == Phase.MOVE_TABLE) {
                 if (!taskZone.contains(craftingTable) || !client.level.getBlockState(craftingTable).is(Blocks.CRAFTING_TABLE)) {
-                    finish(client, this, false, "crafting table changed or left approved AABB");
+                    finish(client, this, false, "bot-owned crafting table changed or left the verified work window");
                     return;
                 }
                 if (player.isWithinBlockInteractionRange(craftingTable, 0.0D)) {
@@ -1416,7 +1394,7 @@ public final class PrimitiveTaskController {
                         lastProgressPosition = player.position();
                         lastProgressTick = tick;
                     } else if (tick - lastProgressTick > 60L) {
-                        finish(client, this, false, "unable to reach approved crafting table " + craftingTable.toShortString());
+                        finish(client, this, false, "unable to reach verified bot-owned crafting table " + craftingTable.toShortString());
                     }
                     return;
                 }
@@ -1753,6 +1731,7 @@ public final class PrimitiveTaskController {
         ItemStack selected = player.getInventory().getSelectedItem();
         for (BlockPos target : candidates) {
             if (excluded.contains(target) || !zone.contains(target) || !client.level.isLoaded(target)) continue;
+            if (!WildernessGuard.safePlacementArea(client, target, 5)) continue;
             BlockState before = client.level.getBlockState(target);
             if (!before.canBeReplaced() || client.level.getBlockEntity(target) != null) continue;
             for (Direction face : List.of(Direction.UP, Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST, Direction.DOWN)) {
@@ -2243,7 +2222,8 @@ public final class PrimitiveTaskController {
         BlockPos best = null;
         double bestDistance = Double.POSITIVE_INFINITY;
         for (BlockPos cursor : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
-            if (!client.level.isLoaded(cursor) || !client.level.getBlockState(cursor).is(Blocks.CRAFTING_TABLE)) continue;
+            if (!client.level.isLoaded(cursor) || !client.level.getBlockState(cursor).is(Blocks.CRAFTING_TABLE)
+                || !OwnedBlockRegistry.isOwned(client, cursor, "minecraft:crafting_table")) continue;
             double distance = player.distanceToSqr(Vec3.atCenterOf(cursor));
             if (distance < bestDistance) {
                 best = cursor.immutable();

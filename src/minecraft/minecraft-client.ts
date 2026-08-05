@@ -160,7 +160,7 @@ export class MinecraftClient implements ActionExecutor {
         return { ok: true, detail: `开始寻找 ${action.purpose}` }
       }
       case 'return_to_zone':
-        return { ok: false, detail: 'Mineflayer 兼容适配器不掌握 Fabric 管理员批准区域；请使用 Fabric 26.2 桥接客户端。' }
+        return { ok: false, detail: 'Mineflayer 兼容适配器不具备 Fabric 的逐目标环境与财产保护验证；请使用 Fabric 26.2 桥接客户端。' }
       case 'attack_player': {
         const entity = bot.players[action.target]?.entity
         if (!entity) return { ok: false, detail: `附近找不到攻击者 ${action.target}` }

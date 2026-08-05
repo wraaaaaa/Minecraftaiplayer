@@ -48,6 +48,22 @@
     "ownedBlocksFile": "data/owned-blocks.json",
     "maxEvents": 5000
   },
+  "agentWorkspace": {
+    "promptDirectory": "data/agent-prompts",
+    "playerProfilesDirectory": "data/player-profiles",
+    "contextBudgetChars": 48000,
+    "compressionTriggerRatio": 0.72,
+    "retainRecentEvents": 16,
+    "selfImprovement": {
+      "enabled": true,
+      "allowPromptEdits": true,
+      "allowBehaviorPatches": true,
+      "minimumRepeatedFailures": 3,
+      "researchProvider": "baidu",
+      "researchEndpoint": "https://www.baidu.com/s",
+      "researchTimeoutMs": 12000
+    }
+  },
   "autonomy": {
     "enabled": true,
     "ownerName": "wraaaaaa",
@@ -73,17 +89,7 @@
     "autoSleep": true,
     "protectOwner": true,
     "allowVerifiedWilderness": true,
-    "longTermGoal": "reach_end",
-    "developmentZone": {
-      "enabled": false,
-      "dimension": "minecraft:overworld",
-      "minX": 0,
-      "minY": 0,
-      "minZ": 0,
-      "maxX": 0,
-      "maxY": 0,
-      "maxZ": 0
-    }
+    "longTermGoal": "reach_end"
   },
   "policyFile": "config/behavior-rules.json",
   "personaFile": "config/persona.json",

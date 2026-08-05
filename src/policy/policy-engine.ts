@@ -69,9 +69,9 @@ export class PolicyEngine {
       case 'excavate_tunnel':
       case 'build_shelter':
         if (!this.#rules.wildernessDevelopmentOnly) return { allowed: true, reason: '运行时仍需验证目标方块与区域' }
-        return { allowed: true, reason: '仅在 Fabric 验证为安全荒野开发区后允许' }
+        return { allowed: true, reason: '仅在 Fabric 对目标天然性、附近结构、危险源和撤退路线逐项验证后允许' }
       case 'place_block':
-        return { allowed: true, reason: '仅允许在 Fabric 验证的管理员批准区域内放置普通建筑方块' }
+        return { allowed: true, reason: '仅允许在 Fabric 动态验证的安全位置放置普通建筑方块' }
       case 'hunt_entity':
         return { allowed: true, reason: 'Fabric 会筛选未命名、未驯化并远离玩家设施的合法生存目标' }
       case 'smelt_item':

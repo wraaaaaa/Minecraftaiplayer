@@ -19,16 +19,17 @@
 - EasyAuth 根据服务器提示自动执行 `/login`，首次使用新名称时可选自动 `/register`；密码只从环境变量读取且日志脱敏。
 - 持久任务队列：`wraaaaaa` 始终最高优先；其他玩家按当前距离由近到远，同一玩家内部按紧急度和先入先出；全局只执行一项。明确“停止/取消”绕过模型立即抢占。
 - 本地生存反射：低生命/低饱食时选择无负面效果的安全食物；只攻击正在威胁 Bot 的敌对生物，自动选择快捷栏最佳武器；死亡后自动复活。
-- 白名单动作：聊天、停止、看向/跟随/走向玩家、安全闲逛、进食、选择最佳装备、准备危险任务、攻击确认敌对目标、使用物品、挖掘/采集批准区方块、收集本任务掉落、合成、放置普通方块、把背包物品交给指定玩家、建造/寻找住所和安全等待。复杂指令可由最多 12 个基础动作组成顺序计划，每一步都重新读取游戏状态并验证后置条件。
+- 白名单动作：聊天、停止、看向/跟随/走向玩家、安全探索、进食、选择最佳装备、准备危险任务、攻击确认敌对目标、使用物品、受保护采集、收集本任务掉落、合成、放置普通方块、把背包物品交给指定玩家、建造/寻找住所和安全等待。复杂指令可由最多 12 个基础动作组成顺序计划，每一步都重新读取游戏状态并验证后置条件。
 - 危险度准备：末地/末影龙任务在执行跟随等主动作前也会强制检查装备，最低为四件附魔黄金等效护甲、同等级武器、安全耐久和至少 16 个安全食物；不足时选择现有最佳装备后详细拒绝。
-- 住所：只在管理员批准区域且与其他玩家保持配置距离时建造；施工前要求门、普通火把和 23 个同类安全实心方块，所有门/火把/墙体均经正常多人交互和服务端状态确认，住所坐标持久化到单独文件。
+- 住所：AI 自行选择候选环境，Fabric 对施工点逐格验证天然性、玩家结构、容器、危险源、碰撞、撤退路线和其他玩家距离；施工前要求门、普通火把和 23 个同类安全实心方块，住所坐标持久化到单独文件。
 - 独立行为准则：禁止破坏玩家物品、禁止打开玩家容器、未知归属时拒绝破坏、仅允许短时针对实际攻击者自卫。
 - Mineflayer 兼容探针与固定来源的 26.2 协议数据，供诊断使用；目标模组服默认使用原生 Fabric 适配器。
 - 中国大陆下载路线：npm 镜像、BMCLAPI/CERNET Minecraft 资源镜像、GitHub 下载镜像回退，并对游戏资源或工具执行官方 SHA-1/SHA-256 校验。
 - 受管理的服务器模组同步：记录来源、文件名和 SHA-256；未来更新来源文件夹后可从总控台一键替换，不会误删项目自己的桥或 Fabric API。
 - 局域网兼容模式：自动监听 Java 版“对局域网开放”的广播和动态端口，用离线 Bot 与同一台电脑或同一局域网的人类玩家游玩。
 - 皮肤管理：WebUI 严格校验 64x64/64x32 PNG、选择 classic/slim，并集成官方万用皮肤加载器；可生成分发给所有玩家的客户端皮肤包，确保安装者看见 Bot 皮肤。
-- 提示词与记忆管理：页面可编辑完整提示词、查看分玩家档案/经验并导出文件；根目录 `PARAMETERS.md` 精确列出全部本地位置。
+- OpenClaw 风格提示词工作区：`rules.md`、`IDENTITY.md`、`SOUL.md`、`TOOLS.md`、`MEMORY.md` 可在 WebUI 或本地同步编辑；每位玩家自动生成隔离的 `USER.md`。上下文接近预算时会调用当前模型压缩旧事件、更新摘要和对应玩家画像。
+- 受限自我改进：同类动作重复失败达到阈值后，可经百度或自建 SearXNG 检索公开解决思路；网页内容按不可信文本处理。AI 只可写 `TOOLS.md` 的托管经验段和声明式 `behavior-patches.json`，不能修改可执行源码、启动脚本、硬规则或秘密。
 - 纯净 Windows 一键部署入口，可安装 Node.js LTS、Java 25 并完成全套构建、资源准备和总控台启动。
 - 持久自主目标 `reach_end`：本地规划器按饥饿/食物储备、工作设施、住所、床、石器、铁器、钻石装备、附魔、下界材料、末影之眼、要塞和末地逐步推进；安全、玩家任务和受击会抢占长期计划。
 - 高级生产动作：狩猎成年且未驯服/未命名的食物生物、羊和牛，追踪本次掉落；熔炉菜单自动装入原料/燃料并取出结果；制作五类石/铁/钻石工具和铁/钻石四件护甲；穿戴最佳护甲并切换任务所需工具。
@@ -49,6 +50,9 @@
 
 ### 2026-08-05 实服回归结果
 
+- 最新候选版本在后台重新进服后，饥饿值从 `19` 实际恢复到 `20`；随后连续得到服务端后置条件：放置自有工作台、3×3 合成熔炉、放置自有熔炉。Bot 坐标随路径移动而变化，不是只生成文字计划。
+- 同轮在地下找不到合法食物目标后自动选择向上开路；修复狭窄通道脚部格投影后，实测从 Y=43 到 Y=59，完成 `31` 个阶梯步骤、破坏 `95` 个天然方块、放置 `1` 个自有支撑，石材背包增量 `72`。到达后规划器继续制作工作台和木板，没有停在矿道原语中。
+- 修复了 Windows 下 WebUI/安全软件读取运行状态时可能长期阻止 `rename/unlink` 的问题：状态文件先保留 `.bak`，再有界重试，仍被占用时才降级为原位写入；重启后的 `runtime-status.json` 已持续刷新。
 - 已实测自主制作木板、工作台、熔炉、木镐，以及石镐、石斧、石剑、石铲、石锄；不是只在单元测试中生成计划。
 - 地下阶梯挖掘已实测从 Y=64 下探到 Y=48，破坏 76 个天然方块并产生 49 个石材背包增量；随后从洞穴 Y=54 稳定开路上浮到 Y=64，结果为 `verified_tunnel_steps=11; verified_broken_blocks=34; inventory_delta=9; final_y=64`。
 - 上浮测试复现并修复了水平距离假到达、悬空脚手、跨列头顶碰撞、空中 tick 假落地和跌落后保留旧目标；最终只在实际落地且达到终点高度时成功。
@@ -284,19 +288,19 @@ CialloAI 跟着我
 
 远处闲聊、明确叫其他人的话、多名玩家之间含糊的陈述不会误触发。模型根据结构化世界状态返回回复和白名单动作；程序再做能力、危险度、财产和真实后置条件检查。每名玩家使用 UUID 建立独立档案；显示名会随最近一次消息更新。空闲模型决策与偶尔发言可用 `chat.proactiveEnabled` 一并关闭或调整间隔；关闭它不影响无需模型的本地进食、防卫和安全挂机。
 
-### 动作、任务顺序与安全开发区
+### 动作、任务顺序与逐目标环境验证
 
-当前动作不是“只能跟随”。Bot 可以聊天、停止、看向/跟随/走向玩家、有限半径安全闲逛、进食、选择装备、准备挖矿/战斗、攻击已确认威胁、使用背包物品、采集批准区资源、收集本任务掉落、执行受限合成、建造或寻找住所，以及在安全位置停止等待。针对玩家的攻击只允许行为规则认可的短时自卫；打开容器和无法证明归属的直接破坏会被拒绝。
+当前动作不是“只能跟随”。Bot 可以聊天、停止、看向/跟随/走向玩家、分段探索、进食、选择装备、准备挖矿/战斗、攻击已确认威胁、使用背包物品、受保护采集、收集本任务掉落、执行受限合成、建造或寻找住所，以及在安全位置停止等待。针对玩家的攻击只允许行为规则认可的短时自卫；打开容器和无法证明归属的直接破坏会被拒绝。
 
-玩家可以自然地说“挖掉 3 个石头”“破坏 2 个原木”或“采 5 个铁矿”。模型可返回 `break_block`，程序会在 Node 层把它转换为同一个受保护的 `gather_resource` 原语；这不是任意坐标拆除接口。Fabric 仍只会在管理员批准的开发区内选择匹配的自然方块，并逐块检查方块 ID/tag、可破坏性、方块实体、工具、玩家距离和服务端实际状态。即使升级前的本地 `config/prompts.json` 仍是旧版，程序也会追加这条兼容动作规则；通过 WebUI 保存新版提示词后语义会更清楚。
+玩家可以自然地说“挖掉 3 个石头”“破坏 2 个原木”或“采 5 个铁矿”。模型可返回 `break_block`，程序会在 Node 层把它转换为同一个受保护的 `gather_resource` 原语；这不是任意坐标拆除接口。人工坐标开发区已经取消：AI 根据结构化环境选择意图，Fabric 才是最终授权层，并对每个候选方块检查方块 ID/tag、天然性、附近玩家结构、方块实体、工具、危险流体、玩家距离、碰撞、撤退路线和服务端实际状态。
 
-安全空闲并达到 `chat.proactiveIdleMs` / `proactiveMinIntervalMs` 后，模型每轮最多选择一个自主发展动作；采集会先选择挖矿工具并在破坏完成后自动收取本次登记的自有掉落。空闲决策硬性禁止跟随、接近、注视或攻击玩家，采集/建造仍只能在批准开发区且满足荒野距离时执行。玩家任务到达会抢占空闲动作；失败原因写入经验文件。它仍是单动作循环，不是能从零规划完整通关的长期规划器。
+无玩家任务时，确定性长期规划器每轮选择一个朝 `reach_end` 前进的可观察步骤；采集会先选择挖矿工具并收取本次登记的自有掉落。空闲模型决策硬性禁止跟随、接近、注视或攻击玩家；所有世界修改继续接受 Fabric 的逐目标检查。玩家任务、受击、饥饿和危险会抢占长期计划，失败写入经验和总聊天，并可能触发受限自我改进。
 
 玩家命令进入全局单任务队列。`autonomy.ownerName` 对应玩家的任务始终优先；没有该玩家任务时，先选择当前离 Bot 最近的发令玩家，再在该玩家的任务中按紧急度从高到低、同紧急度按先入先出执行。明确且独立发送“停止”“停下”“取消当前任务”“stop”或“cancel”会绕过模型，立即停止 Java 长动作并把当前全局任务记为失败；这不是只取消发令者自己的任务。
 
-采集和建造默认不可用，因为 `autonomy.developmentZone.enabled` 默认为 `false`。管理员应在 WebUI 的自主/安全设置中，或直接在 `config/bot.json` 的 `autonomy.developmentZone` 填写维度及包含边界的 AABB，然后重启 Bot。所有目标方块必须在同一批准区内；默认还要求与其他客户端玩家保持至少 `48` 格（`autonomy.wildernessMinPlayerDistance`）。Node 在动作前检查，Fabric 在动作开始及执行过程中再次检查，玩家中途靠近会让动作失败。
+采集、放置、探索、开矿和建房需要 `autonomy.allowVerifiedWilderness:true`（公开示例已启用）。`autonomy.developmentZone` 是仅为旧配置解析保留的废弃字段，运行时会忽略，WebUI 也不再提供坐标表单。默认与其他客户端玩家保持至少 `48` 格（`autonomy.wildernessMinPlayerDistance`）；发令玩家可近距离监督自己明确要求的单次采集，但其他玩家靠近仍会让 Fabric 取消动作。
 
-`build_shelter` 建造固定 3×3、三格高的简易住所。背包需预先有一个可手动开关的门、一支普通火把，以及至少 23 个同一种安全实心满方块；光源、门和外壳都通过正常多人交互放置并等待服务端状态确认。候选点还必须有稳定 3×3 地面、可替换且无方块实体的施工空间、未被实体占用、门位无红石信号、8 格内无敌对威胁，并满足开发区与玩家安全距离。`seek_shelter` 优先验证同维度的已记录住所并开门进入、关门等待；否则寻找附近未占用床旁的安全落脚点，再退回到实测安全位置。
+`build_shelter` 建造固定 3×3、三格高的简易住所。背包需预先有一个可手动开关的门、一支普通火把，以及至少 23 个同一种安全实心满方块；光源、门和外壳都通过正常多人交互放置并等待服务端状态确认。候选点还必须有稳定 3×3 地面、可替换且无方块实体的施工空间、未被实体占用、门位无红石信号、8 格内无敌对威胁，并通过玩家结构、玩家距离和逐目标安全验证。`seek_shelter` 只在确有已记录住所时主动使用，避免没有住所时反复失败。
 
 ### 运行数据迁移
 
@@ -307,12 +311,15 @@ CialloAI 跟着我
 - `data\tasks.json`：所有排队、运行、完成、失败/拒绝任务；重启/重连后恢复未完成项。
 - `data\autonomy-state.json`：服务端确认过的住所维度、室内位置和门位置。
 - `data\diagnostics.json`：WebUI“总聊天”的结构化决策、每步参数、后置条件和完整脱敏错误，最多保留最近 1000 条并原子写入 `.bak`；它用于排错，不替代统一记忆。
+- `data\agent-prompts\`：运行时五份全局 Markdown 提示词及声明式行为补丁；可直接编辑，也可由 WebUI 保存。
+- `data\player-profiles\<uuid-or-name>\USER.md`：每位玩家的画像，首次对话自动创建；不能跨玩家混用。
+- `data\self-improvement.json`：失败签名、重复次数、研究与学习时间；不含网页全文和密钥。
 
 迁移 `tasks.json` 和 `autonomy-state.json` 时，先停止旧目录中的 Bot 和 Minecraft 客户端，再把这两个文件复制到新项目 `data` 目录，并确认 `config/bot.json` 的 `storage.taskFile` / `storage.autonomyFile` 仍指向它们。`tasks.json` 会保留 `.bak`，启动时会把遗留的 `running` 任务重新排为 `queued`；`autonomy-state.json` 使用临时文件原子替换但不生成 `.bak`，加载时还会校验格式、维度和门/室内坐标，因此应另行备份。不要迁移 `bridge-token.txt`、PID 或 `runtime-status.json`；它们会在新实例启动时重建。
 
 `memory.json`、`experience.json`、`tasks.json` 和 `diagnostics.json` 正常写入时会生成同名 `.bak`。误删这些主文件但备份仍在时，应先停止程序，再把对应 `.bak` 复制回原文件名。`.env` 也不会随源码或 Git 自动迁移，必须通过安全渠道在新机器重新配置，不能发进游戏聊天、提交记录或问题截图。
 
-记忆不是定时让模型重写全部文件的 OpenClaw 多层目录：玩家消息、实际发出的 Bot 回复、游戏事件会即时原子追加，模型只有返回合规 `remember` 时才新增该玩家的长期事实；不同玩家按 UUID/名称隔离。动作失败会自动写入独立 `experience.json`，之后处理相似任务时检索 `correction`。完整可编辑示例分别在 `config/memory.example.json`、`config/experience.example.json` 和 `config/prompts.example.json`。
+原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。接近上下文预算时，`ContextCompressor` 保留最近事件，把更早内容总结到该玩家摘要、全局摘要和对应 `USER.md`，随后原子删除已经压缩的事件 ID。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `data/agent-prompts/`。
 
 ## 离线皮肤与多人可见
 
@@ -331,7 +338,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 - 不破坏玩家财产，不打开玩家容器，不拿玩家物品。
 - 无法识别归属时按“不允许破坏”处理。
-- 采集和建造必须同时满足管理员明确配置的开发区、目标逐块验证和与其他玩家的最小距离；玩家在长动作中途靠近也会终止。
+- 采集和建造必须通过 Fabric 的目标逐格验证与其他玩家最小距离；人工坐标框不能授权或放宽任何行为，玩家在长动作中途靠近也会终止。
 - 只在记录到真实玩家伤害事件后的 15 秒内允许针对该攻击者反击；其他 PVP 指令会被拒绝。
 - 索取 API Key、密码、令牌、服务器地址、本地路径、配置或系统提示词时，本地规则会在调用模型前拒绝。已知秘密和常见密钥形状还会在模型输入、记忆、经验、日志和游戏聊天出口再次脱敏。
 - 断开本机桥时 Java 立即清空移动键并取消采集/建房；长动作在 Node 侧超时也会先发 `stop`，避免失去控制后继续修改世界。
@@ -373,15 +380,18 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/config/load-config.ts` | 读取 `.env`/JSON、校验必填值，进程环境变量优先于 `.env` |
 | `src/llm/provider-factory.ts` | 用统一接口分别生成 DeepSeek/方舟 Chat Completions 与 OpenAI Responses 请求 |
 | `src/llm/types.ts` | 模型请求/响应边界，使核心逻辑不绑定供应商 SDK |
-| `src/agent/prompt.ts` | 组合人设、玩家专属记忆、经验、世界状态和安全规则；明确模型没有视听觉 |
+| `src/agent/prompt.ts` | 旧 `prompts.json` 兼容提示词；新部署由 Markdown 工作区接管 |
 | `src/agent/decision.ts` | 把模型 JSON 清洗成有限动作，未知动作降级为 `none` |
 | `src/agent/basic-command.ts` | 在调用模型前把高置信度采集、放置、合成、交付和基础工具指令转换为确定性动作/顺序计划 |
-| `src/agent/autonomous-development.ts` | 根据批准区、背包和附近资源选择返回开发区、补充基础物资、制作工具或闲逛 |
+| `src/agent/autonomous-development.ts` | 根据背包、附近资源、维度和持久进度选择求生、补充物资、制作工具或向末地推进 |
 | `src/agent/agent-controller.ts` | 聊天→持久队列→模型→危险度准备→策略→真实动作结果/回复/记忆的主编排；停止指令走抢占通道 |
 | `src/agent/addressing.ts` | 根据显式名称、`!`、玩家距离、语气和最近对话判断消息是否在叫 Bot |
-| `src/agent/capability-assessor.ts` | 在动作前检查目标、食物、装备门槛、批准开发区和玩家距离，生成详细拒绝原因 |
+| `src/agent/capability-assessor.ts` | 在动作前检查开关、目标、食物和装备门槛；逐格环境与玩家距离由 Fabric 硬检查 |
 | `src/agent/world-state.ts` | 结构化世界状态，包括生命、物理环境、装备/附魔、实体、动作和住所 |
 | `src/memory/memory-store.ts` | 单文件长期记忆、UUID 玩家隔离和事件裁剪 |
+| `src/memory/context-compressor.ts` | 上下文接近预算时压缩旧事件，更新摘要和当前玩家 `USER.md` |
+| `src/prompts/prompt-workspace.ts` | 管理五份 Markdown 提示词、分玩家画像和声明式行为补丁，限制运行时写入边界 |
+| `src/self-improvement/self-improvement-manager.ts` | 聚合同类失败、可选检索公开资料，并只写受限经验段/声明式补丁 |
 | `src/experience/experience-store.ts` | 独立经验文件及任务关键词检索 |
 | `src/tasks/task-store.ts` | 原子任务 schema、owner/距离/紧急度排序、单运行任务、终态、取消和重连恢复 |
 | `src/security/secret-guard.ts` | 在模型、持久化和游戏聊天出口拦截已知秘密、密钥形状及秘密提取请求 |
@@ -404,8 +414,8 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `fabric-bridge/.../LivingEntityDamageMixin.java` | 从真实伤害事件识别玩家攻击者，作为允许自卫的唯一依据 |
 | `fabric-bridge/.../WorldStateEncoder.java` | 每秒输出 schema v2 的稳定物品 ID、槽位、耐久/附魔、装备、危险实体、光照和安全原因 |
 | `fabric-bridge/.../SurvivalController.java` | 每 tick 的安全进食和确认威胁反击；只使用正常背包点击、使用物品和攻击 API |
-| `fabric-bridge/.../PrimitiveTaskController.java` | 装备、使用物品、Bot 掉落收集、批准区采集和已解锁配方合成；以服务端同步后的后置条件结束 |
-| `fabric-bridge/.../ShelterController.java` | 批准区 3×3 住所、门/火把/外壳验证、住所原子保存及开门进入/关门等待 |
+| `fabric-bridge/.../PrimitiveTaskController.java` | 装备、物品、Bot 掉落、逐目标验证采集/放置和真实配方合成；以服务端同步后置条件结束 |
+| `fabric-bridge/.../ShelterController.java` | 动态验证环境中的 3×3 住所、门/火把/外壳验证、住所原子保存及安全进入 |
 | `fabric-bridge/src/main/resources/*` | Fabric 模组元数据和 Mixin 声明 |
 | `fabric-bridge/build.gradle`、`gradle.properties` | 固定 MC 26.2、Loader 0.19.3、API、Loom、Java 25 和国内 Maven 回退 |
 | `fabric-bridge/gradle/wrapper/*`、`gradlew*` | 固定且可校验的 Gradle 9.5.1 构建入口，不要求预装 Gradle |
@@ -477,7 +487,14 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `autonomy.wildernessMinPlayerDistance` | `48` | 采集/建房开始及运行期间与其他玩家的硬距离 |
 | `autonomy.safeIdleEnabled` | `true` | 任务完成后寻找住所/安全点并停止等待 |
 | `autonomy.autoGather/autoCraft/autoBuildShelter` | `true` | 允许规划对应原语，仍需安全前置条件 |
-| `autonomy.developmentZone.*` | 默认关闭 | 管理员批准的维度和 AABB；关闭时所有采集/建造均拒绝 |
+| `autonomy.allowVerifiedWilderness` | `true` | 允许 Fabric 对每个候选目标做动态环境/财产/危险/距离验证；关闭时拒绝世界修改 |
+| `autonomy.developmentZone.*` | 已废弃 | 旧 `bot.json` 可保留但运行时忽略，WebUI 不再显示；不能授权或限制行为 |
+| `agentWorkspace.promptDirectory` | `data/agent-prompts` | 五份运行时 Markdown 提示词和 `behavior-patches.json` |
+| `agentWorkspace.playerProfilesDirectory` | `data/player-profiles` | 每位玩家单独目录中的 `USER.md` |
+| `agentWorkspace.contextBudgetChars` | `48000` | 估算提示上下文字符预算 |
+| `agentWorkspace.compressionTriggerRatio` | `0.72` | 达到预算比例后压缩旧记忆，范围 0.5–0.95 |
+| `agentWorkspace.retainRecentEvents` | `16` | 压缩时保留当前玩家最近事件数 |
+| `agentWorkspace.selfImprovement.*` | 见 `PARAMETERS.md` | 自我改进开关、托管提示词/声明式补丁权限、重复失败阈值、百度/SearXNG 与超时 |
 | `policyFile` / `personaFile` / `promptsFile` | `config/...json` | 规则、人设和提示词路径；WebUI 只允许项目 config 内 |
 | `logging.file` | `logs/bot.log` | JSONL 日志路径 |
 | `logging.level` | `info` | `debug/info/warn/error` |
@@ -490,14 +507,15 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `config/persona.json` | `name` 名称、`description` 身份、`speakingStyle` 风格、`goals[]` 目标、`boundaries[]` 边界 |
 | `config/behavior-rules.json` | `denyBreakingPlayerProperty`、`denyOpeningPlayerContainers`、`denyTakingPlayerItems`、`wildernessDevelopmentOnly`、`allowSelfDefense`、`selfDefenseWindowMs`、`stopSelfDefenseWhenThreatEnds`、`allowPlayerOrderedPvp`、`allowDestructiveActionsWhenOwnershipUnknown` 和 `proactiveChat.*` |
 | `config/mods.json` | `sourceDirectory` 外部 mod 文件夹、`syncOnClientStart` 启动自动同步、`excludeFilePatterns[]` 文件名正则排除 |
-| `config/prompts.json` | `identity` 模板、`capabilityRules[]`、`memoryRules[]`、`actionContract`、`proactiveInstruction` |
+| `config/prompts.json` | 旧版兼容提示词；新运行时以 `data/agent-prompts/*.md` 为准 |
+| `config/agent-prompts.example/` | 新工作区首次启动模板；含五份全局 Markdown、`USER.md` 模板和行为补丁 schema |
 | `config/skin.json` | `enabled`、`model`、`visibilityMode`、`skinFile`、`capeFile`、`onlineProvider.*` |
 
 更完整的允许值、修改效果、记忆自动写入机制和全部运行文件位置见 [`PARAMETERS.md`](PARAMETERS.md)。
 | `.env` | `MINECRAFT_LOGIN_PASSWORD`、`DEEPSEEK_API_KEY`、`ARK_API_KEY`、`OPENAI_API_KEY`；内容绝不提交 |
 | 环境变量 | `MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_WEBUI_PORT` 可覆盖运行/下载位置 |
 
-总控台保存“全部设置”时校验并写入 bot/persona/prompts/skin/behavior-rules/mods 六个 JSON；“安全保存密钥”只写 `.env`。修改设置后，已运行的 Bot 需要点“重新启动”才会重新载入。
+总控台保存“全部设置”时校验并写入 bot/persona/旧版 prompts/skin/behavior-rules/mods JSON，同时原子保存五份 Markdown 提示词；单独的玩家画像按钮只写选中玩家的 `USER.md`。“安全保存密钥”只写 `.env`。提示词会在每次模型决策前重新读取，本地直接编辑无需重启；配置项修改仍建议重启。
 
 ## 故障排查
 
@@ -545,9 +563,9 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 自动回归以当前工作树实际执行的 `npm test` 为准，测试数量会随覆盖范围变化。每次交付前都要重新运行 Node 测试、TypeScript 类型检查、生产构建、Fabric 完整 clean build、工作树审计与无效字符检查；自动测试通过不等于目标服务器已经接受每一种真实游戏动作。
 
-当前真实环境已验证过 Fabric 26.2 进服、EasyAuth、模型最小请求、带称号聊天解析、自动复活、LAN 发现、皮肤加载链路与自动进食。本轮又在管理员明确授权的小型开发区现场验证了附近扫描、单方块采集与自有掉落、普通方块放置、背包 2×2 合成、工作台放置、工作台 3×3 合成、批准区内探索和 Node 重连后任务恢复。固定住所、复杂地形寻路、断线中途恢复及中国大陆无代理纯净 Windows 下载/安装仍需独立验收。
+当前真实环境已验证过 Fabric 26.2 进服、EasyAuth、模型最小请求、带称号聊天解析、自动复活、LAN 发现、皮肤加载链路与自动进食。本轮又在管理员明确授权的可丢弃测试场地验证了附近扫描、单方块采集与自有掉落、普通方块放置、背包 2×2 合成、Bot 自有工作台放置/3×3 合成、分段探索和 Node 重连后任务恢复。固定住所、复杂地形寻路、断线中途恢复及中国大陆无代理纯净 Windows 下载/安装仍需独立验收。
 
-本轮修复了显式“吃东西”动作在食物已经消耗后仍停留于 `consuming_safe_food` 的完成判定：客户端现在先观察服务端同步后的物品种类/数量变化，再判断是否仍在使用物品。任何涉及世界修改的新动作仍必须在管理员授权的可丢弃开发区现场验收，不能只凭自动测试和构建宣称可用。
+本轮修复了显式“吃东西”动作在食物已经消耗后仍停留于 `consuming_safe_food` 的完成判定：客户端现在先观察服务端同步后的物品种类/数量变化，再判断是否仍在使用物品。任何涉及世界修改的新动作仍必须在管理员授权的可丢弃场地现场验收，不能只凭自动测试和构建宣称可用。
 
 ## 开发与验证
 
@@ -568,16 +586,16 @@ npm run probe
 
 当前本地候选版已不再把简单基础玩法完全交给大模型判断。玩家说“挖掘三个石头”“采集材料”“随便放一个方块”“合成四个木板”或“吃东西”时，`src/agent/basic-command.ts` 会先按聊天内容、背包和附近方块扫描生成确定动作；只有无法可靠判断的复杂请求才调用大模型。这既减少 API 消耗，也避免模型错误回答“动作列表没有该选项”。
 
-使用前必须在 WebUI 的“自主/开发区”中开启并填写 `developmentZone`。这是包含边界的安全测试/开发区域：采集、普通方块放置、自主探索和建房不会越出此区域。不要把玩家住宅、箱子或不可恢复建筑划进开发区。保存后使用根目录的 `Stop-Bot.cmd`、`Start-Bot.cmd` 完整重启，使 Node 和 Fabric 客户端同时加载新区域。
+使用前确认 WebUI“自主能力与安全”中的“允许 Fabric 动态环境验证”已开启。AI 根据附近结构化状态决定去哪里，Fabric 在执行时逐目标判断；不再填写任何人工坐标范围。关闭此开关会直接拒绝采集、放置、开矿和建房。
 
 运行时会把 Bot 周围半径 8 格、上下 5 格的已加载方块摘要写入 `data/runtime-status.json` 的 `world.blockSurvey`。`resources` 是原木、石头、泥土和矿物等自然资源；`artificial` 是门、木板、楼梯、玻璃、箱子、工作台、灯等疑似人造内容；`classification` 为 `natural_terrain_likely`、`protected_structure_nearby` 或 `uncertain`。自动行为不靠图片或声音，仍完全使用这一结构化状态和正常客户端动作。
 
 当前可真实执行：
 
-- `gather_resource`：选批准区内匹配方块、准备最佳工具、正常挖掘、等待服务器确认方块变化，并验证掉落已登记或已自动进入背包。发令玩家本人可在旁监督，其他玩家进入安全半径仍会取消动作。
-- `craft_item`：合成已解锁且当前材料足够的配方。2×2 使用背包菜单；3×3 会在批准区内寻找 8 格内已加载工作台，正常打开工作台菜单、执行配方、验证产物增加并关闭菜单。
-- `place_block`：从泥土、石头、圆石、木板、原木、羊毛和工作台等安全白名单材料中选择，在批准区内寻找无方块实体、无碰撞、可合法放置的位置，使用正常多人交互并等待服务器确认。
-- 主动发展：安全且无玩家任务时，依次尝试木板、工作台、木棍、放置工作台和木镐，再按扫描结果补充短缺木材或石材；没有短缺时只在批准区内小范围探索。复杂地形仍缺少 A* 寻路，不能把当前能力理解成已完成整套生存通关。
+- `gather_resource`：在动态验证的已加载候选中准备最佳工具、正常挖掘、等待服务器确认变化，并验证掉落已登记或已自动进入背包。发令玩家本人可在旁监督，其他玩家进入安全半径仍会取消动作。
+- `craft_item`：合成已解锁且材料足够的配方。2×2 使用背包菜单；3×3 只寻找 8 格内账本确认属于 Bot 的已加载工作台，再正常打开菜单、执行配方并验证产物。
+- `place_block`：从安全白名单材料中选择，逐候选检查玩家结构、方块实体、碰撞、支撑、危险和撤退路线，使用正常多人交互并等待服务器确认。
+- 主动发展：安全且无玩家任务时，确定性规划器从食物、设施、工具和住所继续到铁/钻石、下界和末地；移动使用有界 A* 和分段探索，难以绕开的天然障碍可在逐块验证后开路。
 
 多人消息仍进入同一持久任务队列逐条执行；`wraaaaaa` 最高优先，其余玩家按实时距离、紧急度和先后顺序仲裁。每条定向回复现在固定带 `@玩家名`，避免多人同时聊天时看不出回复对象。
 

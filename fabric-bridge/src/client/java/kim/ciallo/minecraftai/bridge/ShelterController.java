@@ -312,7 +312,7 @@ public final class ShelterController {
                 minimumPlayerDistance, null
             );
             if (!verifiedWilderness || !assessment.allowed()) {
-                results.add(new TaskResult(id, false, "refused: build_shelter requires an explicit approved AABB or verified wilderness: "
+                results.add(new TaskResult(id, false, "refused: build_shelter requires verified dynamic wilderness: "
                     + String.join(",", assessment.reasons())));
                 return null;
             }
@@ -321,7 +321,7 @@ public final class ShelterController {
         }
         String dimension = dimensionId(client);
         if (!zone.dimension().equals(dimension)) {
-            results.add(new TaskResult(id, false, "refused: approved AABB belongs to another dimension"));
+            results.add(new TaskResult(id, false, "refused: verified shelter work window belongs to another dimension"));
             return null;
         }
         LocalPlayer player = client.player;
@@ -343,7 +343,7 @@ public final class ShelterController {
         BuildSite site = findBuildSite(client, player, zone, radius);
         if (site == null) {
             results.add(new TaskResult(id, false,
-                "no safe flat 3x3 build site found inside the approved AABB without replacing protected blocks"));
+                "no safe flat 3x3 build site found in the verified work window without replacing protected blocks"));
             return null;
         }
         int requiredWorldBlocks = site.targets().size() + 3; // one two-block door and one torch
@@ -477,7 +477,7 @@ public final class ShelterController {
             if (!allTargetsInside(site.targets(), zone)
                 || !zone.contains(site.home()) || !zone.contains(site.home().above(2))
                 || !zone.contains(site.door()) || !zone.contains(site.door().above())) {
-                finish(client, this, false, "shelter plan escaped approved AABB" + progressSuffix());
+                finish(client, this, false, "shelter plan escaped its verified work window" + progressSuffix());
                 return;
             }
             if (client.level.hasNeighborSignal(site.door())
@@ -543,7 +543,7 @@ public final class ShelterController {
             BlockPos target = placement.target();
             BlockState before = client.level.getBlockState(target);
             if (!zone.contains(target) || !client.level.isLoaded(target)) {
-                finish(client, this, false, "target unavailable or outside approved AABB: " + target + progressSuffix());
+                finish(client, this, false, "target unavailable or outside the verified work window: " + target + progressSuffix());
                 return;
             }
             if (!before.canBeReplaced() || client.level.getBlockEntity(target) != null) {

@@ -34,15 +34,6 @@ function plan(stage: ProgressionStage, reason: string, action: AgentAction): Dev
   return { stage, reason, action }
 }
 
-function outsideConfiguredZone(config: BotConfig, world: WorldState): boolean {
-  const zone = autonomyConfig(config).developmentZone
-  if (!zone?.enabled || !world.position) return false
-  if (world.dimension && world.dimension !== zone.dimension) return true
-  return world.position.x < zone.minX || world.position.x > zone.maxX
-    || world.position.y < zone.minY || world.position.y > zone.maxY
-    || world.position.z < zone.minZ || world.position.z > zone.maxZ
-}
-
 function resourcePlan(
   world: WorldState,
   progression: ProgressionDocument | undefined,
@@ -141,7 +132,6 @@ export function planSurvivalProgression(
 ): DevelopmentPlan | undefined {
   const autonomy = autonomyConfig(config)
   if (!autonomy.enabled || !world.connected || !world.position) return undefined
-  if (outsideConfiguredZone(config, world)) return plan('survive', '先返回管理员明确划定的开发区', { type: 'return_to_zone' })
 
   const food = world.food ?? 20
   const readyFood = safeFoodCount(world)

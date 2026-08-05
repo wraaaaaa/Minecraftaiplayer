@@ -141,7 +141,11 @@ public final class AdvancedTaskController {
     }
 
     public String activeType() { return active == null ? "" : active.type; }
-    public String navigationStatus() { return navigator.status(); }
+    public String navigationStatus() {
+        return active instanceof ExcavateTask excavation
+            ? navigator.status() + "; " + excavation.debugStatus()
+            : navigator.status();
+    }
 
     private abstract class Task {
         final String id;
@@ -584,6 +588,7 @@ public final class AdvancedTaskController {
         private String scaffoldItem;
         private long scaffoldStarted;
         private long scaffoldLastAttempt;
+        private long lastVerifiedProgressTick;
 
         ExcavateTask(String id, JsonObject action, Minecraft client) {
             super(id, "excavate_tunnel", EXCAVATE_TIMEOUT_TICKS);
@@ -592,24 +597,22 @@ public final class AdvancedTaskController {
             }
             targetY = integer(action, "targetY", client.level.getMinY() + 5, client.level.getMaxY() - 5, -53);
             length = integer(action, "length", 2, 64, 12);
-            startY = client.player.blockPosition().getY();
+            startY = navigator.standingBlockPos(client, client.player).getY();
             verticalDirection = Integer.compare(targetY, startY);
             terminalY = verticalDirection > 0
                 ? Math.min(targetY, startY + length)
                 : verticalDirection < 0 ? Math.max(targetY, startY - length) : startY;
             resource = string(action, "resource", "stone").toLowerCase(Locale.ROOT);
             resourceBaseline = resourceInventoryCount(client.player, resource);
+            lastVerifiedProgressTick = startedTick;
             direction = chooseExcavationDirection(client, client.player, targetY);
-            if (direction == null && targetY > client.player.blockPosition().getY()) {
+            if (direction == null && targetY > startY) {
                 direction = chooseScaffoldDirection(client, client.player);
             }
             if (direction == null) throw new IllegalArgumentException("no safe natural direction for the first excavation segment; "
                 + excavationDirectionReport(client, client.player, targetY));
-            WildernessGuard.Assessment assessment = WildernessGuard.assess(
-                client, client.player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
-                minimumPlayerDistance, null
-            );
-            if (!assessment.allowed()) throw new IllegalArgumentException("wilderness verification failed: " + String.join(",", assessment.reasons()));
+            // Every broken block is verified below. Nearby structures must not turn unrelated
+            // natural stone or ore into an artificial global no-mining zone.
         }
 
         @Override
@@ -619,7 +622,12 @@ public final class AdvancedTaskController {
                 finish(client, this, false, "excavation self-preservation stop");
                 return;
             }
-            int currentY = player.blockPosition().getY();
+            if (tick - lastVerifiedProgressTick > 500L) {
+                finish(client, this, false, "excavation_stalled_without_verified_progress; " + debugStatus());
+                return;
+            }
+            BlockPos standing = navigator.standingBlockPos(client, player);
+            int currentY = standing.getY();
             boolean stable = player.onGround() || player.isInWater();
             boolean reachedTerminal = verticalDirection > 0
                 ? stable && currentY >= terminalY
@@ -631,7 +639,7 @@ public final class AdvancedTaskController {
                     + "; verified_support_blocks=" + placedSupports
                     + "; resource=" + resource
                     + "; inventory_delta=" + resourceDelta
-                    + "; final_y=" + player.blockPosition().getY());
+                    + "; final_y=" + currentY);
                 return;
             }
             if (scaffold != null) {
@@ -651,7 +659,7 @@ public final class AdvancedTaskController {
             if (stepGoal == null) prepareNextStep(client, player);
             if (active != this) return;
             if (stepGoal == null) return;
-            BlockPos feet = player.blockPosition();
+            BlockPos feet = standing;
             if (stable && verticalDirection != 0 && Math.abs(stepGoal.getY() - feet.getY()) > 1) {
                 // The Bot slid or fell off a completed stair. Discard the now unreachable stale
                 // goal and continue from the real landing cell instead of repeatedly walking into
@@ -666,9 +674,12 @@ public final class AdvancedTaskController {
             // that airborne tick as a completed stair made the next goal two blocks above the
             // real floor, after which the Bot fell back and A* correctly refused the impossible
             // jump. Only persist progress once grounded (water movement is handled separately).
+            boolean verifiedGoalY = feet.getY() == stepGoal.getY()
+                || Math.abs(player.getY() - stepGoal.getY()) <= 0.25D;
             if ((player.onGround() || player.isInWater())
-                && feet.getY() == stepGoal.getY() && stepDx * stepDx + stepDz * stepDz <= 0.49D) {
+                && verifiedGoalY && stepDx * stepDx + stepDz * stepDz <= 0.49D) {
                 completed++;
+                lastVerifiedProgressTick = tick;
                 stepGoal = null;
                 navigator.release(client);
                 return;
@@ -681,7 +692,7 @@ public final class AdvancedTaskController {
         }
 
         private void prepareNextStep(Minecraft client, LocalPlayer player) {
-            BlockPos current = player.blockPosition();
+            BlockPos current = navigator.standingBlockPos(client, player);
             int dy = Integer.compare(targetY, current.getY());
             if (dy > 0) {
                 Direction upwardDirection = chooseExcavationDirection(client, player, targetY);
@@ -766,6 +777,7 @@ public final class AdvancedTaskController {
             if (observedId.equals(scaffoldItem)) {
                 OwnedBlockRegistry.registerPlacedStructure(client, scaffold, observedId);
                 placedSupports++;
+                lastVerifiedProgressTick = tick;
                 scaffold = null;
                 scaffoldItem = null;
                 navigator.release(client);
@@ -802,6 +814,7 @@ public final class AdvancedTaskController {
             if (state.isAir()) {
                 registerDropsNear(client, breaking);
                 brokenBlocks++;
+                lastVerifiedProgressTick = tick;
                 breaking = null;
                 client.gameMode.stopDestroyBlock();
                 return;
@@ -821,6 +834,19 @@ public final class AdvancedTaskController {
             player.swing(InteractionHand.MAIN_HAND);
             if (tick - breakStarted > 240L) finish(client, this, false, "server did not confirm tunnel block break");
         }
+
+        private String debugStatus() {
+            LocalPlayer player = Minecraft.getInstance().player;
+            String playerPosition = player == null ? "not_in_world" : player.blockPosition().toShortString();
+            return "steps=" + completed
+                + "; broken=" + brokenBlocks
+                + "; supports=" + placedSupports
+                + "; player=" + playerPosition
+                + "; goal=" + (stepGoal == null ? "none" : stepGoal.toShortString())
+                + "; breaking=" + (breaking == null ? "none" : breaking.toShortString())
+                + "; scaffold=" + (scaffold == null ? "none" : scaffold.toShortString())
+                + "; idle_ticks=" + (tick - lastVerifiedProgressTick);
+        }
     }
 
     private final class ExploreTask extends Task {
@@ -828,14 +854,15 @@ public final class AdvancedTaskController {
         private final double radius;
         private Vec3 goal;
         private int replans;
-        private int wildernessSegments;
         private BlockPos obstacle;
         private long obstacleStarted;
 
         ExploreTask(String id, JsonObject action, LocalPlayer player) {
             super(id, "explore_frontier", EXPLORE_TIMEOUT_TICKS);
             purpose = string(action, "purpose", "resource");
-            radius = integer(action, "radius", 8, 256, 32);
+            // One action is one bounded route segment. Long exploration is resumed by the
+            // persistent planner, preventing the Node action timeout from cancelling real progress.
+            radius = Math.min(48.0D, integer(action, "radius", 8, 256, 32));
             goal = frontierGoal(player, radius, frontierSequence++);
         }
 
@@ -863,11 +890,6 @@ public final class AdvancedTaskController {
                 return;
             }
             if (player.distanceToSqr(goal) <= 9.0D) {
-                if (Set.of("village", "portal").contains(purpose)) {
-                    finish(client, this, true, "verified_discovery_route_segment_reached; purpose=" + purpose
-                        + "; x=" + Math.floor(player.getX()) + "; z=" + Math.floor(player.getZ()));
-                    return;
-                }
                 WildernessGuard.Assessment assessment = WildernessGuard.assess(
                     client,
                     player.blockPosition(),
@@ -875,18 +897,10 @@ public final class AdvancedTaskController {
                     minimumPlayerDistance,
                     System.getenv("MCAI_OWNER_NAME")
                 );
-                if (assessment.allowed()) {
-                    finish(client, this, true, "verified_frontier_reached_and_wilderness_clear; purpose=" + purpose
-                        + "; x=" + Math.floor(player.getX()) + "; z=" + Math.floor(player.getZ()));
-                    return;
-                }
-                if (++wildernessSegments <= 8) {
-                    goal = frontierGoal(player, radius, frontierSequence++);
-                    navigator.release(client);
-                    return;
-                }
-                finish(client, this, false, "no_verified_wilderness_after_eight_route_segments: "
-                    + String.join(",", assessment.reasons()));
+                finish(client, this, true, "verified_discovery_route_segment_reached; purpose=" + purpose
+                    + "; environment=" + (assessment.allowed() ? "natural_terrain_likely" : "protected_structure_nearby")
+                    + (assessment.reasons().isEmpty() ? "" : "; evidence=" + String.join(",", assessment.reasons()))
+                    + "; x=" + Math.floor(player.getX()) + "; z=" + Math.floor(player.getZ()));
                 return;
             }
             boolean routed = navigator.drive(client, player, goal, 2.0D, true, tick);
@@ -1219,10 +1233,10 @@ public final class AdvancedTaskController {
             || entity instanceof TamableAnimal tamable && tamable.isTame()
             || entity instanceof Leashable leashable && leashable.isLeashed()) return false;
         if (Set.of("ender_pearl", "blaze_rod").contains(purpose)) return entity instanceof Enemy;
-        WildernessGuard.Assessment assessment = WildernessGuard.assess(
-            client, entity.blockPosition(), 8, minimumPlayerDistance, null
-        );
-        return assessment.allowed();
+        if (!WildernessGuard.safePlacementArea(client, entity.blockPosition(), 6)) return false;
+        LocalPlayer bot = client.player;
+        return client.level.players().stream().noneMatch(player -> player != bot && player.isAlive()
+            && player.distanceToSqr(entity) < minimumPlayerDistance * minimumPlayerDistance);
     }
 
     private static boolean huntMatches(LivingEntity entity, String purpose) {

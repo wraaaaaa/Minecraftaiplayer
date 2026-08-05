@@ -26,8 +26,13 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   autoSleep: true,
   protectOwner: true,
   allowVerifiedWilderness: true,
-  longTermGoal: 'reach_end',
-  developmentZone: Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
+  longTermGoal: 'reach_end'
+})
+
+const WORKSPACE_DEFAULTS = Object.freeze({
+  promptDirectory: 'data/agent-prompts', playerProfilesDirectory: 'data/player-profiles', contextBudgetChars: 48000,
+  compressionTriggerRatio: 0.72, retainRecentEvents: 16,
+  selfImprovement: Object.freeze({ enabled: true, allowPromptEdits: true, allowBehaviorPatches: true, minimumRepeatedFailures: 3, researchProvider: 'baidu', researchEndpoint: 'https://www.baidu.com/s', researchTimeoutMs: 12000 })
 })
 
 const $ = id => document.getElementById(id)
@@ -201,6 +206,25 @@ function renderStatus(snapshot) {
   $('skinPreview').hidden = !snapshot.skin.imageUrl
 }
 
+function renderPlayerProfiles(snapshot) {
+  const select = $('playerProfileSelect')
+  const current = select.value
+  const profiles = snapshot.playerProfiles || []
+  select.replaceChildren()
+  if (!profiles.length) {
+    const option = document.createElement('option'); option.value = ''; option.textContent = '暂无玩家画像'; select.append(option)
+    set('playerProfileContent', '')
+  } else {
+    profiles.forEach(profile => {
+      const option = document.createElement('option'); option.value = profile.id; option.textContent = `${profile.playerName}${profile.uuid ? ` · ${profile.uuid}` : ''}`; select.append(option)
+    })
+    select.value = profiles.some(profile => profile.id === current) ? current : profiles[0].id
+    set('playerProfileContent', profiles.find(profile => profile.id === select.value)?.content || '')
+  }
+  $('behaviorPatchView').textContent = snapshot.behaviorPatches?.patches?.length
+    ? JSON.stringify(snapshot.behaviorPatches.patches, null, 2) : '暂无补丁'
+}
+
 function populate(snapshot) {
   state = snapshot
   const c = snapshot.config
@@ -216,16 +240,19 @@ function populate(snapshot) {
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
   for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness']) setChecked(id, autonomy[id])
-  const developmentZone = { ...AUTONOMY_DEFAULTS.developmentZone, ...(autonomy.developmentZone || {}) }
-  setChecked('developmentZoneEnabled', developmentZone.enabled); set('developmentDimension', developmentZone.dimension); setNumber('developmentMinX', developmentZone.minX); setNumber('developmentMinY', developmentZone.minY); setNumber('developmentMinZ', developmentZone.minZ); setNumber('developmentMaxX', developmentZone.maxX); setNumber('developmentMaxY', developmentZone.maxY); setNumber('developmentMaxZ', developmentZone.maxZ)
+  const workspace = { ...WORKSPACE_DEFAULTS, ...(c.agentWorkspace || {}), selfImprovement: { ...WORKSPACE_DEFAULTS.selfImprovement, ...(c.agentWorkspace?.selfImprovement || {}) } }
+  set('promptDirectory', workspace.promptDirectory); set('playerProfilesDirectory', workspace.playerProfilesDirectory); setNumber('contextBudgetChars', workspace.contextBudgetChars); setNumber('compressionTriggerRatio', workspace.compressionTriggerRatio); setNumber('retainRecentEvents', workspace.retainRecentEvents)
+  setChecked('selfImprovementEnabled', workspace.selfImprovement.enabled); setChecked('allowPromptEdits', workspace.selfImprovement.allowPromptEdits); setChecked('allowBehaviorPatches', workspace.selfImprovement.allowBehaviorPatches); setNumber('minimumRepeatedFailures', workspace.selfImprovement.minimumRepeatedFailures); set('researchProvider', workspace.selfImprovement.researchProvider); set('researchEndpoint', workspace.selfImprovement.researchEndpoint); setNumber('researchTimeoutMs', workspace.selfImprovement.researchTimeoutMs)
   set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); set('taskFile', c.storage.taskFile ?? 'data/tasks.json'); set('autonomyFile', c.storage.autonomyFile ?? 'data/autonomy-state.json'); set('progressionFile', c.storage.progressionFile ?? 'data/progression.json'); set('ownedBlocksFile', c.storage.ownedBlocksFile ?? 'data/owned-blocks.json'); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
   set('personaName', snapshot.persona.name); set('personaDescription', snapshot.persona.description); set('speakingStyle', snapshot.persona.speakingStyle); set('personaGoals', snapshot.persona.goals.join('\n')); set('personaBoundaries', snapshot.persona.boundaries.join('\n'))
   set('promptIdentity', snapshot.prompts.identity); set('promptCapabilities', snapshot.prompts.capabilityRules.join('\n')); set('promptMemory', snapshot.prompts.memoryRules.join('\n')); set('promptContract', snapshot.prompts.actionContract); set('promptProactive', snapshot.prompts.proactiveInstruction)
+  set('agentRules', snapshot.agentPrompts['rules.md']); set('agentIdentity', snapshot.agentPrompts['IDENTITY.md']); set('agentSoul', snapshot.agentPrompts['SOUL.md']); set('agentTools', snapshot.agentPrompts['TOOLS.md']); set('agentMemory', snapshot.agentPrompts['MEMORY.md'])
   setChecked('skinEnabled', snapshot.skin.enabled); set('skinModel', snapshot.skin.model); set('skinVisibility', snapshot.skin.visibilityMode); set('skinProviderName', snapshot.skin.onlineProvider.name); set('skinProfileName', snapshot.skin.onlineProvider.profileName); set('skinProviderWebsite', snapshot.skin.onlineProvider.website)
   const r = snapshot.rules
   setChecked('denyBreaking', r.denyBreakingPlayerProperty); setChecked('denyContainers', r.denyOpeningPlayerContainers); setChecked('denyTaking', r.denyTakingPlayerItems); setChecked('wildernessOnly', r.wildernessDevelopmentOnly); setChecked('allowSelfDefense', r.allowSelfDefense); setNumber('selfDefenseWindow', r.selfDefenseWindowMs); setChecked('stopDefense', r.stopSelfDefenseWhenThreatEnds); setChecked('allowOrderedPvp', r.allowPlayerOrderedPvp); setChecked('allowUnknownDestruction', r.allowDestructiveActionsWhenOwnershipUnknown); setChecked('policyProactive', r.proactiveChat.enabled); setChecked('avoidSecrets', r.proactiveChat.avoidSecrets); setChecked('avoidSpam', r.proactiveChat.avoidSpam)
   set('modsSource', snapshot.mods.sourceDirectory); setChecked('syncOnStart', snapshot.mods.syncOnClientStart); set('excludePatterns', snapshot.mods.excludeFilePatterns.join('\n'))
   renderStatus(snapshot)
+  renderPlayerProfiles(snapshot)
   setDirty(false)
 }
 
@@ -242,31 +269,28 @@ function collect() {
   const lowHealthThreshold = number('lowHealthThreshold')
   const criticalHealthThreshold = number('criticalHealthThreshold')
   if (criticalHealthThreshold > lowHealthThreshold) throw new Error('危险生命阈值不能高于低生命阈值')
-  const developmentZone = {
-    enabled: checked('developmentZoneEnabled'), dimension: value('developmentDimension').trim(),
-    minX: number('developmentMinX'), minY: number('developmentMinY'), minZ: number('developmentMinZ'),
-    maxX: number('developmentMaxX'), maxY: number('developmentMaxY'), maxZ: number('developmentMaxZ')
-  }
-  if (!developmentZone.dimension) throw new Error('开发区域维度 ID 不能为空')
-  if (developmentZone.minX > developmentZone.maxX || developmentZone.minY > developmentZone.maxY || developmentZone.minZ > developmentZone.maxZ) throw new Error('开发区域的最小坐标不能大于最大坐标')
-  if (developmentZone.maxX - developmentZone.minX > 256 || developmentZone.maxY - developmentZone.minY > 128 || developmentZone.maxZ - developmentZone.minZ > 256) throw new Error('开发区域过大：X/Z 最多 256 格，高度最多 128 格')
   c.autonomy = {
     enabled: checked('autonomyEnabled'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
     safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
     autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'),
-    longTermGoal: 'reach_end', developmentZone
+    longTermGoal: 'reach_end'
+  }
+  c.agentWorkspace = {
+    promptDirectory: value('promptDirectory').trim(), playerProfilesDirectory: value('playerProfilesDirectory').trim(), contextBudgetChars: number('contextBudgetChars'), compressionTriggerRatio: number('compressionTriggerRatio'), retainRecentEvents: number('retainRecentEvents'),
+    selfImprovement: { enabled: checked('selfImprovementEnabled'), allowPromptEdits: checked('allowPromptEdits'), allowBehaviorPatches: checked('allowBehaviorPatches'), minimumRepeatedFailures: number('minimumRepeatedFailures'), researchProvider: value('researchProvider'), researchEndpoint: value('researchEndpoint').trim(), researchTimeoutMs: number('researchTimeoutMs') }
   }
   Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), taskFile: value('taskFile').trim(), autonomyFile: value('autonomyFile').trim(), progressionFile: value('progressionFile').trim(), ownedBlocksFile: value('ownedBlocksFile').trim(), maxEvents: number('maxEvents') })
   Object.assign(c.logging, { file: value('logFile').trim(), level: value('logLevel'), console: checked('logConsole') })
   const persona = { name: value('personaName').trim(), description: value('personaDescription').trim(), speakingStyle: value('speakingStyle').trim(), goals: lines('personaGoals'), boundaries: lines('personaBoundaries') }
   const prompts = { identity: value('promptIdentity'), capabilityRules: lines('promptCapabilities'), memoryRules: lines('promptMemory'), actionContract: value('promptContract'), proactiveInstruction: value('promptProactive') }
+  const agentPrompts = { 'rules.md': value('agentRules'), 'IDENTITY.md': value('agentIdentity'), 'SOUL.md': value('agentSoul'), 'TOOLS.md': value('agentTools'), 'MEMORY.md': value('agentMemory') }
   const skin = structuredClone(state.skin); delete skin.imported; delete skin.imageUrl
   Object.assign(skin, { enabled: checked('skinEnabled'), model: value('skinModel'), visibilityMode: value('skinVisibility'), onlineProvider: { name: value('skinProviderName').trim(), profileName: value('skinProfileName').trim(), website: value('skinProviderWebsite').trim() } })
   const rules = { version: 1, denyBreakingPlayerProperty: checked('denyBreaking'), denyOpeningPlayerContainers: checked('denyContainers'), denyTakingPlayerItems: checked('denyTaking'), wildernessDevelopmentOnly: checked('wildernessOnly'), allowSelfDefense: checked('allowSelfDefense'), selfDefenseWindowMs: number('selfDefenseWindow'), stopSelfDefenseWhenThreatEnds: checked('stopDefense'), allowPlayerOrderedPvp: checked('allowOrderedPvp'), allowDestructiveActionsWhenOwnershipUnknown: checked('allowUnknownDestruction'), proactiveChat: { enabled: checked('policyProactive'), avoidSecrets: checked('avoidSecrets'), avoidSpam: checked('avoidSpam') } }
   const mods = { sourceDirectory: value('modsSource').trim(), syncOnClientStart: checked('syncOnStart'), excludeFilePatterns: lines('excludePatterns') }
-  return { config: c, persona, prompts, skin, rules, mods }
+  return { config: c, persona, prompts, agentPrompts, skin, rules, mods }
 }
 
 async function load() {
@@ -280,6 +304,17 @@ async function save() {
     toast('全部设置已安全保存')
     await load()
   } catch (error) { toast(error.message, true) } finally { $('saveButton').disabled = false }
+}
+
+async function savePlayerProfile() {
+  const id = value('playerProfileSelect')
+  if (!id) return toast('当前没有可保存的玩家画像', true)
+  try {
+    const result = await request('/api/player-profile', { method: 'PUT', body: JSON.stringify({ id, content: value('playerProfileContent') }) })
+    const existing = (state.playerProfiles || []).findIndex(profile => profile.id === id)
+    if (existing >= 0) state.playerProfiles[existing] = result.profile
+    toast('当前玩家 USER.md 已保存')
+  } catch (error) { toast(error.message, true) }
 }
 
 async function saveSecrets() {
@@ -359,6 +394,8 @@ async function refreshCentralChat() {
 $('saveButton').addEventListener('click', save)
 $('reloadButton').addEventListener('click', () => { if (!dirty || confirm('放弃尚未保存的修改？')) load() })
 $('saveSecretsButton').addEventListener('click', saveSecrets)
+$('savePlayerProfileButton').addEventListener('click', savePlayerProfile)
+$('playerProfileSelect').addEventListener('change', () => set('playerProfileContent', (state.playerProfiles || []).find(profile => profile.id === value('playerProfileSelect'))?.content || ''))
 $('clearSecretsButton').addEventListener('click', clearSecrets)
 $('discoverLanButton').addEventListener('click', discoverLan)
 $('importSkinButton').addEventListener('click', importSkin)

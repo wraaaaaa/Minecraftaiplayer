@@ -50,6 +50,22 @@ export interface BotConfig {
     ownedBlocksFile?: string
     maxEvents: number
   }
+  agentWorkspace?: {
+    promptDirectory: string
+    playerProfilesDirectory: string
+    contextBudgetChars: number
+    compressionTriggerRatio: number
+    retainRecentEvents: number
+    selfImprovement: {
+      enabled: boolean
+      allowPromptEdits: boolean
+      allowBehaviorPatches: boolean
+      minimumRepeatedFailures: number
+      researchProvider: 'baidu' | 'searxng' | 'disabled'
+      researchEndpoint: string
+      researchTimeoutMs: number
+    }
+  }
   autonomy?: {
     enabled: boolean
     ownerName: string
@@ -123,6 +139,7 @@ export interface AutonomyConfig {
   protectOwner: boolean
   allowVerifiedWilderness: boolean
   longTermGoal: 'reach_end'
+  /** @deprecated 仅为读取旧配置保留；运行时不再使用手工坐标范围。 */
   developmentZone?: {
     enabled: boolean
     dimension: string
@@ -164,7 +181,56 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
 })
 
 export function autonomyConfig(config: BotConfig): AutonomyConfig {
-  return { ...DEFAULT_AUTONOMY_CONFIG, ...config.autonomy }
+  // 手工坐标框已废弃。旧 bot.json 即使仍保存 developmentZone，也不会再限制或授权行为。
+  const configured = { ...config.autonomy }
+  delete configured.developmentZone
+  return { ...DEFAULT_AUTONOMY_CONFIG, ...configured }
+}
+
+export interface AgentWorkspaceConfig {
+  promptDirectory: string
+  playerProfilesDirectory: string
+  contextBudgetChars: number
+  compressionTriggerRatio: number
+  retainRecentEvents: number
+  selfImprovement: {
+    enabled: boolean
+    allowPromptEdits: boolean
+    allowBehaviorPatches: boolean
+    minimumRepeatedFailures: number
+    researchProvider: 'baidu' | 'searxng' | 'disabled'
+    researchEndpoint: string
+    researchTimeoutMs: number
+  }
+}
+
+export const DEFAULT_AGENT_WORKSPACE_CONFIG: Readonly<AgentWorkspaceConfig> = Object.freeze({
+  promptDirectory: 'data/agent-prompts',
+  playerProfilesDirectory: 'data/player-profiles',
+  contextBudgetChars: 48_000,
+  compressionTriggerRatio: 0.72,
+  retainRecentEvents: 16,
+  selfImprovement: Object.freeze({
+    enabled: true,
+    allowPromptEdits: true,
+    allowBehaviorPatches: true,
+    minimumRepeatedFailures: 3,
+    researchProvider: 'baidu',
+    researchEndpoint: 'https://www.baidu.com/s',
+    researchTimeoutMs: 12_000
+  })
+})
+
+export function agentWorkspaceConfig(config: BotConfig): AgentWorkspaceConfig {
+  const configured = config.agentWorkspace
+  return {
+    ...DEFAULT_AGENT_WORKSPACE_CONFIG,
+    ...configured,
+    selfImprovement: {
+      ...DEFAULT_AGENT_WORKSPACE_CONFIG.selfImprovement,
+      ...configured?.selfImprovement
+    }
+  }
 }
 
 export interface PromptTemplates {

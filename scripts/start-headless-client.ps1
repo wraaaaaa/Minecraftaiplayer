@@ -137,16 +137,6 @@ if (-not $ownedBlocksPath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySepa
     throw 'storage.ownedBlocksFile must stay inside the project data directory.'
 }
 $env:MCAI_OWNED_BLOCKS_FILE = $ownedBlocksPath
-$env:MCAI_DEVELOPMENT_ZONE_ENABLED = if ($null -eq $config.autonomy.developmentZone.enabled) { 'false' } else { ([bool]$config.autonomy.developmentZone.enabled).ToString().ToLowerInvariant() }
-if ($env:MCAI_DEVELOPMENT_ZONE_ENABLED -eq 'true') {
-    $env:MCAI_DEVELOPMENT_ZONE_DIMENSION = [string]$config.autonomy.developmentZone.dimension
-    $env:MCAI_DEVELOPMENT_ZONE_MIN_X = [string][int]$config.autonomy.developmentZone.minX
-    $env:MCAI_DEVELOPMENT_ZONE_MIN_Y = [string][int]$config.autonomy.developmentZone.minY
-    $env:MCAI_DEVELOPMENT_ZONE_MIN_Z = [string][int]$config.autonomy.developmentZone.minZ
-    $env:MCAI_DEVELOPMENT_ZONE_MAX_X = [string][int]$config.autonomy.developmentZone.maxX
-    $env:MCAI_DEVELOPMENT_ZONE_MAX_Y = [string][int]$config.autonomy.developmentZone.maxY
-    $env:MCAI_DEVELOPMENT_ZONE_MAX_Z = [string][int]$config.autonomy.developmentZone.maxZ
-}
 $bridgeTokenFile = Join-Path $projectRoot 'data\bridge-token.txt'
 if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
     throw 'Bridge session token is missing. Start the AI controller first or use start-all-background.ps1.'

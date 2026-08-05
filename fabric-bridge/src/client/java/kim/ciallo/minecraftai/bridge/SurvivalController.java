@@ -88,6 +88,9 @@ public final class SurvivalController {
     private long eatingStartedTick;
     private int eatingInitialCount;
     private Item eatingInitialItem;
+    private int eatingInitialFood;
+    private float eatingInitialHealth;
+    private long eatingRetryAfterTick;
     private long completedFoodConsumptions;
     private long successfulAttacks;
     private Snapshot snapshot = new Snapshot(
@@ -179,6 +182,12 @@ public final class SurvivalController {
             }
         }
 
+        if (localTick < eatingRetryAfterTick) {
+            snapshot = new Snapshot(Mode.UNSAFE, false, List.of("food_use_retry_cooldown"), null,
+                "waiting_before_food_use_retry");
+            return;
+        }
+
         boolean needsFood = player.getHealth() <= eatHealthThreshold
             || player.getFoodData().getFoodLevel() < eatFoodThreshold;
 
@@ -249,6 +258,14 @@ public final class SurvivalController {
 
     public long successfulAttackCount() {
         return successfulAttacks;
+    }
+
+    /** Releases a pending long-use state when its RPC deadline expires. */
+    public void cancelFoodUse(Minecraft client) {
+        LocalPlayer player = client == null ? null : client.player;
+        if (player != null) cancelEating(client, player);
+        else releaseControls(client);
+        eatingRetryAfterTick = 0L;
     }
 
     public List<String> safetyReasons() {
@@ -420,6 +437,8 @@ public final class SurvivalController {
         eatingStartedTick = localTick;
         eatingInitialCount = selected.getCount();
         eatingInitialItem = selected.getItem();
+        eatingInitialFood = player.getFoodData().getFoodLevel();
+        eatingInitialHealth = player.getHealth();
         client.options.keyUse.setDown(true);
         return true;
     }
@@ -436,7 +455,9 @@ public final class SurvivalController {
         // remain reported as "consuming_safe_food" until the explicit action times out.
         if (selected.isEmpty()
             || selected.getItem() != eatingInitialItem
-            || selected.getCount() < eatingInitialCount) {
+            || selected.getCount() < eatingInitialCount
+            || player.getFoodData().getFoodLevel() > eatingInitialFood
+            || player.getHealth() > eatingInitialHealth) {
             completedFoodConsumptions++;
             cancelEating(client, player);
             return false;
@@ -448,6 +469,16 @@ public final class SurvivalController {
         }
 
         if (player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
+            // A normal food use completes well before this point. A server/mod can reject the
+            // long-use completion while leaving the local client in isUsingItem(); release that
+            // stale state so the next explicit attempt is a genuinely new network interaction.
+            if (localTick - eatingStartedTick > 60L) {
+                cancelEating(client, player);
+                eatingRetryAfterTick = localTick + 10L;
+                snapshot = new Snapshot(Mode.UNSAFE, false, List.of("food_use_stalled"), null,
+                    "food_use_stalled_and_released");
+                return false;
+            }
             client.options.keyUse.setDown(true);
             return true;
         }

@@ -21,5 +21,5 @@ test('旧 prompts.json 也会获得受保护破坏方块兼容入口', () => {
   }
   const prompt = buildSystemPrompt(persona, legacy)
   assert.match(prompt, /可输出 break_block（block\/count）或 gather_resource（resource\/count）/u)
-  assert.match(prompt, /Fabric 仍只在管理员批准开发区内选择并验证目标/u)
+  assert.match(prompt, /Fabric 会逐目标验证天然方块、玩家结构、危险源和撤退路径/u)
 })
