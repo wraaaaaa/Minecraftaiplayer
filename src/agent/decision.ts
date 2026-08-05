@@ -46,9 +46,23 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
       const radius = typeof action.radius === 'number' && Number.isFinite(action.radius) ? Math.max(2, Math.min(16, Math.round(action.radius))) : 6
       return { action: { type: 'wander', radius } }
     }
+    case 'explore_frontier': {
+      const purpose = String(action.purpose ?? 'resource')
+      if (!['food', 'wood', 'village', 'portal', 'resource'].includes(purpose)) return { action: { type: 'none' }, error: 'explore_frontier 的 purpose 无效' }
+      return { action: { type, purpose: purpose as 'food' | 'wood' | 'village' | 'portal' | 'resource', radius: integer(action.radius, 8, 256, 32) } }
+    }
     case 'eat_best_food': return { action: { type: 'eat_best_food' } }
     case 'attack_hostile':
-      return { action: { type: 'attack_hostile', ...(typeof action.targetId === 'string' && action.targetId.trim() ? { targetId: action.targetId.trim() } : {}) } }
+      return { action: {
+        type: 'attack_hostile',
+        ...(typeof action.targetId === 'string' && action.targetId.trim() ? { targetId: action.targetId.trim() } : {}),
+        ...(typeof action.protectPlayer === 'string' && action.protectPlayer.trim() ? { protectPlayer: action.protectPlayer.trim() } : {})
+      } }
+    case 'hunt_entity': {
+      const purpose = String(action.purpose ?? 'food')
+      if (!['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'].includes(purpose)) return { action: { type: 'none' }, error: 'hunt_entity 的 purpose 无效' }
+      return { action: { type, purpose: purpose as 'food' | 'wool' | 'leather' | 'ender_pearl' | 'blaze_rod', count: integer(action.count, 1, 64, 1) } }
+    }
     case 'equip_best':
     case 'prepare_for': {
       const purpose = String(action.purpose ?? 'general')
@@ -81,6 +95,31 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
     case 'place_item':
     case 'place':
       return { action: { type: 'place_block', count: integer(action.count, 1, 16, 1), ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {}) } }
+    case 'smelt_item':
+      return { action: {
+        type,
+        count: integer(action.count, 1, 64, 1),
+        ...(typeof action.inputItemId === 'string' && action.inputItemId.trim() ? { inputItemId: action.inputItemId.trim() } : {}),
+        ...(typeof action.outputItemId === 'string' && action.outputItemId.trim() ? { outputItemId: action.outputItemId.trim() } : {})
+      } }
+    case 'trade_villager':
+      return { action: { type, count: integer(action.count, 1, 64, 1), ...(typeof action.desiredItemId === 'string' && action.desiredItemId.trim() ? { desiredItemId: action.desiredItemId.trim() } : {}) } }
+    case 'enchant_item':
+      return { action: { type, ...(typeof action.itemId === 'string' && action.itemId.trim() ? { itemId: action.itemId.trim() } : {}), minLevel: integer(action.minLevel, 1, 30, 1) } }
+    case 'sleep_in_bed': return { action: { type } }
+    case 'excavate_tunnel':
+      return { action: {
+        type,
+        targetY: integer(action.targetY, -64, 320, -53),
+        length: integer(action.length, 2, 64, 12),
+        ...(typeof action.resource === 'string' && action.resource.trim() ? { resource: action.resource.trim().slice(0, 80) } : {})
+      } }
+    case 'travel_to_dimension': {
+      const dimension = String(action.dimension ?? '')
+      if (!['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end'].includes(dimension)) return { action: { type: 'none' }, error: 'travel_to_dimension 的 dimension 无效' }
+      return { action: { type, dimension: dimension as 'minecraft:overworld' | 'minecraft:the_nether' | 'minecraft:the_end' } }
+    }
+    case 'build_nether_portal': return { action: { type } }
     case 'drop_item':
     case 'give_item':
     case 'give_item_to_player':

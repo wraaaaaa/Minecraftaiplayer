@@ -117,9 +117,12 @@ $env:MCAI_EASYAUTH_REGISTER_IF_NEEDED = [string]$config.easyAuth.registerIfNeede
 $env:MCAI_AUTO_RESPAWN_ENABLED = if ($null -eq $config.server.autoRespawn) { 'true' } else { ([bool]$config.server.autoRespawn).ToString().ToLowerInvariant() }
 $env:MCAI_RESPAWN_DELAY_MS = if ($null -eq $config.server.respawnDelayMs) { '3000' } else { [string][int]$config.server.respawnDelayMs }
 $env:MCAI_AUTONOMY_ENABLED = if ($null -eq $config.autonomy.enabled) { 'true' } else { ([bool]$config.autonomy.enabled).ToString().ToLowerInvariant() }
+$env:MCAI_OWNER_NAME = if ([string]::IsNullOrWhiteSpace([string]$config.autonomy.ownerName)) { 'wraaaaaa' } else { [string]$config.autonomy.ownerName }
 $env:MCAI_LOW_HEALTH_THRESHOLD = if ($null -eq $config.autonomy.lowHealthThreshold) { '10' } else { [string][double]$config.autonomy.lowHealthThreshold }
-$env:MCAI_EAT_BELOW_FOOD = if ($null -eq $config.autonomy.eatBelowFood) { '16' } else { [string][int]$config.autonomy.eatBelowFood }
+$env:MCAI_EAT_BELOW_FOOD = if ($null -eq $config.autonomy.eatBelowFood) { '20' } else { [string][int]$config.autonomy.eatBelowFood }
 $env:MCAI_HOSTILE_SCAN_RADIUS = if ($null -eq $config.autonomy.hostileScanRadius) { '12' } else { [string][double]$config.autonomy.hostileScanRadius }
+$env:MCAI_ALLOW_VERIFIED_WILDERNESS = if ($null -eq $config.autonomy.allowVerifiedWilderness) { 'true' } else { ([bool]$config.autonomy.allowVerifiedWilderness).ToString().ToLowerInvariant() }
+$env:MCAI_PROTECT_OWNER = if ($null -eq $config.autonomy.protectOwner) { 'true' } else { ([bool]$config.autonomy.protectOwner).ToString().ToLowerInvariant() }
 $env:MCAI_WILDERNESS_MIN_PLAYER_DISTANCE = if ($null -eq $config.autonomy.wildernessMinPlayerDistance) { '48' } else { [string][double]$config.autonomy.wildernessMinPlayerDistance }
 $autonomyStateRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.autonomyFile)) { 'data\autonomy-state.json' } else { [string]$config.storage.autonomyFile }
 $autonomyStatePath = [IO.Path]::GetFullPath((Join-Path $projectRoot $autonomyStateRelative))
@@ -128,6 +131,12 @@ if (-not $autonomyStatePath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySe
     throw 'storage.autonomyFile must stay inside the project data directory.'
 }
 $env:MCAI_HOME_FILE = $autonomyStatePath
+$ownedBlocksRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.ownedBlocksFile)) { 'data\owned-blocks.json' } else { [string]$config.storage.ownedBlocksFile }
+$ownedBlocksPath = [IO.Path]::GetFullPath((Join-Path $projectRoot $ownedBlocksRelative))
+if (-not $ownedBlocksPath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+    throw 'storage.ownedBlocksFile must stay inside the project data directory.'
+}
+$env:MCAI_OWNED_BLOCKS_FILE = $ownedBlocksPath
 $env:MCAI_DEVELOPMENT_ZONE_ENABLED = if ($null -eq $config.autonomy.developmentZone.enabled) { 'false' } else { ([bool]$config.autonomy.developmentZone.enabled).ToString().ToLowerInvariant() }
 if ($env:MCAI_DEVELOPMENT_ZONE_ENABLED -eq 'true') {
     $env:MCAI_DEVELOPMENT_ZONE_DIMENSION = [string]$config.autonomy.developmentZone.dimension

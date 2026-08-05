@@ -6,20 +6,27 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Holder;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.AgeableMob;
 import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.entity.Leashable;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.TamableAnimal;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.food.FoodProperties;
+import net.minecraft.world.item.component.Consumable;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.level.LightLayer;
 import net.minecraft.world.level.block.state.BlockState;
@@ -45,12 +52,25 @@ public final class WorldStateEncoder {
         Registries.BLOCK,
         Identifier.parse("minecraft:coal_ores")
     );
+    private static final TagKey<net.minecraft.world.level.block.Block> DIAMOND_ORES = blockTag("minecraft:diamond_ores");
+    private static final TagKey<net.minecraft.world.level.block.Block> LAPIS_ORES = blockTag("minecraft:lapis_ores");
+    private static final TagKey<net.minecraft.world.level.block.Block> REDSTONE_ORES = blockTag("minecraft:redstone_ores");
+    private static final TagKey<net.minecraft.world.level.block.Block> EMERALD_ORES = blockTag("minecraft:emerald_ores");
 
     private final AtomicLong sequence = new AtomicLong();
+    private final String ownerName;
     private JsonObject cachedBlockSurvey;
     private BlockPos cachedSurveyCenter;
     private String cachedSurveyDimension;
     private long cachedSurveyAt;
+
+    public WorldStateEncoder() {
+        this("wraaaaaa");
+    }
+
+    public WorldStateEncoder(String ownerName) {
+        this.ownerName = ownerName == null || ownerName.isBlank() ? "wraaaaaa" : ownerName.trim();
+    }
 
     public JsonObject encode(Minecraft client) {
         return encode(client, null);
@@ -81,6 +101,8 @@ public final class WorldStateEncoder {
         root.addProperty("maxHealth", player.getMaxHealth());
         root.addProperty("food", player.getFoodData().getFoodLevel());
         root.addProperty("saturation", player.getFoodData().getSaturationLevel());
+        root.addProperty("experienceLevel", player.experienceLevel);
+        root.addProperty("experienceProgress", player.experienceProgress);
         root.addProperty("dimension", client.level.dimension().identifier().toString());
 
         JsonObject physical = new JsonObject();
@@ -97,6 +119,8 @@ public final class WorldStateEncoder {
         root.addProperty("selectedHotbarSlot", player.getInventory().getSelectedSlot());
         root.add("inventory", inventory(player));
         root.add("equipment", equipment(player));
+        JsonObject ownerWaypoint = ownerWaypoint(client, player);
+        if (ownerWaypoint != null) root.add("ownerWaypoint", ownerWaypoint);
 
         BlockPos blockPosition = player.blockPosition();
         long clock = client.level.getOverworldClockTime();
@@ -118,6 +142,7 @@ public final class WorldStateEncoder {
 
         Integer currentThreatId = survival == null ? null : survival.snapshot().threatEntityId();
         root.add("hostiles", hostiles(client, player, currentThreatId));
+        root.add("creatures", creatures(client, player));
         root.add("drops", drops(client, player));
 
         SurvivalController.SafetyAssessment assessed = SurvivalController.assessSafety(client);
@@ -134,6 +159,18 @@ public final class WorldStateEncoder {
 
     public long currentSequence() {
         return sequence.get();
+    }
+
+    private JsonObject ownerWaypoint(Minecraft client, LocalPlayer player) {
+        OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
+        if (fix == null) return null;
+        JsonObject output = new JsonObject();
+        output.addProperty("name", fix.name());
+        output.addProperty("uuid", fix.uuid().toString());
+        output.addProperty("bearingDegrees", fix.bearingDegrees());
+        output.addProperty("precision", fix.precision());
+        if (Double.isFinite(fix.distance())) output.addProperty("distance", fix.distance());
+        return output;
     }
 
     private static JsonArray inventory(LocalPlayer player) {
@@ -165,7 +202,8 @@ public final class WorldStateEncoder {
 
     private static JsonObject item(ItemStack stack) {
         JsonObject output = new JsonObject();
-        output.addProperty("itemId", BuiltInRegistries.ITEM.getKey(stack.getItem()).toString());
+        String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        output.addProperty("itemId", itemId);
         output.addProperty("name", stack.getHoverName().getString());
         output.addProperty("count", stack.getCount());
         if (stack.getItem() instanceof BlockItem blockItem) {
@@ -181,6 +219,13 @@ public final class WorldStateEncoder {
             durability.addProperty("fraction", maximum == 0 ? 0.0D : (double) remaining / maximum);
             output.add("durability", durability);
         }
+        FoodProperties food = stack.get(DataComponents.FOOD);
+        Consumable consumable = stack.get(DataComponents.CONSUMABLE);
+        if (food != null && consumable != null) {
+            output.addProperty("foodNutrition", food.nutrition());
+            output.addProperty("foodSaturation", food.saturation());
+            output.addProperty("safeFood", !isKnownUnsafeFood(itemId));
+        }
 
         JsonArray enchantments = new JsonArray();
         stack.getEnchantments().entrySet().stream()
@@ -193,6 +238,14 @@ public final class WorldStateEncoder {
             });
         output.add("enchantments", enchantments);
         return output;
+    }
+
+    private static boolean isKnownUnsafeFood(String itemId) {
+        return Set.of(
+            "minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:poisonous_potato",
+            "minecraft:pufferfish", "minecraft:chicken", "minecraft:suspicious_stew",
+            "minecraft:chorus_fruit"
+        ).contains(itemId);
     }
 
     private static String enchantmentId(Holder<Enchantment> enchantment) {
@@ -220,11 +273,41 @@ public final class WorldStateEncoder {
             hostile.addProperty("maxHealth", entity.getMaxHealth());
             hostile.addProperty("lineOfSight", player.hasLineOfSight(entity));
             hostile.addProperty("autoCombatExcluded", SurvivalController.excludedFromAutomaticCombat(entity));
-            boolean targetingPlayer = entity instanceof Mob mob && mob.getTarget() == player;
+            LivingEntity target = entity instanceof Mob mob ? mob.getTarget() : null;
+            boolean targetingPlayer = target == player;
             hostile.addProperty("targetingPlayer", targetingPlayer);
+            if (target instanceof Player targetPlayer) hostile.addProperty("targetPlayerName", targetPlayer.getGameProfile().name());
             hostile.addProperty("currentThreat", currentThreatId != null && currentThreatId == entity.getId());
             hostile.add("position", position(entity));
             output.add(hostile);
+        }
+        return output;
+    }
+
+    private static JsonArray creatures(Minecraft client, LocalPlayer player) {
+        List<LivingEntity> entities = client.level.getEntitiesOfClass(
+            LivingEntity.class,
+            player.getBoundingBox().inflate(ENTITY_SCAN_RADIUS),
+            entity -> entity != player && entity instanceof Mob && !(entity instanceof Enemy)
+                && entity.isAlive() && !entity.isRemoved()
+        );
+        entities.sort(Comparator.<LivingEntity>comparingDouble(player::distanceToSqr).thenComparingInt(Entity::getId));
+        JsonArray output = new JsonArray();
+        for (LivingEntity entity : entities) {
+            JsonObject encoded = new JsonObject();
+            encoded.addProperty("entityId", entity.getId());
+            encoded.addProperty("uuid", entity.getUUID().toString());
+            encoded.addProperty("typeId", BuiltInRegistries.ENTITY_TYPE.getKey(entity.getType()).toString());
+            encoded.addProperty("distance", player.distanceTo(entity));
+            encoded.addProperty("health", entity.getHealth());
+            encoded.addProperty("baby", entity instanceof AgeableMob ageable && ageable.isBaby());
+            encoded.addProperty("tamed", entity instanceof TamableAnimal tamable && tamable.isTame());
+            encoded.addProperty("leashed", entity instanceof Leashable leashable && leashable.isLeashed());
+            encoded.addProperty("customNamed", entity.hasCustomName());
+            encoded.addProperty("inWater", entity.isInWater());
+            if (entity.hasCustomName()) encoded.addProperty("name", entity.getCustomName().getString());
+            encoded.add("position", position(entity));
+            output.add(encoded);
         }
         return output;
     }
@@ -265,6 +348,7 @@ public final class WorldStateEncoder {
 
         Map<String, SurveyBlock> resources = new HashMap<>();
         Map<String, SurveyBlock> artificial = new HashMap<>();
+        Map<String, SurveyBlock> owned = new HashMap<>();
         Map<String, SurveyBlock> other = new HashMap<>();
         int sampled = 0;
         int solid = 0;
@@ -280,9 +364,12 @@ public final class WorldStateEncoder {
             solid++;
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             boolean hasBlockEntity = client.level.getBlockEntity(cursor) != null;
-            if (hasBlockEntity) blockEntities++;
+            boolean botOwned = OwnedBlockRegistry.isOwned(client, cursor, id);
+            if (hasBlockEntity && !botOwned) blockEntities++;
             String category = naturalResourceCategory(state, id);
-            Map<String, SurveyBlock> destination = category != null
+            Map<String, SurveyBlock> destination = botOwned
+                ? owned
+                : category != null
                 ? resources
                 : hasBlockEntity || looksPlayerBuilt(id)
                     ? artificial
@@ -300,6 +387,7 @@ public final class WorldStateEncoder {
         survey.add("center", position(center));
         survey.add("resources", surveyEntries(resources, 32));
         survey.add("artificial", surveyEntries(artificial, 24));
+        survey.add("owned", surveyEntries(owned, 24));
         survey.add("other", surveyEntries(other, 24));
 
         int artificialCount = artificial.values().stream().mapToInt(entry -> entry.count).sum();
@@ -343,11 +431,22 @@ public final class WorldStateEncoder {
         if (state.is(BlockTags.IRON_ORES)) return "iron_ore";
         if (state.is(BlockTags.COPPER_ORES)) return "copper_ore";
         if (state.is(BlockTags.GOLD_ORES)) return "gold_ore";
+        if (state.is(DIAMOND_ORES)) return "diamond_ore";
+        if (state.is(LAPIS_ORES)) return "lapis_ore";
+        if (state.is(REDSTONE_ORES)) return "redstone_ore";
+        if (state.is(EMERALD_ORES)) return "emerald_ore";
+        if (id.equals("minecraft:obsidian") || id.equals("minecraft:crying_obsidian")) return "obsidian";
+        if (id.equals("minecraft:sugar_cane")) return "sugar_cane";
+        if (id.endsWith("_portal") || id.equals("minecraft:end_portal_frame")) return "portal";
         if (state.is(BlockTags.BASE_STONE_OVERWORLD)) return "stone";
         String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
         if (Set.of("dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud").contains(path)) return "soil";
         if (Set.of("sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice").contains(path)) return "surface";
         return null;
+    }
+
+    private static TagKey<net.minecraft.world.level.block.Block> blockTag(String id) {
+        return TagKey.create(Registries.BLOCK, Identifier.parse(id));
     }
 
     private static boolean looksPlayerBuilt(String id) {

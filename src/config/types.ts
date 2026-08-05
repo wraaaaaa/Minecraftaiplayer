@@ -46,6 +46,8 @@ export interface BotConfig {
     experienceFile: string
     taskFile?: string
     autonomyFile?: string
+    progressionFile?: string
+    ownedBlocksFile?: string
     maxEvents: number
   }
   autonomy?: {
@@ -64,6 +66,16 @@ export interface BotConfig {
     autoGather: boolean
     autoCraft: boolean
     autoBuildShelter: boolean
+    autoHunt?: boolean
+    autoSmelt?: boolean
+    autoMine?: boolean
+    autoTrade?: boolean
+    autoEnchant?: boolean
+    autoDimensionTravel?: boolean
+    autoSleep?: boolean
+    protectOwner?: boolean
+    allowVerifiedWilderness?: boolean
+    longTermGoal?: 'reach_end'
     developmentZone?: {
       enabled: boolean
       dimension: string
@@ -101,6 +113,16 @@ export interface AutonomyConfig {
   autoGather: boolean
   autoCraft: boolean
   autoBuildShelter: boolean
+  autoHunt: boolean
+  autoSmelt: boolean
+  autoMine: boolean
+  autoTrade: boolean
+  autoEnchant: boolean
+  autoDimensionTravel: boolean
+  autoSleep: boolean
+  protectOwner: boolean
+  allowVerifiedWilderness: boolean
+  longTermGoal: 'reach_end'
   developmentZone?: {
     enabled: boolean
     dimension: string
@@ -122,13 +144,23 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   conversationWindowMs: 60_000,
   lowHealthThreshold: 10,
   criticalHealthThreshold: 6,
-  eatBelowFood: 16,
+  eatBelowFood: 20,
   hostileScanRadius: 12,
   wildernessMinPlayerDistance: 48,
   safeIdleEnabled: true,
   autoGather: true,
   autoCraft: true,
-  autoBuildShelter: true
+  autoBuildShelter: true,
+  autoHunt: true,
+  autoSmelt: true,
+  autoMine: true,
+  autoTrade: true,
+  autoEnchant: true,
+  autoDimensionTravel: true,
+  autoSleep: true,
+  protectOwner: true,
+  allowVerifiedWilderness: true,
+  longTermGoal: 'reach_end'
 })
 
 export function autonomyConfig(config: BotConfig): AutonomyConfig {

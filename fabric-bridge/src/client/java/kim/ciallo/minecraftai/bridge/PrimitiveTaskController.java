@@ -111,6 +111,7 @@ public final class PrimitiveTaskController {
 
     private final ArrayDeque<TaskResult> results = new ArrayDeque<>();
     private final Map<Integer, OwnedDrop> ownedDrops = new HashMap<>();
+    private final LocalPathNavigator navigator = new LocalPathNavigator();
     private ApprovedZone approvedZone;
     private double minimumPlayerDistance = 48.0D;
     private PrimitiveTask active;
@@ -203,6 +204,10 @@ public final class PrimitiveTaskController {
         return active == null ? "" : active.type;
     }
 
+    public String navigationStatus() {
+        return navigator.status();
+    }
+
     public void setApprovedZone(String dimension, BlockPos min, BlockPos max) {
         approvedZone = new ApprovedZone(dimension, min, max);
     }
@@ -262,17 +267,31 @@ public final class PrimitiveTaskController {
     }
 
     private GatherResourceTask createGatherTask(String id, JsonObject action, Minecraft client) {
-        if (approvedZone == null) {
-            results.add(new TaskResult(id, false, "refused: no explicit approved resource AABB"));
+        boolean verifiedWilderness = booleanValue(action, "verifiedWilderness", false);
+        LocalPlayer player = client.player;
+        String authorizedPlayer = optionalString(action, "authorizedPlayer", null);
+        ApprovedZone taskZone = approvedZone;
+        boolean dynamicNaturalOnly = taskZone == null && verifiedWilderness;
+        if (taskZone == null && verifiedWilderness) {
+            WildernessGuard.Assessment assessment = WildernessGuard.assess(
+                client, player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
+                minimumPlayerDistance, authorizedPlayer
+            );
+            if (!assessment.allowed()) {
+                results.add(new TaskResult(id, false, "refused: dynamic wilderness verification failed: " + String.join(",", assessment.reasons())));
+                return null;
+            }
+            taskZone = WildernessGuard.workZone(client, player.blockPosition(), 16, 24);
+        }
+        if (taskZone == null) {
+            results.add(new TaskResult(id, false, "refused: no explicit approved resource AABB or verified wilderness evidence"));
             return null;
         }
         String dimension = client.level.dimension().identifier().toString();
-        if (!approvedZone.dimension().equals(dimension)) {
+        if (!taskZone.dimension().equals(dimension)) {
             results.add(new TaskResult(id, false, "refused: approved zone belongs to another dimension"));
             return null;
         }
-        LocalPlayer player = client.player;
-        String authorizedPlayer = optionalString(action, "authorizedPlayer", null);
         if (authorizedPlayer != null && !authorizedPlayer.matches("[A-Za-z0-9_]{1,16}")) {
             results.add(new TaskResult(id, false, "invalid authorizedPlayer name"));
             return null;
@@ -296,7 +315,7 @@ public final class PrimitiveTaskController {
                 return null;
             }
             requestedTarget = new BlockPos(target.get("x").getAsInt(), target.get("y").getAsInt(), target.get("z").getAsInt());
-            if (count != 1 || !approvedZone.contains(requestedTarget)) {
+            if (count != 1 || !taskZone.contains(requestedTarget)) {
                 results.add(new TaskResult(id, false, "targeted break must be one block inside approved AABB"));
                 return null;
             }
@@ -307,7 +326,7 @@ public final class PrimitiveTaskController {
                 return null;
             }
         }
-        return new GatherResourceTask(id, matcher, count, approvedZone, authorizedPlayer, requestedTarget, tick);
+        return new GatherResourceTask(id, matcher, count, taskZone, authorizedPlayer, requestedTarget, dynamicNaturalOnly, tick);
     }
 
     private CraftItemTask createCraftTask(String id, JsonObject action, Minecraft client) {
@@ -328,20 +347,44 @@ public final class PrimitiveTaskController {
             results.add(new TaskResult(id, false, "no unlocked craftable 2x2/3x3 recipe with available ingredients for " + targetItemId));
             return null;
         }
-        if (requiresTable && approvedZone == null) {
-            results.add(new TaskResult(id, false, "3x3 crafting requires an approved AABB containing a crafting table"));
+        ApprovedZone taskZone = approvedZone;
+        if (requiresTable && taskZone == null && booleanValue(action, "verifiedWilderness", false)) {
+            WildernessGuard.Assessment assessment = WildernessGuard.assess(
+                client, player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
+                minimumPlayerDistance, null
+            );
+            if (assessment.allowed()) taskZone = WildernessGuard.workZone(client, player.blockPosition(), 8, 8);
+            else {
+                results.add(new TaskResult(id, false, "3x3 crafting wilderness verification failed: " + String.join(",", assessment.reasons())));
+                return null;
+            }
+        }
+        if (requiresTable && taskZone == null) {
+            results.add(new TaskResult(id, false, "3x3 crafting requires an approved AABB or verified wilderness containing a crafting table"));
             return null;
         }
-        return new CraftItemTask(id, targetItemId, count, recipe, requiresTable, approvedZone, tick);
+        return new CraftItemTask(id, targetItemId, count, recipe, requiresTable, taskZone, tick);
     }
 
     private PlaceBlockTask createPlaceTask(String id, JsonObject action, Minecraft client) {
-        if (approvedZone == null) {
-            results.add(new TaskResult(id, false, "refused: no explicit approved placement AABB"));
+        ApprovedZone taskZone = approvedZone;
+        if (taskZone == null && booleanValue(action, "verifiedWilderness", false)) {
+            WildernessGuard.Assessment assessment = WildernessGuard.assess(
+                client, client.player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
+                minimumPlayerDistance, null
+            );
+            if (!assessment.allowed()) {
+                results.add(new TaskResult(id, false, "refused: dynamic wilderness verification failed: " + String.join(",", assessment.reasons())));
+                return null;
+            }
+            taskZone = WildernessGuard.workZone(client, client.player.blockPosition(), 8, 8);
+        }
+        if (taskZone == null) {
+            results.add(new TaskResult(id, false, "refused: no explicit approved placement AABB or verified wilderness evidence"));
             return null;
         }
         String dimension = client.level.dimension().identifier().toString();
-        if (!approvedZone.dimension().equals(dimension)) {
+        if (!taskZone.dimension().equals(dimension)) {
             results.add(new TaskResult(id, false, "refused: approved zone belongs to another dimension"));
             return null;
         }
@@ -354,7 +397,7 @@ public final class PrimitiveTaskController {
                 : "requested item is missing or is not an ordinary safe full block: " + requestedItemId));
             return null;
         }
-        return new PlaceBlockTask(id, requestedItemId, count, approvedZone, tick);
+        return new PlaceBlockTask(id, requestedItemId, count, taskZone, tick);
     }
 
     private DropItemTask createDropTask(String id, JsonObject action, Minecraft client) {
@@ -379,6 +422,7 @@ public final class PrimitiveTaskController {
         final String type;
         final long startedTick;
         final int timeoutTicks;
+        final LocalPathNavigator navigator = new LocalPathNavigator();
 
         PrimitiveTask(String id, String type, long startedTick, int timeoutTicks) {
             this.id = id;
@@ -390,6 +434,7 @@ public final class PrimitiveTaskController {
         abstract void tick(Minecraft client);
 
         void cleanup(Minecraft client) {
+            navigator.release(client);
             clearTaskControls(client);
         }
     }
@@ -772,7 +817,11 @@ public final class PrimitiveTaskController {
             if (distance <= 1.25D) {
                 clearMovement(client);
             } else {
-                moveToward(client, player, target.position(), 1.0D);
+                if (!navigator.drive(client, player, target.position(), 1.0D, false, tick)
+                    && navigator.consecutivePlanFailures() >= 3) {
+                    finish(client, this, false, "no collision-safe route to registered owned drop entityId=" + target.getId());
+                    return;
+                }
             }
 
             if (lastProgressPosition == null || player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
@@ -792,6 +841,7 @@ public final class PrimitiveTaskController {
         private final ApprovedZone taskZone;
         private final String authorizedPlayer;
         private final BlockPos requestedTarget;
+        private final boolean dynamicNaturalOnly;
         private final Set<BlockPos> completedPositions = new HashSet<>();
         private final Set<Integer> dropIdsBefore = new HashSet<>();
         private Phase phase = Phase.SEEK;
@@ -817,6 +867,7 @@ public final class PrimitiveTaskController {
             ApprovedZone taskZone,
             String authorizedPlayer,
             BlockPos requestedTarget,
+            boolean dynamicNaturalOnly,
             long startedTick
         ) {
             super(id, "gather_resource", startedTick, GATHER_TIMEOUT_TICKS);
@@ -825,6 +876,7 @@ public final class PrimitiveTaskController {
             this.taskZone = taskZone;
             this.authorizedPlayer = authorizedPlayer;
             this.requestedTarget = requestedTarget == null ? null : requestedTarget.immutable();
+            this.dynamicNaturalOnly = dynamicNaturalOnly;
             LocalPlayer player = Minecraft.getInstance().player;
             baselineInventoryCount = player == null ? 0 : totalInventoryCount(player);
         }
@@ -874,6 +926,11 @@ public final class PrimitiveTaskController {
                 if (target == null) {
                     finish(client, this, false, "no matching loaded block in approved AABB; verified_broken_blocks="
                         + completedCount + "; resource=" + matcher.description());
+                    return;
+                }
+                if (dynamicNaturalOnly && !WildernessGuard.safeNaturalBreak(client, target)) {
+                    completedPositions.add(target.immutable());
+                    target = null;
                     return;
                 }
                 BlockState state = client.level.getBlockState(target);
@@ -984,7 +1041,11 @@ public final class PrimitiveTaskController {
                 }
                 // Move close enough that ordinary block drops are normally picked up
                 // during the server-confirmed break, including a one-block depression.
-                moveToward(client, player, Vec3.atCenterOf(target), 1.85D);
+                if (!navigator.drive(client, player, Vec3.atCenterOf(target), 1.85D, false, tick)
+                    && navigator.consecutivePlanFailures() >= 3) {
+                    finish(client, this, false, "no collision-safe route to approved resource block " + target.toShortString());
+                    return;
+                }
                 if (player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
                     lastProgressPosition = player.position();
                     lastProgressTick = tick;
@@ -1054,7 +1115,11 @@ public final class PrimitiveTaskController {
             }
             double distance = player.distanceTo(target);
             if (distance > 3.2D) {
-                moveToward(client, player, target.position(), 2.5D);
+                if (!navigator.drive(client, player, target.position(), 2.5D, false, tick)
+                    && navigator.consecutivePlanFailures() >= 3) {
+                    finish(client, this, false, "no collision-safe route to receiving player " + target.getGameProfile().name());
+                    return;
+                }
                 if (lastProgressPosition == null || player.position().distanceToSqr(lastProgressPosition) >= 0.16D) {
                     lastProgressPosition = player.position();
                     lastProgressTick = tick;
@@ -1156,10 +1221,12 @@ public final class PrimitiveTaskController {
 
             if (phase == Phase.VERIFY) {
                 BlockState observed = client.level.getBlockState(placement.target());
+                boolean safeUtility = requestedItemId != null && safeRequestedUtility(requestedItemId);
                 if (observed.is(material.item().getBlock()) && !observed.canBeReplaced()
-                    && client.level.getBlockEntity(placement.target()) == null) {
+                    && (client.level.getBlockEntity(placement.target()) == null || safeUtility)) {
                     stableTicks++;
                     if (stableTicks >= 2) {
+                        OwnedBlockRegistry.registerPlacedStructure(client, placement.target(), blockId(observed));
                         completedPositions.add(placement.target().immutable());
                         completedCount++;
                         stableTicks = 0;
@@ -1340,7 +1407,11 @@ public final class PrimitiveTaskController {
                     clearMovement(client);
                     phase = Phase.OPEN_TABLE;
                 } else {
-                    moveToward(client, player, Vec3.atCenterOf(craftingTable), 2.5D);
+                    if (!navigator.drive(client, player, Vec3.atCenterOf(craftingTable), 2.5D, false, tick)
+                        && navigator.consecutivePlanFailures() >= 3) {
+                        finish(client, this, false, "no collision-safe route to crafting table " + craftingTable.toShortString());
+                        return;
+                    }
                     if (player.position().distanceToSqr(lastProgressPosition) >= 0.25D) {
                         lastProgressPosition = player.position();
                         lastProgressTick = tick;
@@ -1452,6 +1523,7 @@ public final class PrimitiveTaskController {
     private void finish(Minecraft client, PrimitiveTask task, boolean ok, String detail) {
         if (active != task) return;
         task.cleanup(client);
+        navigator.release(client);
         active = null;
         results.add(new TaskResult(task.id, ok, detail == null ? "" : detail));
     }
@@ -1488,6 +1560,15 @@ public final class PrimitiveTaskController {
         if (!action.has(key) || !action.get(key).isJsonPrimitive()) return fallback;
         try {
             return Math.max(minimum, Math.min(maximum, action.get(key).getAsInt()));
+        } catch (RuntimeException ignored) {
+            return fallback;
+        }
+    }
+
+    private static boolean booleanValue(JsonObject action, String key, boolean fallback) {
+        if (!action.has(key) || !action.get(key).isJsonPrimitive()) return fallback;
+        try {
+            return action.get(key).getAsBoolean();
         } catch (RuntimeException ignored) {
             return fallback;
         }
@@ -1609,7 +1690,8 @@ public final class PrimitiveTaskController {
             if (stack.isEmpty() || !(stack.getItem() instanceof BlockItem blockItem)) continue;
             String id = itemId(stack);
             if (requestedItemId != null && !requestedItemId.equals(id)) continue;
-            if (!ordinaryPlacementMaterial(client, player, blockItem)) continue;
+            if (!ordinaryPlacementMaterial(client, player, blockItem)
+                && !(requestedItemId != null && safeRequestedUtility(id))) continue;
             PlaceableCandidate candidate = new PlaceableCandidate(slot, id, blockItem, stack);
             if (best == null
                 || (Inventory.isHotbarSlot(slot) && !Inventory.isHotbarSlot(best.inventorySlot()))
@@ -1638,6 +1720,14 @@ public final class PrimitiveTaskController {
             || path.endsWith("_wool")
             || path.endsWith("_log")
             || path.endsWith("_wood");
+    }
+
+    private static boolean safeRequestedUtility(String itemId) {
+        String path = itemId.substring(itemId.indexOf(':') + 1);
+        return Set.of(
+            "furnace", "smoker", "blast_furnace", "enchanting_table",
+            "anvil", "chipped_anvil", "damaged_anvil", "brewing_stand"
+        ).contains(path) || path.endsWith("_bed");
     }
 
     private static PlacementPlan findSimplePlacement(
@@ -2084,6 +2174,12 @@ public final class PrimitiveTaskController {
                 case "iron", "铁", "铁矿" -> new ResourceMatcher("#minecraft:iron_ores", null, BlockTags.IRON_ORES);
                 case "copper", "铜", "铜矿" -> new ResourceMatcher("#minecraft:copper_ores", null, BlockTags.COPPER_ORES);
                 case "gold", "金", "金矿" -> new ResourceMatcher("#minecraft:gold_ores", null, BlockTags.GOLD_ORES);
+                case "diamond", "钻石", "钻石矿" -> new ResourceMatcher("#minecraft:diamond_ores", null, blockTag("minecraft:diamond_ores"));
+                case "lapis", "lapis_lazuli", "青金石", "青金石矿" -> new ResourceMatcher("#minecraft:lapis_ores", null, blockTag("minecraft:lapis_ores"));
+                case "redstone", "红石", "红石矿" -> new ResourceMatcher("#minecraft:redstone_ores", null, blockTag("minecraft:redstone_ores"));
+                case "emerald", "绿宝石", "绿宝石矿" -> new ResourceMatcher("#minecraft:emerald_ores", null, blockTag("minecraft:emerald_ores"));
+                case "obsidian", "黑曜石" -> new ResourceMatcher("minecraft:obsidian", Identifier.parse("minecraft:obsidian"), null);
+                case "sugar_cane", "sugar cane", "甘蔗" -> new ResourceMatcher("minecraft:sugar_cane", Identifier.parse("minecraft:sugar_cane"), null);
                 default -> {
                     if (normalized.startsWith("#")) {
                         Identifier tagId = Identifier.tryParse(normalized.substring(1));
@@ -2099,6 +2195,10 @@ public final class PrimitiveTaskController {
 
         boolean matches(BlockState state) {
             return tag != null ? state.is(tag) : BuiltInRegistries.BLOCK.getKey(state.getBlock()).equals(exactId);
+        }
+
+        private static TagKey<Block> blockTag(String id) {
+            return TagKey.create(Registries.BLOCK, Identifier.parse(id));
         }
     }
 
@@ -2154,50 +2254,7 @@ public final class PrimitiveTaskController {
     }
 
     private void moveToward(Minecraft client, LocalPlayer player, Vec3 target, double stopDistance) {
-        double dx = target.x - player.getX();
-        double dz = target.z - player.getZ();
-        double horizontal = Math.sqrt(dx * dx + dz * dz);
-        if (horizontal <= stopDistance) {
-            clearMovement(client);
-            return;
-        }
-        clearMovement(client);
-        lookAt(player, target.x, target.y, target.z);
-        double forwardX = dx / Math.max(0.001D, horizontal);
-        double forwardZ = dz / Math.max(0.001D, horizontal);
-        AABB forward = player.getBoundingBox().move(forwardX * 0.5D, 0.0D, forwardZ * 0.5D);
-        boolean clearAhead = client.level.noCollision(player, forward);
-        boolean supportedAhead = hasSafeLandingBelow(client, player, forward);
-        if (clearAhead && supportedAhead && !player.horizontalCollision) {
-            client.options.keyUp.setDown(true);
-            client.options.keySprint.setDown(horizontal > 5.0D);
-            return;
-        }
-        boolean jumpClear = client.level.noCollision(player, forward.move(0.0D, 1.0D, 0.0D));
-        if (!clearAhead && jumpClear && player.onGround()) {
-            client.options.keyUp.setDown(true);
-            client.options.keyJump.setDown(true);
-            return;
-        }
-        double leftX = -forwardZ;
-        double leftZ = forwardX;
-        AABB left = player.getBoundingBox().move(forwardX * 0.2D + leftX * 0.7D, 0.0D, forwardZ * 0.2D + leftZ * 0.7D);
-        AABB right = player.getBoundingBox().move(forwardX * 0.2D - leftX * 0.7D, 0.0D, forwardZ * 0.2D - leftZ * 0.7D);
-        boolean leftSafe = client.level.noCollision(player, left) && hasSafeLandingBelow(client, player, left);
-        boolean rightSafe = client.level.noCollision(player, right) && hasSafeLandingBelow(client, player, right);
-        client.options.keyUp.setDown(true);
-        if (leftSafe && (!rightSafe || (tick / 20L) % 2L == 0L)) client.options.keyLeft.setDown(true);
-        else if (rightSafe) client.options.keyRight.setDown(true);
-        else {
-            client.options.keyUp.setDown(false);
-            client.options.keyJump.setDown(player.onGround());
-        }
-    }
-
-    private static boolean hasSafeLandingBelow(Minecraft client, LocalPlayer player, AABB projected) {
-        // Accept level ground and a single-block descent, but reject deeper ledges.
-        return !client.level.noCollision(player, projected.move(0.0D, -0.7D, 0.0D))
-            || !client.level.noCollision(player, projected.move(0.0D, -1.7D, 0.0D));
+        navigator.drive(client, player, target, stopDistance, true, tick);
     }
 
     private static void lookAt(LocalPlayer player, double x, double y, double z) {

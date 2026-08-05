@@ -32,6 +32,8 @@ type BridgeMessage = {
   food?: number
   maxHealth?: number
   saturation?: number
+  experienceLevel?: number
+  experienceProgress?: number
   air?: number
   onFire?: boolean
   inWater?: boolean
@@ -42,7 +44,7 @@ type BridgeMessage = {
   sequence?: number
   seq?: number
   observedAt?: number
-  inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; enchantments?: Array<{ id?: string; level?: number }> }>
+  inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; foodNutrition?: number; foodSaturation?: number; safeFood?: boolean; enchantments?: Array<{ id?: string; level?: number }> }>
   blockSurvey?: {
     radius?: number
     verticalRadius?: number
@@ -52,24 +54,29 @@ type BridgeMessage = {
     center?: { x?: number; y?: number; z?: number }
     resources?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
     artificial?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
+    owned?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
     other?: Array<{ blockId?: string; category?: string; count?: number; nearestDistance?: number; nearest?: { x?: number; y?: number; z?: number } }>
     classification?: string
     protectedLikely?: boolean
     reasons?: string[]
   }
   equipment?: Record<string, { name?: string; itemId?: string; count?: number; durability?: number; maxDurability?: number; enchanted?: boolean } | null> | Array<{ slot?: string; name?: string; itemId?: string; count?: number; durability?: { damage?: number; max?: number; remaining?: number }; enchantments?: Array<{ id?: string; level?: number }> }>
-  nearbyPlayers?: Array<{ name?: string; uuid?: string; distance?: number; lookingAtBlock?: { blockId?: string; x?: number; y?: number; z?: number; distance?: number } }>
-  nearbyHostiles?: Array<{ id?: string; typeId?: string; name?: string; distance?: number; health?: number; targetingBot?: boolean }>
+  nearbyPlayers?: Array<{ name?: string; uuid?: string; distance?: number; health?: number; position?: { x?: number; y?: number; z?: number }; lookingAtBlock?: { blockId?: string; x?: number; y?: number; z?: number; distance?: number } }>
+  ownerWaypoint?: { name?: string; uuid?: string; bearingDegrees?: number; distance?: number; precision?: string }
+  nearbyHostiles?: Array<{ id?: string; typeId?: string; name?: string; distance?: number; health?: number; targetingBot?: boolean; targetPlayerName?: string; position?: { x?: number; y?: number; z?: number } }>
+  nearbyCreatures?: Array<{ id?: string; typeId?: string; name?: string; distance?: number; health?: number; position?: { x?: number; y?: number; z?: number }; baby?: boolean; tamed?: boolean; leashed?: boolean; customNamed?: boolean; inWater?: boolean }>
   nearbyItems?: Array<{ id?: string; itemId?: string; count?: number; distance?: number }>
   environment?: { isNight?: boolean; blockLight?: number; skyLight?: number; skyVisible?: boolean; safeToIdle?: boolean; safetyReasons?: string[] }
   activePrimitive?: string
+  navigationStatus?: string
   home?: { dimension?: string; x?: number; y?: number; z?: number; doorX?: number; doorY?: number; doorZ?: number; persisted?: boolean }
   token?: string
   survivalMode?: string
   safeToIdle?: boolean
   safetyReasons?: string[]
   physical?: { air?: number; onFire?: boolean; inWater?: boolean; onGround?: boolean }
-  hostiles?: Array<{ entityId?: number; typeId?: string; distance?: number; health?: number; targetingPlayer?: boolean; currentThreat?: boolean }>
+  hostiles?: Array<{ entityId?: number; typeId?: string; distance?: number; health?: number; targetingPlayer?: boolean; currentThreat?: boolean; targetPlayerName?: string; position?: { x?: number; y?: number; z?: number } }>
+  creatures?: Array<{ entityId?: number; typeId?: string; name?: string; distance?: number; health?: number; position?: { x?: number; y?: number; z?: number }; baby?: boolean; tamed?: boolean; leashed?: boolean; customNamed?: boolean; inWater?: boolean }>
   drops?: Array<{ entityId?: number; itemId?: string; count?: number; distance?: number }>
 }
 
@@ -278,13 +285,15 @@ export class FabricBridgeClient implements ActionExecutor {
       ...(typeof message.maxHealth === 'number' ? { maxHealth: message.maxHealth } : {}),
       ...(typeof message.food === 'number' ? { food: message.food } : {}),
       ...(typeof message.saturation === 'number' ? { saturation: message.saturation } : {}),
+      ...(typeof message.experienceLevel === 'number' ? { experienceLevel: message.experienceLevel } : {}),
+      ...(typeof message.experienceProgress === 'number' ? { experienceProgress: message.experienceProgress } : {}),
       ...(typeof air === 'number' ? { air } : {}),
       ...(typeof onFire === 'boolean' ? { onFire } : {}),
       ...(typeof inWater === 'boolean' ? { inWater } : {}),
       ...(typeof onGround === 'boolean' ? { onGround } : {}),
       ...(typeof message.dimension === 'string' ? { dimension: message.dimension } : {}),
       ...(typeof message.timeOfDay === 'number' ? { timeOfDay: message.timeOfDay } : {}),
-      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}) }] : []),
+      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(typeof item.foodNutrition === 'number' ? { foodNutrition: item.foodNutrition } : {}), ...(typeof item.foodSaturation === 'number' ? { foodSaturation: item.foodSaturation } : {}), ...(typeof item.safeFood === 'boolean' ? { safeFood: item.safeFood } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}) }] : []),
       ...(message.equipment ? { equipment: this.#equipment(message.equipment) } : {}),
       nearbyPlayers: (message.nearbyPlayers ?? []).flatMap((player) => {
         if (typeof player.name !== 'string' || typeof player.distance !== 'number') return []
@@ -294,14 +303,30 @@ export class FabricBridgeClient implements ActionExecutor {
           && typeof pointed.distance === 'number'
           ? { blockId: pointed.blockId, x: pointed.x, y: pointed.y, z: pointed.z, distance: pointed.distance }
           : undefined
-        return [{ name: player.name, distance: player.distance, ...(typeof player.uuid === 'string' ? { uuid: player.uuid } : {}), ...(lookingAtBlock ? { lookingAtBlock } : {}) }]
+        const playerPosition = player.position && typeof player.position.x === 'number' && typeof player.position.y === 'number' && typeof player.position.z === 'number'
+          ? { x: player.position.x, y: player.position.y, z: player.position.z }
+          : undefined
+        return [{ name: player.name, distance: player.distance, ...(typeof player.uuid === 'string' ? { uuid: player.uuid } : {}), ...(typeof player.health === 'number' ? { health: player.health } : {}), ...(playerPosition ? { position: playerPosition } : {}), ...(lookingAtBlock ? { lookingAtBlock } : {}) }]
       }),
-      ...((message.nearbyHostiles || message.hostiles) ? { nearbyHostiles: message.nearbyHostiles?.flatMap(entity => typeof entity.id === 'string' && typeof entity.typeId === 'string' && typeof entity.distance === 'number' ? [{ id: entity.id, typeId: entity.typeId, distance: entity.distance, ...(typeof entity.name === 'string' ? { name: entity.name } : {}), ...(typeof entity.health === 'number' ? { health: entity.health } : {}), ...(typeof entity.targetingBot === 'boolean' ? { targetingBot: entity.targetingBot } : {}) }] : []) ?? message.hostiles?.flatMap(entity => typeof entity.entityId === 'number' && typeof entity.typeId === 'string' && typeof entity.distance === 'number' ? [{ id: String(entity.entityId), typeId: entity.typeId, distance: entity.distance, ...(typeof entity.health === 'number' ? { health: entity.health } : {}), ...(typeof (entity.targetingPlayer ?? entity.currentThreat) === 'boolean' ? { targetingBot: entity.targetingPlayer === true || entity.currentThreat === true } : {}) }] : []) ?? [] } : {}),
+      ...(message.ownerWaypoint && typeof message.ownerWaypoint.name === 'string'
+        && typeof message.ownerWaypoint.bearingDegrees === 'number'
+        ? { ownerWaypoint: {
+            name: message.ownerWaypoint.name,
+            bearingDegrees: message.ownerWaypoint.bearingDegrees,
+            precision: ['position', 'chunk', 'azimuth'].includes(message.ownerWaypoint.precision ?? '')
+              ? message.ownerWaypoint.precision as 'position' | 'chunk' | 'azimuth'
+              : 'unknown',
+            ...(typeof message.ownerWaypoint.uuid === 'string' ? { uuid: message.ownerWaypoint.uuid } : {}),
+            ...(typeof message.ownerWaypoint.distance === 'number' ? { distance: message.ownerWaypoint.distance } : {})
+          } } : {}),
+      ...((message.nearbyHostiles || message.hostiles) ? { nearbyHostiles: this.#livingEntities(message.nearbyHostiles ?? message.hostiles ?? [], true) } : {}),
+      ...((message.nearbyCreatures || message.creatures) ? { nearbyCreatures: this.#livingEntities(message.nearbyCreatures ?? message.creatures ?? [], false) } : {}),
       ...((message.nearbyItems || message.drops) ? { nearbyItems: message.nearbyItems?.flatMap(entity => typeof entity.id === 'string' && typeof entity.itemId === 'string' && typeof entity.count === 'number' && typeof entity.distance === 'number' ? [{ id: entity.id, itemId: entity.itemId, count: entity.count, distance: entity.distance }] : []) ?? message.drops?.flatMap(entity => typeof entity.entityId === 'number' && typeof entity.itemId === 'string' && typeof entity.count === 'number' && typeof entity.distance === 'number' ? [{ id: String(entity.entityId), itemId: entity.itemId, count: entity.count, distance: entity.distance }] : []) ?? [] } : {}),
       ...(message.blockSurvey ? { blockSurvey: this.#blockSurvey(message.blockSurvey) } : {}),
       ...(message.environment ? { environment: { ...message.environment, ...(typeof (message.environment.isNight ?? (message.environment as { night?: boolean }).night) === 'boolean' ? { isNight: message.environment.isNight ?? (message.environment as { night?: boolean }).night } : {}), ...(typeof (message.environment.skyVisible ?? (message.environment as { canSeeSky?: boolean }).canSeeSky) === 'boolean' ? { skyVisible: message.environment.skyVisible ?? (message.environment as { canSeeSky?: boolean }).canSeeSky } : {}), ...(typeof message.safeToIdle === 'boolean' ? { safeToIdle: message.safeToIdle } : {}), ...(Array.isArray(message.safetyReasons) ? { safetyReasons: message.safetyReasons } : {}) } } : {}),
       ...(message.home && typeof message.home.dimension === 'string' && typeof message.home.x === 'number' && typeof message.home.y === 'number' && typeof message.home.z === 'number' ? { home: { dimension: message.home.dimension, x: message.home.x, y: message.home.y, z: message.home.z, ...(typeof message.home.doorX === 'number' ? { doorX: message.home.doorX } : {}), ...(typeof message.home.doorY === 'number' ? { doorY: message.home.doorY } : {}), ...(typeof message.home.doorZ === 'number' ? { doorZ: message.home.doorZ } : {}), ...(typeof message.home.persisted === 'boolean' ? { persisted: message.home.persisted } : {}) } } : {}),
-      ...(typeof (message.activePrimitive ?? message.survivalMode) === 'string' ? { activePrimitive: message.activePrimitive ?? message.survivalMode } : {})
+      ...(typeof (message.activePrimitive ?? message.survivalMode) === 'string' ? { activePrimitive: message.activePrimitive ?? message.survivalMode } : {}),
+      ...(typeof message.navigationStatus === 'string' ? { navigationStatus: message.navigationStatus } : {})
     }
     if (this.#world.connected) this.#ensureProactiveTimer()
     void this.#publishStatus(this.#world.connected ? 'in_world' : 'connected')
@@ -320,6 +345,44 @@ export class FabricBridgeClient implements ActionExecutor {
       return Object.fromEntries(value.flatMap(item => typeof item.slot === 'string' && typeof item.itemId === 'string' && typeof item.name === 'string' && typeof item.count === 'number' ? [[item.slot === 'mainhand' ? 'mainHand' : item.slot === 'offhand' ? 'offHand' : item.slot, { itemId: item.itemId, name: item.name, count: item.count, ...(typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.durability?.max === 'number' ? { maxDurability: item.durability.max } : {}), enchanted: (item.enchantments?.length ?? 0) > 0 }]] : []))
     }
     return Object.fromEntries(Object.entries(value).map(([slot, item]) => [slot, item && typeof item.itemId === 'string' && typeof item.name === 'string' && typeof item.count === 'number' ? { itemId: item.itemId, name: item.name, count: item.count, ...(typeof item.durability === 'number' ? { durability: item.durability } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : {}) } : null]))
+  }
+
+  #livingEntities(input: unknown[], hostile: boolean): Array<{
+    id: string; typeId: string; name?: string; distance: number; health?: number
+    targetingBot?: boolean; targetPlayerName?: string; position?: { x: number; y: number; z: number }
+    baby?: boolean; tamed?: boolean; leashed?: boolean; customNamed?: boolean; inWater?: boolean
+  }> {
+    return input.flatMap(value => {
+      if (!value || typeof value !== 'object') return []
+      const entity = value as Record<string, unknown>
+      const rawId = entity.id ?? entity.entityId
+      if ((typeof rawId !== 'string' && typeof rawId !== 'number') || typeof entity.typeId !== 'string' || typeof entity.distance !== 'number') return []
+      const rawPosition = entity.position
+      const position = rawPosition && typeof rawPosition === 'object'
+        && typeof (rawPosition as Record<string, unknown>).x === 'number'
+        && typeof (rawPosition as Record<string, unknown>).y === 'number'
+        && typeof (rawPosition as Record<string, unknown>).z === 'number'
+        ? {
+            x: (rawPosition as { x: number }).x,
+            y: (rawPosition as { y: number }).y,
+            z: (rawPosition as { z: number }).z
+          }
+        : undefined
+      const targetingBot = entity.targetingBot === true || entity.targetingPlayer === true || entity.currentThreat === true
+      return [{
+        id: String(rawId), typeId: entity.typeId, distance: entity.distance,
+        ...(typeof entity.name === 'string' ? { name: entity.name } : {}),
+        ...(typeof entity.health === 'number' ? { health: entity.health } : {}),
+        ...(position ? { position } : {}),
+        ...(hostile ? { targetingBot } : {}),
+        ...(typeof entity.targetPlayerName === 'string' ? { targetPlayerName: entity.targetPlayerName } : {}),
+        ...(typeof entity.baby === 'boolean' ? { baby: entity.baby } : {}),
+        ...(typeof entity.tamed === 'boolean' ? { tamed: entity.tamed } : {}),
+        ...(typeof entity.leashed === 'boolean' ? { leashed: entity.leashed } : {}),
+        ...(typeof entity.customNamed === 'boolean' ? { customNamed: entity.customNamed } : {}),
+        ...(typeof entity.inWater === 'boolean' ? { inWater: entity.inWater } : {})
+      }]
+    })
   }
 
   #blockSurvey(value: NonNullable<BridgeMessage['blockSurvey']>): NonNullable<WorldState['blockSurvey']> {
@@ -354,6 +417,7 @@ export class FabricBridgeClient implements ActionExecutor {
       center,
       resources: entries(value.resources),
       artificial: entries(value.artificial),
+      owned: entries(value.owned),
       other: entries(value.other),
       classification,
       protectedLikely: value.protectedLikely === true,
@@ -402,9 +466,15 @@ export class FabricBridgeClient implements ActionExecutor {
     const socket = this.#socket
     if (!this.#connected || !socket || socket.destroyed) return Promise.resolve({ ok: false, detail: 'Fabric 客户端桥未连接' })
     const id = randomUUID()
-    const longRunning = ['equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item', 'seek_shelter', 'build_shelter'].includes(action.type)
+    const longRunning = ['equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
+      'attack_hostile', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
+      'explore_frontier', 'travel_to_dimension', 'build_nether_portal', 'seek_shelter', 'build_shelter'].includes(action.type)
     const shelterAction = action.type === 'seek_shelter' || action.type === 'build_shelter'
-    const timeoutMs = longRunning ? Math.max(this.#config.server.actionTimeoutMs, shelterAction ? 180_000 : 120_000) : this.#config.server.actionTimeoutMs
+    const veryLongAction = action.type === 'smelt_item' || action.type === 'excavate_tunnel'
+    const journeyAction = action.type === 'travel_to_dimension'
+    const timeoutMs = longRunning
+      ? Math.max(this.#config.server.actionTimeoutMs, journeyAction ? 1_800_000 : veryLongAction ? 600_000 : shelterAction ? 180_000 : 120_000)
+      : this.#config.server.actionTimeoutMs
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id)

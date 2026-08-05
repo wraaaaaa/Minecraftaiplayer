@@ -75,3 +75,21 @@ test('原木与石砖的放置和采集使用精确基础动作', () => {
     type: 'gather_resource', resource: 'minecraft:stone_bricks', count: 1
   })
 })
+
+test('烹饪、狩猎、矿道、交易、附魔、睡觉和跨维度命令不依赖模型猜测', () => {
+  const withFood = structuredClone(world)
+  withFood.inventory = [{ name: '生牛肉', itemId: 'minecraft:beef', count: 4 }]
+  assert.deepEqual(inferBasicDecision('烹饪牛肉', withFood, 'Alice')?.action, { type: 'smelt_item', inputItemId: 'minecraft:beef', outputItemId: 'minecraft:cooked_beef', count: 1 })
+  assert.deepEqual(inferBasicDecision('去狩猎三份食物', withFood, 'Alice')?.action, { type: 'hunt_entity', purpose: 'food', count: 3 })
+  assert.deepEqual(inferBasicDecision('挖一条12格矿道', withFood, 'Alice')?.action, { type: 'excavate_tunnel', targetY: -53, length: 12 })
+  assert.deepEqual(inferBasicDecision('和村民交易', withFood, 'Alice')?.action, { type: 'trade_villager', count: 1 })
+  assert.deepEqual(inferBasicDecision('给钻石剑附魔', withFood, 'Alice')?.action, { type: 'enchant_item', minLevel: 1 })
+  assert.deepEqual(inferBasicDecision('睡觉设置重生点', withFood, 'Alice')?.action, { type: 'sleep_in_bed' })
+  assert.deepEqual(inferBasicDecision('前往末地', withFood, 'Alice')?.action, { type: 'travel_to_dimension', dimension: 'minecraft:the_end' })
+})
+
+test('最高优先玩家来找我和紧跟指令直接使用全图可续航动作', () => {
+  const observed = structuredClone(world)
+  assert.deepEqual(inferBasicDecision('来找我', observed, 'wraaaaaa')?.action, { type: 'come_to_player', target: 'wraaaaaa' })
+  assert.deepEqual(inferBasicDecision('紧跟我', observed, 'wraaaaaa')?.action, { type: 'follow_player', target: 'wraaaaaa' })
+})

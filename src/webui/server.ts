@@ -14,6 +14,8 @@ import { decodePngDataUrl, validateMinecraftSkin } from '../skin/png.js'
 import type { MemoryDocument } from '../memory/memory-store.js'
 import type { ExperienceDocument } from '../experience/experience-store.js'
 import type { TaskDocument } from '../tasks/task-store.js'
+import type { DiagnosticDocument } from '../diagnostics/diagnostic-store.js'
+import type { ProgressionDocument } from '../progression/progression-store.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -24,9 +26,7 @@ const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY'] as const
 const DEFAULT_DEVELOPMENT_ZONE = Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
 
-type WebUiBotConfig = BotConfig & {
-  storage: BotConfig['storage'] & { autonomyFile?: string }
-}
+type WebUiBotConfig = BotConfig
 
 const files = {
   config: path.join(projectRoot, 'config', 'bot.json'),
@@ -47,6 +47,7 @@ const files = {
   runtimeStatus: path.join(projectRoot, 'data', 'runtime-status.json'),
   memory: path.join(projectRoot, 'data', 'memory.json'),
   experience: path.join(projectRoot, 'data', 'experience.json'),
+  diagnostics: path.join(projectRoot, 'data', 'diagnostics.json'),
   skinVendor: path.join(projectRoot, 'vendor', 'custom-skin-loader', 'CustomSkinLoader_Universal-15.0.1.jar'),
   botLog: path.join(projectRoot, 'logs', 'bot.log'),
   gameLog: path.join(projectRoot, '.runtime', 'minecraft', 'logs', 'latest.log')
@@ -154,6 +155,8 @@ function ensureProjectPaths(config: WebUiBotConfig): void {
     [config.storage.experienceFile, path.join(projectRoot, 'data')],
     [config.storage.taskFile ?? 'data/tasks.json', path.join(projectRoot, 'data')],
     [config.storage.autonomyFile ?? 'data/autonomy-state.json', path.join(projectRoot, 'data')],
+    [config.storage.progressionFile ?? 'data/progression.json', path.join(projectRoot, 'data')],
+    [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', path.join(projectRoot, 'data')],
     [config.logging.file, path.join(projectRoot, 'logs')]
   ]
   for (const [configured, allowedRoot] of checks) {
@@ -206,7 +209,7 @@ async function snapshot(): Promise<unknown> {
   const storedConfig = await readJson<WebUiBotConfig>(files.config, files.configExample)
   const config: WebUiBotConfig = {
     ...storedConfig,
-    storage: { ...storedConfig.storage, taskFile: storedConfig.storage.taskFile ?? 'data/tasks.json', autonomyFile: storedConfig.storage.autonomyFile ?? 'data/autonomy-state.json' },
+    storage: { ...storedConfig.storage, taskFile: storedConfig.storage.taskFile ?? 'data/tasks.json', autonomyFile: storedConfig.storage.autonomyFile ?? 'data/autonomy-state.json', progressionFile: storedConfig.storage.progressionFile ?? 'data/progression.json', ownedBlocksFile: storedConfig.storage.ownedBlocksFile ?? 'data/owned-blocks.json' },
     autonomy: {
       ...DEFAULT_AUTONOMY_CONFIG,
       ...storedConfig.autonomy,
@@ -216,7 +219,8 @@ async function snapshot(): Promise<unknown> {
   const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
   const experienceFile = path.resolve(projectRoot, config.storage.experienceFile)
   const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
-  const [persona, prompts, skin, rules, mods, manifest, live, memory, experience, tasks, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
+  const progressionFile = path.resolve(projectRoot, config.storage.progressionFile ?? 'data/progression.json')
+  const [persona, prompts, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
     readJson<Persona>(files.persona, files.personaExample),
     readJson<PromptTemplates>(files.prompts, files.promptsExample),
     readJson<SkinConfig>(files.skin, files.skinExample),
@@ -227,9 +231,23 @@ async function snapshot(): Promise<unknown> {
     readJson<MemoryDocument>(memoryFile).catch(() => null),
     readJson<ExperienceDocument>(experienceFile).catch(() => null),
     readJson<TaskDocument>(taskFile).catch(() => null),
+    readJson<ProgressionDocument>(progressionFile).catch(() => null),
+    readJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
-  return { config, persona, prompts, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  return { config, persona, prompts, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+}
+
+async function centralChatSnapshot(): Promise<unknown> {
+  const config = await readJson<WebUiBotConfig>(files.config, files.configExample)
+  const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
+  const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
+  const [memory, tasks, diagnostics] = await Promise.all([
+    readJson<MemoryDocument>(memoryFile).catch(() => null),
+    readJson<TaskDocument>(taskFile).catch(() => null),
+    readJson<DiagnosticDocument>(files.diagnostics).catch(() => null)
+  ])
+  return { ok: true, memory, tasks, diagnostics }
 }
 
 async function runPowerShell(script: string): Promise<string> {
@@ -313,6 +331,7 @@ async function sendStorageDownload(response: ServerResponse, kind: 'memory' | 'e
 
 async function api(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<void> {
   if (request.method === 'GET' && pathname === '/api/snapshot') return json(response, 200, await snapshot())
+  if (request.method === 'GET' && pathname === '/api/diagnostics') return json(response, 200, await centralChatSnapshot())
   if (request.method === 'GET' && pathname === '/api/skin/image') return await sendSkinImage(response)
   if (request.method === 'GET' && pathname === '/api/memory/download') return await sendStorageDownload(response, 'memory')
   if (request.method === 'GET' && pathname === '/api/experience/download') return await sendStorageDownload(response, 'experience')

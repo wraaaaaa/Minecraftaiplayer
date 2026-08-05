@@ -10,8 +10,10 @@ import { PolicyEngine } from '../policy/policy-engine.js'
 import { AgentController } from '../agent/agent-controller.js'
 import { RuntimeStatusStore } from './status-store.js'
 import { TaskStore } from '../tasks/task-store.js'
+import { DiagnosticStore } from '../diagnostics/diagnostic-store.js'
 import { SecretGuard } from '../security/secret-guard.js'
 import path from 'node:path'
+import { ProgressionStore } from '../progression/progression-store.js'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -29,9 +31,11 @@ export class BotRuntime {
     const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
     const experience = new ExperienceStore(config.storage.experienceFile)
     const tasks = new TaskStore(config.storage.taskFile ?? 'data/tasks.json', config.autonomy?.ownerName ? { ownerName: config.autonomy.ownerName } : {})
+    const diagnostics = new DiagnosticStore('data/diagnostics.json')
+    const progression = new ProgressionStore(config.storage.progressionFile ?? 'data/progression.json')
     const secrets = new SecretGuard([apiKey, easyAuthPassword, config.server.host, path.resolve('.')])
     const status = new RuntimeStatusStore()
-    await Promise.all([memory.load(), experience.load(), tasks.load(), status.load()])
+    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load()])
     const serverLabel = `${config.server.host}:${config.server.port}`
     await status.report('starting', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
@@ -42,7 +46,7 @@ export class BotRuntime {
         : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, secrets, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
       await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
-      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets })
+      const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets, diagnostics, progression })
       await controller.initialize()
       client.setMessageHandler((identity, message, world) => controller.handlePlayerMessage(identity, message, world))
       client.setProactiveHandler((world) => controller.proactiveTick(world))

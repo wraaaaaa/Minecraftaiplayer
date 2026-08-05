@@ -148,6 +148,17 @@ export class MinecraftClient implements ActionExecutor {
         bot.pathfinder.setGoal(new goals.GoalNear(targetX, Math.floor(base.y), targetZ, 1))
         return { ok: true, detail: '开始小范围安全闲逛' }
       }
+      case 'explore_frontier': {
+        const base = bot.entity.position
+        const angle = Math.random() * Math.PI * 2
+        bot.pathfinder.setGoal(new goals.GoalNear(
+          Math.floor(base.x + Math.cos(angle) * action.radius),
+          Math.floor(base.y),
+          Math.floor(base.z + Math.sin(angle) * action.radius),
+          2
+        ))
+        return { ok: true, detail: `开始寻找 ${action.purpose}` }
+      }
       case 'return_to_zone':
         return { ok: false, detail: 'Mineflayer 兼容适配器不掌握 Fabric 管理员批准区域；请使用 Fabric 26.2 桥接客户端。' }
       case 'attack_player': {
@@ -161,10 +172,18 @@ export class MinecraftClient implements ActionExecutor {
       case 'eat_best_food':
       case 'equip_best':
       case 'attack_hostile':
+      case 'hunt_entity':
       case 'collect_own_drops':
       case 'gather_resource':
       case 'craft_item':
       case 'place_block':
+      case 'smelt_item':
+      case 'trade_villager':
+      case 'enchant_item':
+      case 'sleep_in_bed':
+      case 'excavate_tunnel':
+      case 'travel_to_dimension':
+      case 'build_nether_portal':
       case 'drop_item':
       case 'use_item':
       case 'seek_shelter':

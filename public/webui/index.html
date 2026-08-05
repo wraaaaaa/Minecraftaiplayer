@@ -22,6 +22,7 @@
   <div class="layout">
     <nav class="sidebar" aria-label="设置导航">
       <a href="#overview" class="active">运行概览</a>
+      <a href="#central-chat">总聊天</a>
       <a href="#server">服务器</a>
       <a href="#model">大模型</a>
       <a href="#chat">聊天与自主</a>
@@ -59,6 +60,23 @@
           <span><small>生命 / 饱食度</small><strong id="worldVitals">—</strong></span>
           <span><small>维度 / 附近玩家</small><strong id="worldContext">—</strong></span>
           <span><small>当前动作 / 住所</small><strong id="worldAutonomy">—</strong></span>
+        </div>
+      </section>
+
+      <section id="central-chat" class="panel central-chat-panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">CENTRAL CHAT & DIAGNOSTICS</p><h2>总聊天</h2><p class="muted">玩家对话、Bot 回复、结构化决策摘要、步骤和完整错误统一显示在这里。</p></div>
+          <details open><summary>这里的“决策摘要”是什么？</summary><p>页面展示模型选择的动作、参数、能力与安全检查、后置条件和脱敏错误，便于排错；它不是也不会伪造模型不可验证的隐藏思维链。游戏聊天不会发送这些内部内容。</p></details>
+        </div>
+        <div class="central-chat-toolbar">
+          <label>显示范围<select id="centralChatFilter" class="ui-only"><option value="all">全部消息与诊断</option><option value="conversation">仅游戏对话</option><option value="errors">仅警告与错误</option></select></label>
+          <label class="switch"><input id="centralChatAuto" class="ui-only" type="checkbox" checked><span></span>自动刷新</label>
+          <button id="refreshCentralChatButton" class="button ghost">立即刷新</button>
+          <small id="centralChatCount" class="muted">0 条</small>
+        </div>
+        <div class="central-chat-layout">
+          <div id="centralChatTimeline" class="central-chat-timeline" aria-live="polite"><p class="central-chat-empty">暂无对话或诊断记录</p></div>
+          <aside class="central-task-panel"><h3>当前任务队列</h3><div id="centralTaskSummary" class="central-task-summary">暂无任务</div><p class="muted">失败详情只在本机保存；API Key、登录密码、令牌、服务器地址和项目绝对路径会在写入前脱敏。</p></aside>
         </div>
       </section>
 
@@ -122,6 +140,8 @@
           <span>最高优先玩家目前仅按游戏名匹配。请保持 EasyAuth 开启并保护该名称的登录密码，避免他人冒用。</span>
           <strong>持久任务队列</strong>
           <span id="taskQueueSummary">尚无任务记录</span>
+          <strong>末地发育进度</strong>
+          <span id="progressionSummary">尚未生成发育进度文件</span>
         </div>
         <div class="priority-flow" aria-label="任务执行顺序">
           <span><b>1</b>安全反射</span><i>›</i><span><b>2</b>最高优先玩家</span><i>›</i><span><b>3</b>距离最近的玩家</span><i>›</i><span><b>4</b>逐项串行完成</span>
@@ -157,11 +177,20 @@
               <label class="switch"><input id="autoGather" type="checkbox"><span></span>允许自主采集</label>
               <label class="switch"><input id="autoCraft" type="checkbox"><span></span>允许自主合成</label>
               <label class="switch"><input id="autoBuildShelter" type="checkbox"><span></span>允许建造避难所</label>
+              <label class="switch"><input id="autoHunt" type="checkbox"><span></span>允许狩猎食物与材料</label>
+              <label class="switch"><input id="autoSmelt" type="checkbox"><span></span>允许烹饪与冶炼</label>
+              <label class="switch"><input id="autoMine" type="checkbox"><span></span>允许自主开矿道</label>
+              <label class="switch"><input id="autoTrade" type="checkbox"><span></span>允许村民交易</label>
+              <label class="switch"><input id="autoEnchant" type="checkbox"><span></span>允许装备附魔</label>
+              <label class="switch"><input id="autoDimensionTravel" type="checkbox"><span></span>允许跨维度发育</label>
+              <label class="switch"><input id="autoSleep" type="checkbox"><span></span>允许睡觉设置重生点</label>
+              <label class="switch"><input id="protectOwner" type="checkbox"><span></span>跟随时保护最高优先玩家</label>
+              <label class="switch"><input id="allowVerifiedWilderness" type="checkbox"><span></span>允许 Fabric 动态验证荒野</label>
             </div>
             <p class="safety-note">这些开关只代表允许规划对应能力，不会绕过行为准则。采集和建造仍必须通过可信荒野、玩家财产与未知归属检查；证据不足时 Bot 应拒绝并说明原因。</p>
             <div class="development-zone">
               <div class="development-zone-heading">
-                <div><h3>管理员批准的开发区域</h3><p>只有管理员明确批准并在这里填写的区域，才会启用自主采集和建造；区域外一律不得因此获得破坏权限。</p></div>
+                <div><h3>管理员批准的开发区域（可选）</h3><p>启用后强制把采集和建造限制在固定坐标；关闭时只有勾选“动态验证荒野”才可发展，Fabric 会逐次排除建筑、容器、危险流体和附近玩家。</p></div>
                 <label class="switch"><input id="developmentZoneEnabled" type="checkbox"><span></span>启用批准区域</label>
               </div>
               <div class="form-grid two">
@@ -224,8 +253,8 @@
       </section>
 
       <section id="storage" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json、experience.json、tasks.json 和 autonomy-state.json。它们分别保存记忆、经验、排队任务和 Bot 已验证的住所位置；程序还会生成 .bak。</p></details></div>
-        <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>任务队列文件<input id="taskFile" type="text"><small>保存排队和重启后待恢复的任务。</small></label><label>自主状态文件<input id="autonomyFile" type="text"><small>保存 Bot 已验证并可重新寻找的住所位置。</small></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label><small class="muted">记忆、经验、任务和自主状态文件都必须位于项目 data 文件夹内。</small></div>
+        <div class="section-heading"><div><p class="eyebrow">PERSISTENCE</p><h2>存储与日志</h2></div><details><summary>哪些文件必须备份？</summary><p>最重要的是 memory.json、experience.json、tasks.json、autonomy-state.json、progression.json 和 owned-blocks.json。它们分别保存记忆、经验、排队任务、住所、末地发育断点以及 Bot 自己放置并经服务器确认的方块坐标。</p></details></div>
+        <div class="form-grid three"><label>记忆文件<input id="memoryFile" type="text"></label><label>经验文件<input id="experienceFile" type="text"></label><label>任务队列文件<input id="taskFile" type="text"><small>保存排队和重启后待恢复的任务。</small></label><label>自主状态文件<input id="autonomyFile" type="text"><small>保存 Bot 已验证并可重新寻找的住所位置。</small></label><label>发育进度文件<input id="progressionFile" type="text"><small>保存末地长期目标、阶段、最近动作和失败回退计数。</small></label><label>自有方块证据文件<input id="ownedBlocksFile" type="text"><small>保存 Bot 自己放置且由服务器确认的工作站、床等坐标，重启后仍不会误认成玩家建筑。</small></label><label>最多记忆事件<input id="maxEvents" type="number" min="1"></label><label>日志文件<input id="logFile" type="text"></label><label>日志等级<select id="logLevel"><option>debug</option><option>info</option><option>warn</option><option>error</option></select></label><label class="switch"><input id="logConsole" type="checkbox"><span></span>同时显示控制台日志</label><small class="muted">上述运行数据文件都必须位于项目 data 文件夹内。</small></div>
         <div class="memory-grid"><article><span>已认识玩家</span><strong id="memoryPlayers">0</strong></article><article><span>记忆事件</span><strong id="memoryEvents">0</strong></article><article><span>经验条目</span><strong id="experienceEntries">0</strong></article></div>
         <div class="inline-actions"><a class="button ghost link-button" href="/api/memory/download" download>导出统一记忆文件</a><a class="button ghost link-button" href="/api/experience/download" download>导出经验文件</a><span class="muted">程序会在聊天、回复、游戏事件和 remember 事实产生时自动原子写入；当前不会定时改写摘要。</span></div>
         <div class="log-grid memory-view"><div><h3>玩家档案</h3><pre id="memoryView">暂无记忆</pre></div><div><h3>经验摘要</h3><pre id="experienceView">暂无经验</pre></div></div>

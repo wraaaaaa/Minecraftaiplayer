@@ -10,13 +10,23 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   conversationWindowMs: 60000,
   lowHealthThreshold: 10,
   criticalHealthThreshold: 6,
-  eatBelowFood: 16,
+  eatBelowFood: 20,
   hostileScanRadius: 12,
   wildernessMinPlayerDistance: 48,
   safeIdleEnabled: true,
   autoGather: true,
   autoCraft: true,
   autoBuildShelter: true,
+  autoHunt: true,
+  autoSmelt: true,
+  autoMine: true,
+  autoTrade: true,
+  autoEnchant: true,
+  autoDimensionTravel: true,
+  autoSleep: true,
+  protectOwner: true,
+  allowVerifiedWilderness: true,
+  longTermGoal: 'reach_end',
   developmentZone: Object.freeze({ enabled: false, dimension: 'minecraft:overworld', minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 })
 })
 
@@ -50,6 +60,92 @@ function setDirty(next) {
   $('saveState').style.color = next ? 'var(--amber)' : 'var(--muted)'
 }
 
+function centralTimeline(snapshot) {
+  const memory = snapshot.memory
+  const players = memory?.players || {}
+  const messages = (memory?.events || [])
+    .filter(event => event.type === 'player_message' || event.type === 'bot_reply')
+    .map(event => ({
+      id: event.id, at: event.at, kind: event.type === 'player_message' ? 'player' : 'bot',
+      level: 'info', title: event.type === 'player_message' ? (players[event.playerKey]?.currentName || '玩家') : (memory?.botName || 'Bot'),
+      summary: event.content, detail: ''
+    }))
+  const diagnostics = (snapshot.diagnostics?.events || [])
+    .filter(event => event.type !== 'request')
+    .map(event => ({ ...event, kind: 'diagnostic' }))
+  return [...messages, ...diagnostics]
+    .sort((left, right) => Date.parse(left.at) - Date.parse(right.at) || String(left.id).localeCompare(String(right.id)))
+    .slice(-250)
+}
+
+function appendTimelineEvent(parent, event) {
+  const article = document.createElement('article')
+  article.className = `timeline-event ${event.kind} ${event.level || 'info'}`
+  const meta = document.createElement('div')
+  meta.className = 'timeline-meta'
+  const title = document.createElement('strong')
+  title.textContent = event.title || '诊断'
+  const time = document.createElement('span')
+  const timestamp = new Date(event.at)
+  time.textContent = Number.isNaN(timestamp.getTime()) ? event.at : timestamp.toLocaleString()
+  meta.append(title, time)
+  if (event.playerName && event.kind === 'diagnostic') {
+    const player = document.createElement('span')
+    player.textContent = `玩家：${event.playerName}`
+    meta.append(player)
+  }
+  const summary = document.createElement('p')
+  summary.textContent = event.summary || '—'
+  article.append(meta, summary)
+  if (event.detail) {
+    const details = document.createElement('details')
+    const toggle = document.createElement('summary')
+    toggle.textContent = event.level === 'error' ? '查看完整错误原因' : '查看动作、参数与后置条件'
+    const content = document.createElement('pre')
+    content.textContent = event.detail
+    details.append(toggle, content)
+    article.append(details)
+  }
+  parent.append(article)
+}
+
+function renderCentralChat(snapshot) {
+  const timeline = $('centralChatTimeline')
+  if (!timeline) return
+  const nearBottom = timeline.scrollHeight - timeline.scrollTop - timeline.clientHeight < 80
+  const filter = value('centralChatFilter')
+  const all = centralTimeline(snapshot)
+  const visible = filter === 'conversation' ? all.filter(event => event.kind === 'player' || event.kind === 'bot')
+    : filter === 'errors' ? all.filter(event => event.level === 'error' || event.level === 'warning') : all
+  timeline.replaceChildren()
+  if (!visible.length) {
+    const empty = document.createElement('p')
+    empty.className = 'central-chat-empty'
+    empty.textContent = filter === 'all' ? '暂无对话或诊断记录' : '当前筛选条件下没有记录'
+    timeline.append(empty)
+  } else {
+    visible.forEach(event => appendTimelineEvent(timeline, event))
+  }
+  $('centralChatCount').textContent = `${visible.length} 条（最多显示最近 250 条）`
+  if (nearBottom) timeline.scrollTop = timeline.scrollHeight
+
+  const tasks = (snapshot.tasks?.tasks || []).slice().sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+  const important = [...tasks.filter(task => task.status === 'running' || task.status === 'queued'), ...tasks.filter(task => task.status === 'failed').slice(0, 3)].slice(0, 8)
+  const taskSummary = $('centralTaskSummary')
+  taskSummary.replaceChildren()
+  if (!important.length) taskSummary.textContent = '暂无任务'
+  for (const task of important) {
+    const item = document.createElement('div')
+    item.className = 'task-pill'
+    const status = document.createElement('strong')
+    status.textContent = `${task.issuer.name} · ${{ queued: '排队', running: '执行中', failed: '失败', completed: '完成' }[task.status] || task.status}`
+    const requestText = document.createElement('span')
+    requestText.textContent = task.request
+    item.append(status, requestText)
+    taskSummary.append(item)
+  }
+}
+
 function renderStatus(snapshot) {
   const bot = snapshot.runtime.bot
   const client = snapshot.runtime.client
@@ -72,9 +168,13 @@ function renderStatus(snapshot) {
   $('worldPosition').textContent = world?.position ? `${world.position.x.toFixed(1)}, ${world.position.y.toFixed(1)}, ${world.position.z.toFixed(1)}` : '—'
   $('worldVitals').textContent = world && (world.health !== undefined || world.food !== undefined) ? `${world.health ?? '—'} HP / ${world.food ?? '—'}` : '—'
   $('worldContext').textContent = world ? `${world.dimension || '—'} / ${world.nearbyPlayers?.length ?? 0} 人` : '—'
-  $('worldAutonomy').textContent = world ? `${world.activePrimitive || '安全等待'} / ${world.home ? '住所已记录' : '无住所'}` : '—'
+  $('worldAutonomy').textContent = world ? `${world.activePrimitive || '安全等待'}${world.navigationStatus && world.navigationStatus !== 'idle' ? ` · ${world.navigationStatus}` : ''} / ${world.home ? '住所已记录' : '无住所'}` : '—'
   const taskCounts = (snapshot.tasks?.tasks || []).reduce((counts, task) => { counts[task.status] = (counts[task.status] || 0) + 1; return counts }, {})
   $('taskQueueSummary').textContent = snapshot.tasks ? `执行中 ${taskCounts.running || 0}，排队 ${taskCounts.queued || 0}，完成 ${taskCounts.completed || 0}，失败/拒绝 ${taskCounts.failed || 0}` : '尚无任务记录'
+  const progression = snapshot.progression
+  $('progressionSummary').textContent = progression
+    ? `${progression.stage || 'survive'} → ${progression.goal || 'reach_end'}；最近：${progression.lastAction || '等待'}${progression.lastResult ? `（${progression.lastResult.ok ? '成功' : '失败'}）` : ''}`
+    : '尚未生成发育进度文件'
   $('modsSummary').textContent = snapshot.manifest.sourceDirectory ? `来源：${snapshot.manifest.sourceDirectory}` : '尚未设置模组来源'
   $('modList').replaceChildren(...mods.map(mod => {
     const item = document.createElement('div')
@@ -95,6 +195,7 @@ function renderStatus(snapshot) {
   $('experienceEntries').textContent = String(experience?.entries?.length || 0)
   $('memoryView').textContent = memory ? JSON.stringify({ globalSummary: memory.globalSummary, players: Object.values(memory.players || {}).map(player => ({ name: player.currentName, knownNames: player.knownNames, facts: player.facts, lastSeenAt: player.lastSeenAt })), recentEvents: (memory.events || []).slice(-12) }, null, 2) : '尚未生成记忆文件'
   $('experienceView').textContent = experience ? JSON.stringify((experience.entries || []).slice(-12).map(entry => ({ task: entry.task, outcome: entry.outcome, lesson: entry.lesson, correction: entry.correction, verified: entry.verified })), null, 2) : '尚未生成经验文件'
+  renderCentralChat(snapshot)
   $('skinState').textContent = snapshot.skin.imported ? `已导入：${snapshot.skin.skinFile}` : '尚未导入标准皮肤 PNG'
   $('skinPreview').src = snapshot.skin.imageUrl ? `${snapshot.skin.imageUrl}?t=${Date.now()}` : ''
   $('skinPreview').hidden = !snapshot.skin.imageUrl
@@ -114,9 +215,10 @@ function populate(snapshot) {
   setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
+  for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness']) setChecked(id, autonomy[id])
   const developmentZone = { ...AUTONOMY_DEFAULTS.developmentZone, ...(autonomy.developmentZone || {}) }
   setChecked('developmentZoneEnabled', developmentZone.enabled); set('developmentDimension', developmentZone.dimension); setNumber('developmentMinX', developmentZone.minX); setNumber('developmentMinY', developmentZone.minY); setNumber('developmentMinZ', developmentZone.minZ); setNumber('developmentMaxX', developmentZone.maxX); setNumber('developmentMaxY', developmentZone.maxY); setNumber('developmentMaxZ', developmentZone.maxZ)
-  set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); set('taskFile', c.storage.taskFile ?? 'data/tasks.json'); set('autonomyFile', c.storage.autonomyFile ?? 'data/autonomy-state.json'); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
+  set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); set('taskFile', c.storage.taskFile ?? 'data/tasks.json'); set('autonomyFile', c.storage.autonomyFile ?? 'data/autonomy-state.json'); set('progressionFile', c.storage.progressionFile ?? 'data/progression.json'); set('ownedBlocksFile', c.storage.ownedBlocksFile ?? 'data/owned-blocks.json'); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
   set('personaName', snapshot.persona.name); set('personaDescription', snapshot.persona.description); set('speakingStyle', snapshot.persona.speakingStyle); set('personaGoals', snapshot.persona.goals.join('\n')); set('personaBoundaries', snapshot.persona.boundaries.join('\n'))
   set('promptIdentity', snapshot.prompts.identity); set('promptCapabilities', snapshot.prompts.capabilityRules.join('\n')); set('promptMemory', snapshot.prompts.memoryRules.join('\n')); set('promptContract', snapshot.prompts.actionContract); set('promptProactive', snapshot.prompts.proactiveInstruction)
   setChecked('skinEnabled', snapshot.skin.enabled); set('skinModel', snapshot.skin.model); set('skinVisibility', snapshot.skin.visibilityMode); set('skinProviderName', snapshot.skin.onlineProvider.name); set('skinProfileName', snapshot.skin.onlineProvider.profileName); set('skinProviderWebsite', snapshot.skin.onlineProvider.website)
@@ -151,9 +253,12 @@ function collect() {
   c.autonomy = {
     enabled: checked('autonomyEnabled'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
-    safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'), developmentZone
+    safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
+    autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
+    autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'),
+    longTermGoal: 'reach_end', developmentZone
   }
-  Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), taskFile: value('taskFile').trim(), autonomyFile: value('autonomyFile').trim(), maxEvents: number('maxEvents') })
+  Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), taskFile: value('taskFile').trim(), autonomyFile: value('autonomyFile').trim(), progressionFile: value('progressionFile').trim(), ownedBlocksFile: value('ownedBlocksFile').trim(), maxEvents: number('maxEvents') })
   Object.assign(c.logging, { file: value('logFile').trim(), level: value('logLevel'), console: checked('logConsole') })
   const persona = { name: value('personaName').trim(), description: value('personaDescription').trim(), speakingStyle: value('speakingStyle').trim(), goals: lines('personaGoals'), boundaries: lines('personaBoundaries') }
   const prompts = { identity: value('promptIdentity'), capabilityRules: lines('promptCapabilities'), memoryRules: lines('promptMemory'), actionContract: value('promptContract'), proactiveInstruction: value('promptProactive') }
@@ -238,7 +343,17 @@ async function action(url, success) {
 }
 
 async function refreshStatus() {
-  try { const next = await request('/api/snapshot'); state.runtime = next.runtime; state.manifest = next.manifest; state.live = next.live; state.secrets = next.secrets; state.logs = next.logs; renderStatus({ ...state, ...next }) } catch (error) { toast(error.message, true) }
+  try { const next = await request('/api/snapshot'); state.runtime = next.runtime; state.manifest = next.manifest; state.live = next.live; state.secrets = next.secrets; state.logs = next.logs; state.memory = next.memory; state.tasks = next.tasks; state.progression = next.progression; state.diagnostics = next.diagnostics; renderStatus({ ...state, ...next }) } catch (error) { toast(error.message, true) }
+}
+
+async function refreshCentralChat() {
+  try {
+    const next = await request('/api/diagnostics')
+    state.memory = next.memory
+    state.tasks = next.tasks
+    state.diagnostics = next.diagnostics
+    renderCentralChat(state)
+  } catch (error) { toast(error.message, true) }
 }
 
 $('saveButton').addEventListener('click', save)
@@ -254,9 +369,12 @@ $('restartButton').addEventListener('click', () => action('/api/runtime/restart'
 $('syncModsButton').addEventListener('click', async () => { try { if (dirty) await save(); await request('/api/mods/sync', { method: 'POST', body: '{}' }); toast('服务器模组同步完成'); await load() } catch (error) { toast(error.message, true) } })
 $('testModelButton').addEventListener('click', async () => { try { $('modelTestResult').textContent = '正在进行一次最小请求…'; const result = await request('/api/model/test', { method: 'POST', body: '{}' }); $('modelTestResult').textContent = `${result.model} · ${result.elapsedMs}ms · ${result.effectiveEffort}`; toast('模型接口测试成功') } catch (error) { $('modelTestResult').textContent = ''; toast(error.message, true) } })
 $('refreshLogsButton').addEventListener('click', refreshStatus)
-document.querySelectorAll('input, select, textarea').forEach(control => control.addEventListener('input', () => setDirty(true)))
+$('refreshCentralChatButton').addEventListener('click', refreshCentralChat)
+$('centralChatFilter').addEventListener('change', () => renderCentralChat(state))
+document.querySelectorAll('input:not(.ui-only), select:not(.ui-only), textarea:not(.ui-only)').forEach(control => control.addEventListener('input', () => setDirty(true)))
 document.querySelectorAll('.sidebar a').forEach(link => link.addEventListener('click', () => { document.querySelectorAll('.sidebar a').forEach(item => item.classList.remove('active')); link.classList.add('active') }))
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = '' } })
 
 load()
 setInterval(() => { if (!dirty) refreshStatus() }, 10000)
+setInterval(() => { if (checked('centralChatAuto')) refreshCentralChat() }, 4000)

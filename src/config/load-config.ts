@@ -81,6 +81,8 @@ export function validateConfig(config: BotConfig): void {
   requireString(config.storage?.experienceFile, 'storage.experienceFile')
   if (config.storage.taskFile !== undefined) requireString(config.storage.taskFile, 'storage.taskFile')
   if (config.storage.autonomyFile !== undefined) requireString(config.storage.autonomyFile, 'storage.autonomyFile')
+  if (config.storage.progressionFile !== undefined) requireString(config.storage.progressionFile, 'storage.progressionFile')
+  if (config.storage.ownedBlocksFile !== undefined) requireString(config.storage.ownedBlocksFile, 'storage.ownedBlocksFile')
   if (path.resolve(config.storage.memoryFile) === path.resolve(config.storage.experienceFile)) {
     throw new Error('记忆文件与经验文件必须分开')
   }
@@ -104,6 +106,10 @@ export function validateConfig(config: BotConfig): void {
     for (const name of ['enabled', 'contextualAddressing', 'safeIdleEnabled', 'autoGather', 'autoCraft', 'autoBuildShelter'] as const) {
       if (typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
+    for (const name of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness'] as const) {
+      if (config.autonomy[name] !== undefined && typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
+    }
+    if (config.autonomy.longTermGoal !== undefined && config.autonomy.longTermGoal !== 'reach_end') throw new Error('autonomy.longTermGoal 当前只能是 reach_end')
     const zone = config.autonomy.developmentZone
     if (zone !== undefined) {
       if (typeof zone.enabled !== 'boolean') throw new Error('autonomy.developmentZone.enabled 必须是布尔值')

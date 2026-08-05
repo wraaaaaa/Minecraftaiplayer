@@ -1,0 +1,150 @@
+package kim.ciallo.minecraftai.bridge;
+
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.player.AbstractClientPlayer;
+import net.minecraft.client.player.LocalPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.resources.Identifier;
+import net.minecraft.tags.BlockTags;
+import net.minecraft.tags.TagKey;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.state.BlockState;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+
+/** Runtime-only evidence that a moving work area does not resemble player property. */
+public final class WildernessGuard {
+    public static final int DEFAULT_SCAN_RADIUS = 10;
+    private static final TagKey<Block> COAL_ORES = blockTag("minecraft:coal_ores");
+    private static final TagKey<Block> DIAMOND_ORES = blockTag("minecraft:diamond_ores");
+    private static final TagKey<Block> LAPIS_ORES = blockTag("minecraft:lapis_ores");
+    private static final TagKey<Block> REDSTONE_ORES = blockTag("minecraft:redstone_ores");
+    private static final TagKey<Block> EMERALD_ORES = blockTag("minecraft:emerald_ores");
+
+    public record Assessment(boolean allowed, List<String> reasons) {
+        public Assessment {
+            reasons = List.copyOf(reasons);
+        }
+    }
+
+    private WildernessGuard() { }
+
+    public static Assessment assess(
+        Minecraft client,
+        BlockPos center,
+        int radius,
+        double minimumPlayerDistance,
+        String authorizedPlayer
+    ) {
+        List<String> reasons = new ArrayList<>();
+        if (client == null || client.player == null || client.level == null) {
+            return new Assessment(false, List.of("not_in_world"));
+        }
+        int scanRadius = Math.max(4, Math.min(16, radius));
+        int blockEntities = 0;
+        int artificial = 0;
+        int unloaded = 0;
+        for (BlockPos cursor : BlockPos.betweenClosed(
+            center.offset(-scanRadius, -5, -scanRadius),
+            center.offset(scanRadius, 5, scanRadius)
+        )) {
+            if (!client.level.isLoaded(cursor)) {
+                unloaded++;
+                continue;
+            }
+            BlockState state = client.level.getBlockState(cursor);
+            String id = blockId(state);
+            boolean botOwned = OwnedBlockRegistry.isOwned(client, cursor, id);
+            if (client.level.getBlockEntity(cursor) != null && !botOwned) blockEntities++;
+            if (!state.isAir() && looksPlayerBuilt(id) && !botOwned) artificial++;
+        }
+        if (blockEntities > 0) reasons.add("block_entities_nearby=" + blockEntities);
+        if (artificial >= 4) reasons.add("player_building_blocks_nearby=" + artificial);
+        if (unloaded > (scanRadius * 2 + 1) * 16) reasons.add("insufficient_loaded_area");
+
+        LocalPlayer player = client.player;
+        for (AbstractClientPlayer other : client.level.players()) {
+            if (other == player || !other.isAlive()) continue;
+            if (authorizedPlayer != null && other.getGameProfile().name().equalsIgnoreCase(authorizedPlayer)) continue;
+            if (other.distanceToSqr(center.getX() + 0.5D, center.getY() + 0.5D, center.getZ() + 0.5D)
+                < minimumPlayerDistance * minimumPlayerDistance) {
+                reasons.add("player_too_close=" + other.getGameProfile().name());
+                break;
+            }
+        }
+        return new Assessment(reasons.isEmpty(), reasons);
+    }
+
+    public static PrimitiveTaskController.ApprovedZone workZone(Minecraft client, BlockPos center, int radius, int verticalRadius) {
+        int horizontal = Math.max(4, Math.min(32, radius));
+        int vertical = Math.max(4, Math.min(64, verticalRadius));
+        int minY = Math.max(client.level.getMinY(), center.getY() - vertical);
+        int maxY = Math.min(client.level.getMaxY() - 1, center.getY() + vertical);
+        return new PrimitiveTaskController.ApprovedZone(
+            client.level.dimension().identifier().toString(),
+            new BlockPos(center.getX() - horizontal, minY, center.getZ() - horizontal),
+            new BlockPos(center.getX() + horizontal, maxY, center.getZ() + horizontal)
+        );
+    }
+
+    /** Per-block rule for autonomous excavation; deliberately excludes every workstation/building family. */
+    public static boolean safeNaturalBreak(Minecraft client, BlockPos position) {
+        if (client == null || client.level == null || !client.level.isLoaded(position)) return false;
+        if (client.level.getBlockEntity(position) != null) return false;
+        BlockState state = client.level.getBlockState(position);
+        if (state.isAir() || !state.getFluidState().isEmpty()) return false;
+        String id = blockId(state);
+        if (looksPlayerBuilt(id)) return false;
+        if (state.is(BlockTags.LOGS) || state.is(BlockTags.LEAVES)
+            || state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)
+            || state.is(COAL_ORES) || state.is(BlockTags.IRON_ORES)
+            || state.is(BlockTags.COPPER_ORES) || state.is(BlockTags.GOLD_ORES)
+            || state.is(DIAMOND_ORES) || state.is(LAPIS_ORES)
+            || state.is(REDSTONE_ORES) || state.is(EMERALD_ORES)) return true;
+        String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
+        return Set.of(
+            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud",
+            "sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice",
+            "netherrack", "basalt", "blackstone", "soul_sand", "soul_soil", "end_stone",
+            "tuff", "calcite", "dripstone_block"
+        ).contains(path) || path.endsWith("_ore") || path.equals("obsidian") && naturalObsidianEvidence(client, position);
+    }
+
+    private static boolean naturalObsidianEvidence(Minecraft client, BlockPos position) {
+        for (Direction direction : Direction.values()) {
+            BlockPos neighbor = position.relative(direction);
+            if (!client.level.isLoaded(neighbor)) continue;
+            String neighborId = blockId(client.level.getBlockState(neighbor));
+            if (neighborId.equals("minecraft:water") || neighborId.equals("minecraft:lava")) return true;
+        }
+        return false;
+    }
+
+    public static boolean looksPlayerBuilt(String id) {
+        String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
+        return path.contains("planks") || path.contains("bricks") || path.contains("door")
+            || path.contains("trapdoor") || path.contains("fence") || path.contains("wall")
+            || path.contains("stairs") || path.contains("slab") || path.contains("glass")
+            || path.contains("concrete") || path.contains("terracotta") || path.contains("wool")
+            || path.contains("carpet") || path.contains("bed") || path.contains("chest")
+            || path.contains("barrel") || path.contains("furnace") || path.contains("crafting_table")
+            || path.contains("redstone") || path.contains("rail") || path.contains("torch")
+            || path.contains("lantern") || path.contains("ladder") || path.contains("bookshelf")
+            || path.contains("sign") || path.contains("banner") || path.contains("anvil")
+            || path.contains("enchanting_table") || path.contains("beacon") || path.contains("hopper");
+    }
+
+    private static String blockId(BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+    }
+
+    private static TagKey<Block> blockTag(String id) {
+        return TagKey.create(Registries.BLOCK, Identifier.parse(id));
+    }
+}

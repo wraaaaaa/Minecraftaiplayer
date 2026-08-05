@@ -54,3 +54,18 @@ test('模型可以返回有上限且逐步规范化的工具计划', () => {
   ])
   assert.deepEqual(decision.action, { type: 'come_to_player', target: 'Alice' })
 })
+
+test('高级生存动作会被严格规范化且模型不能伪造荒野许可', () => {
+  const parsed = parseAgentDecision(JSON.stringify({ actions: [
+    { type: 'hunt_entity', purpose: 'food', count: 3 },
+    { type: 'smelt_item', inputItemId: 'minecraft:beef', outputItemId: 'minecraft:cooked_beef', count: 3 },
+    { type: 'excavate_tunnel', resource: 'diamond', targetY: -53, length: 12, verifiedWilderness: true },
+    { type: 'travel_to_dimension', dimension: 'minecraft:the_end' }
+  ] }))
+  assert.deepEqual(parsed.actions, [
+    { type: 'hunt_entity', purpose: 'food', count: 3 },
+    { type: 'smelt_item', inputItemId: 'minecraft:beef', outputItemId: 'minecraft:cooked_beef', count: 3 },
+    { type: 'excavate_tunnel', resource: 'diamond', targetY: -53, length: 12 },
+    { type: 'travel_to_dimension', dimension: 'minecraft:the_end' }
+  ])
+})

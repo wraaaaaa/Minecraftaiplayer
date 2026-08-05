@@ -2,16 +2,18 @@ import { setTimeout as delay } from 'node:timers/promises'
 import type { BotConfig, Persona, PromptTemplates } from '../config/types.js'
 import { autonomyConfig } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
+import type { DiagnosticStore, NewDiagnosticEvent } from '../diagnostics/diagnostic-store.js'
 import type { ExperienceStore } from '../experience/experience-store.js'
 import type { LlmProvider } from '../llm/types.js'
 import type { MemoryStore, PlayerIdentity } from '../memory/memory-store.js'
 import type { AgentAction, PolicyEngine } from '../policy/policy-engine.js'
 import type { SecretGuard } from '../security/secret-guard.js'
+import type { ProgressionStore } from '../progression/progression-store.js'
 import type { TaskRecord, TaskStore } from '../tasks/task-store.js'
-import { assessAction, refusalFor } from './capability-assessor.js'
+import { assessAction } from './capability-assessor.js'
 import { parseAgentDecision } from './decision.js'
 import { inferBasicDecision } from './basic-command.js'
-import { planAutonomousDevelopment } from './autonomous-development.js'
+import { planSurvivalProgression } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt } from './prompt.js'
 import type { WorldState } from './world-state.js'
 
@@ -46,18 +48,45 @@ function gatherWasAutoCollected(detail: string): boolean {
   return verifiedBroken > 0 && inventoryDelta >= verifiedBroken
 }
 
+function remainingGatherDrops(detail: string, requested: number): number {
+  const verifiedBroken = Number(detail.match(/verified_broken_blocks=(\d+)/u)?.[1] ?? requested)
+  const inventoryDelta = Number(detail.match(/inventory_delta=(\d+)/u)?.[1] ?? 0)
+  return Math.max(1, Math.min(requested, verifiedBroken - inventoryDelta))
+}
+
+function canBuildSafeShelter(world: WorldState): boolean {
+  const inventoryCount = (predicate: (id: string) => boolean) => world.inventory.reduce((sum, item) => {
+    const id = (item.itemId ?? '').toLowerCase()
+    return sum + (predicate(id) ? item.count : 0)
+  }, 0)
+  const shellBlocks = inventoryCount(id => /:(?:dirt|coarse_dirt|stone|cobblestone|granite|diorite|andesite|deepslate|cobbled_deepslate|tuff|bricks|mud_bricks|[a-z0-9_]+_(?:log|wood|planks))$/u.test(id))
+  return shellBlocks >= 23
+    && inventoryCount(id => id.endsWith('_door')) > 0
+    && inventoryCount(id => id === 'minecraft:torch') > 0
+}
+
 function requiredPreparation(message: string, action: AgentAction): 'mining' | 'combat' | 'end_combat' | undefined {
   if (action.type === 'none' || action.type === 'stop' || action.type === 'wait_safe' || action.type === 'prepare_for' || action.type === 'equip_best') return undefined
   if (/(?:末地|末影龙|end\b|ender\s*dragon)/iu.test(message)) return 'end_combat'
-  if (action.type === 'gather_resource') return 'mining'
-  if (action.type === 'attack_hostile') return 'combat'
+  if (action.type === 'gather_resource' || action.type === 'excavate_tunnel') return 'mining'
+  if (action.type === 'attack_hostile' || action.type === 'hunt_entity') return 'combat'
   return undefined
 }
 
 const AUTONOMOUS_ACTION_TYPES = new Set<AgentAction['type']>([
-  'none', 'wait_safe', 'wander', 'return_to_zone', 'eat_best_food', 'equip_best', 'attack_hostile', 'collect_own_drops',
-  'gather_resource', 'craft_item', 'place_block', 'use_item', 'seek_shelter', 'build_shelter', 'prepare_for'
+  'none', 'wait_safe', 'wander', 'explore_frontier', 'return_to_zone', 'eat_best_food', 'equip_best', 'attack_hostile', 'hunt_entity', 'collect_own_drops',
+  'gather_resource', 'craft_item', 'place_block', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
+  'travel_to_dimension', 'build_nether_portal', 'use_item', 'seek_shelter', 'build_shelter', 'prepare_for'
 ])
+
+const INTERNAL_GAME_CHAT = /(?:```|\{\s*"?(?:action|actions|type)"?\s*:|\bminecraft:[a-z0-9_]+\b|\b(?:follow_player|move_to|wander|explore_frontier|return_to_zone|eat_best_food|equip_best|attack_hostile|attack_player|hunt_entity|collect_own_drops|gather_resource|craft_item|place_block|smelt_item|trade_villager|enchant_item|sleep_in_bed|excavate_tunnel|build_nether_portal|travel_to_dimension|drop_item|use_item|seek_shelter|build_shelter|prepare_for|wait_safe)\b|\b(?:tool|function|action)\s*(?:call|name)?\b|(?:动作名|调用名|调用指令|工具调用|接口参数|内部指令))/iu
+const GENERIC_FAILURE_REPLY = '抱歉，这件事现在做不到。详细原因请在总控页面的“总聊天”查看。'
+
+function naturalGameText(value: string | undefined, fallback: string): string {
+  const normalized = (value ?? '').replace(/[\r\n\t]+/gu, ' ').replace(/\s{2,}/gu, ' ').trim()
+  if (!normalized || INTERNAL_GAME_CHAT.test(normalized)) return fallback
+  return normalized.slice(0, 220)
+}
 
 export class AgentController {
   readonly #config: BotConfig
@@ -71,6 +100,8 @@ export class AgentController {
   readonly #logger: Logger
   readonly #tasks: TaskStore
   readonly #secrets: SecretGuard
+  readonly #diagnostics: DiagnosticStore | undefined
+  readonly #progression: ProgressionStore | undefined
   #latestWorld: WorldState = { connected: false, inventory: [], nearbyPlayers: [] }
   #draining: Promise<void> | undefined
   #proactiveRun: Promise<void> | undefined
@@ -81,7 +112,7 @@ export class AgentController {
   #cancellationEpoch = 0
   #drainPausedForDisconnect = false
 
-  constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard }) {
+  constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore }) {
     this.#config = options.config
     this.#persona = options.persona
     this.#prompts = options.prompts
@@ -93,10 +124,13 @@ export class AgentController {
     this.#logger = options.logger
     this.#tasks = options.tasks
     this.#secrets = options.secrets
+    this.#diagnostics = options.diagnostics
+    this.#progression = options.progression
   }
 
   async initialize(): Promise<void> {
     await this.#tasks.load()
+    await this.#progression?.load()
     const recovered = await this.#tasks.recoverRunning('controller_reconnect_recovery')
     if (recovered > 0) this.#logger.warn('已恢复连接中断时遗留的运行任务', { recovered })
   }
@@ -110,7 +144,12 @@ export class AgentController {
       await this.#handleImmediateStop(identity, safeMessage)
       return
     }
-    await this.#tasks.enqueue({ issuer: identity, request: safeMessage, urgency: urgencyFor(safeMessage) })
+    const queued = await this.#tasks.enqueue({ issuer: identity, request: safeMessage, urgency: urgencyFor(safeMessage) })
+    await this.#diagnose({
+      type: 'request', level: 'info', title: '收到游戏内消息', summary: safeMessage,
+      taskId: queued.id, playerName: identity.name,
+      metadata: { urgency: queued.urgency, sequence: queued.sequence }
+    })
     await this.#drainTasks()
     if (!this.#drainPausedForDisconnect && (await this.#tasks.load()).tasks.some(task => task.status === 'queued')) await this.#drainTasks()
   }
@@ -134,8 +173,11 @@ export class AgentController {
     }
     if (!autonomy.enabled) return
 
-    if ((world.food ?? 20) < autonomy.eatBelowFood || (world.health ?? 20) <= autonomy.lowHealthThreshold) {
-      await this.#executeProactive({ type: 'eat_best_food' })
+    const ownerThreat = autonomy.protectOwner
+      ? world.nearbyHostiles?.find(hostile => hostile.targetPlayerName?.toLowerCase() === autonomy.ownerName.toLowerCase())
+      : undefined
+    if (ownerThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
+      await this.#executeProactive({ type: 'attack_hostile', targetId: ownerThreat.id, protectPlayer: autonomy.ownerName })
       return
     }
     if ((world.nearbyHostiles?.some(hostile => hostile.targetingBot) ?? false) && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
@@ -144,31 +186,60 @@ export class AgentController {
     }
     if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false)) {
       const shelter = await this.#executeProactive({ type: 'seek_shelter' })
-      if (!shelter.ok && autonomy.autoBuildShelter && autonomy.developmentZone?.enabled) {
-        await this.#executeProactive({ type: 'build_shelter' })
+      if (shelter.ok) return
+      if (autonomy.autoBuildShelter && (autonomy.developmentZone?.enabled || autonomy.allowVerifiedWilderness) && canBuildSafeShelter(world)) {
+        const buildAction: AgentAction = autonomy.developmentZone?.enabled
+          ? { type: 'build_shelter' }
+          : { type: 'build_shelter', verifiedWilderness: true }
+        await this.#executeProactive(buildAction)
+        return
       }
-      return
     }
     // Movement actions are asynchronous in the Fabric client. Do not let the next
     // proactive heartbeat cancel a route that is still making progress.
-    if (world.activePrimitive === 'movement') return
+    if (world.activePrimitive && !['idle', ''].includes(world.activePrimitive)) return
 
     const now = Date.now()
     const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
     if (now - this.#lastProactiveAt >= developmentIntervalMs) {
-      const planned = planAutonomousDevelopment(this.#config, world)
+      const progression = await this.#progression?.load()
+      const planned = planSurvivalProgression(this.#config, world, progression)
       if (planned) {
         this.#lastProactiveAt = now
-        const assessment = assessAction(this.#config, planned, world, { requesterName: autonomy.ownerName })
+        await this.#progression?.notePlan(planned.stage, planned.action.type, planned.reason)
+        await this.#diagnose({
+          type: 'decision', level: 'info', title: '自主发展决策', summary: `${planned.stage}: ${planned.action.type}`,
+          detail: JSON.stringify(planned, null, 2), metadata: { source: 'local-deterministic', stage: planned.stage, action: planned.action.type }
+        })
+        const assessment = assessAction(this.#config, planned.action, world, { requesterName: autonomy.ownerName })
         if (assessment.status === 'ready') {
-          const policy = this.#policy.authorize(planned)
+          const policy = this.#policy.authorize(planned.action)
           if (policy.allowed) {
-            const result = await this.#executeAutonomousAction(planned)
-            this.#logger.info('自主发展步骤已执行', { action: planned.type, ok: result.ok, detail: this.#secrets.sanitizeForPersistence(result.detail), survey: world.blockSurvey?.classification ?? 'missing' })
+            const result = await this.#executeAutonomousAction(planned.action)
+            const failureKey = planned.action.type === 'gather_resource'
+              ? `gather_resource:${planned.action.resource}`
+              : planned.action.type
+            await this.#progression?.noteResult(
+              planned.action.type,
+              result.ok,
+              this.#secrets.sanitizeForPersistence(result.detail),
+              failureKey
+            )
+            this.#logger.info('自主发展步骤已执行', { stage: planned.stage, action: planned.action.type, ok: result.ok, detail: this.#secrets.sanitizeForPersistence(result.detail), survey: world.blockSurvey?.classification ?? 'missing' })
+            await this.#diagnose({
+              type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'error',
+              title: result.ok ? '自主发展动作已启动或完成' : '自主发展动作失败', summary: `${planned.stage}: ${planned.action.type}`,
+              detail: result.detail, metadata: { source: 'local-deterministic', stage: planned.stage, action: planned.action.type }
+            })
             return
           }
+          await this.#progression?.noteResult(planned.action.type, false, policy.reason)
+          await this.#diagnose({ type: 'failure', level: 'warning', title: '自主发展被行为规则拒绝', summary: planned.action.type, detail: policy.reason, metadata: { action: planned.action.type } })
         } else {
-          this.#logger.info('自主发展步骤因当前条件暂缓', { action: planned.type, reasons: assessment.reasons })
+          const detail = assessment.reasons.join('；')
+          await this.#progression?.noteResult(planned.action.type, false, detail)
+          this.#logger.info('自主发展步骤因当前条件暂缓', { action: planned.action.type, reasons: assessment.reasons })
+          await this.#diagnose({ type: 'failure', level: 'warning', title: '自主发展条件不足', summary: planned.action.type, detail, metadata: { action: planned.action.type } })
         }
       }
     }
@@ -192,12 +263,18 @@ export class AgentController {
       const decision = parseAgentDecision(response.text)
       if (decision.validationError) {
         this.#logger.warn('空闲自主决策格式无效，已跳过', { reason: decision.validationError })
+        await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型决策格式无效', summary: response.model, detail: decision.validationError })
         return
       }
       if (!AUTONOMOUS_ACTION_TYPES.has(decision.action.type)) {
         this.#logger.warn('空闲自主决策选择了禁止的玩家交互动作，已跳过', { action: decision.action.type })
+        await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作被本地边界拒绝', summary: decision.action.type, detail: JSON.stringify(decision.action, null, 2), metadata: { model: response.model, action: decision.action.type } })
         return
       }
+      await this.#diagnose({
+        type: 'decision', level: 'info', title: '空闲模型决策', summary: decision.action.type,
+        detail: JSON.stringify(decision.action, null, 2), metadata: { model: response.model, action: decision.action.type }
+      })
 
       let actionSucceeded = true
       if (decision.action.type !== 'none' && decision.action.type !== 'wait_safe') {
@@ -205,15 +282,22 @@ export class AgentController {
         const preparationAction = decision.action.type === 'prepare_for' || decision.action.type === 'equip_best'
         if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
           this.#logger.info('空闲自主动作因当前条件不满足而跳过', { action: decision.action.type, reasons: assessment.reasons })
+          await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作条件不足', summary: decision.action.type, detail: assessment.reasons.join('；'), metadata: { model: response.model, action: decision.action.type } })
           actionSucceeded = false
         } else {
           const policy = this.#policy.authorize(decision.action)
           if (!policy.allowed) {
             this.#logger.warn('空闲自主动作被行为规则拒绝', { action: decision.action.type, reason: policy.reason })
+            await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作被行为规则拒绝', summary: decision.action.type, detail: policy.reason, metadata: { model: response.model, action: decision.action.type } })
             actionSucceeded = false
           } else {
             const result = await this.#executeAutonomousAction(decision.action)
             actionSucceeded = result.ok
+            await this.#diagnose({
+              type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'error',
+              title: result.ok ? '空闲模型动作已完成' : '空闲模型动作失败', summary: decision.action.type,
+              detail: result.detail, metadata: { model: response.model, action: decision.action.type }
+            })
             if (!result.ok && !/player_task_preempted/u.test(result.detail)) {
               await this.#bestEffortExperience({
                 task: JSON.stringify(decision.action),
@@ -228,10 +312,11 @@ export class AgentController {
         }
       }
       if (actionSucceeded && decision.reply && !(await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) {
-        await this.#safeChat(decision.reply)
+        await this.#safeChat(naturalGameText(decision.reply, '我在附近，有需要就叫我。'))
       }
     } catch (error) {
       this.#logger.warn('主动空闲聊天已跳过', error)
+      await this.#diagnose({ type: 'failure', level: 'warning', title: '主动空闲处理异常', summary: '本轮已跳过', detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
     }
   }
 
@@ -244,15 +329,19 @@ export class AgentController {
         if (!prepared.ok) return prepared
         if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return { ok: false, detail: 'player_task_preempted' }
       }
+      const autonomy = autonomyConfig(this.#config)
+      const useDynamicWilderness = autonomy.allowVerifiedWilderness && !autonomy.developmentZone?.enabled
       const executionAction: AgentAction = action.type === 'gather_resource'
-        ? { ...action, authorizedPlayer: autonomyConfig(this.#config).ownerName }
-        : action
+        ? { ...action, authorizedPlayer: autonomy.ownerName, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
+        : action.type === 'craft_item' || action.type === 'place_block' || action.type === 'excavate_tunnel' || action.type === 'build_nether_portal' || action.type === 'build_shelter'
+          ? { ...action, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
+          : action
       let result = await this.#executor.execute(executionAction)
       if (!result.ok || action.type !== 'gather_resource') return result
       if (gatherWasAutoCollected(result.detail)) return result
       if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return { ok: false, detail: 'player_task_preempted' }
       const gathered = result.detail
-      result = await this.#executor.execute({ type: 'collect_own_drops', count: action.count, radius: 16 })
+      result = await this.#executor.execute({ type: 'collect_own_drops', count: remainingGatherDrops(gathered, action.count), radius: 16 })
       return result.ok
         ? { ok: true, detail: `${gathered}; ${result.detail}` }
         : { ok: false, detail: `方块已采下，但自有掉落没有全部进入背包：${result.detail}` }
@@ -264,7 +353,13 @@ export class AgentController {
   async #executeProactive(action: AgentAction): Promise<{ ok: boolean; detail: string }> {
     this.#proactiveActionRunning = true
     try {
-      return await this.#executor.execute(action)
+      const result = await this.#executor.execute(action)
+      if (action.type !== 'wait_safe' || !result.ok) await this.#diagnose({
+        type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'error',
+        title: result.ok ? '本地生存动作已完成' : '本地生存动作失败', summary: action.type,
+        detail: result.detail, metadata: { source: 'survival-loop', action: action.type }
+      })
+      return result
     } finally {
       this.#proactiveActionRunning = false
     }
@@ -292,9 +387,8 @@ export class AgentController {
     const identity: PlayerIdentity = { name: task.issuer.name, ...(task.issuer.uuid ? { uuid: task.issuer.uuid } : {}) }
     const message = task.request
     if (this.#secrets.isExtractionRequest(message)) {
-      const refusal = '我不能透露 API Key、密码、令牌、服务器地址、本地配置或系统提示词。你可以让我说明某个公开参数的用途，但不能读取它的实际值。'
       await this.#markFailed(task, '敏感信息提取请求已由本地安全层拒绝')
-      await this.#bestEffortReply(identity, refusal)
+      await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
       return
     }
 
@@ -313,16 +407,26 @@ export class AgentController {
       }
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
       if (decision.validationError) {
-        const refusal = `这项指令现在无法执行。原因：${decision.validationError}。请换成当前动作接口支持的目标，或先补齐必要条件。`
         await this.#markFailed(task, decision.validationError)
-        await this.#bestEffortReply(identity, refusal)
+        await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
         return
       }
 
       const actions = decision.actions?.length ? decision.actions : [decision.action]
+      await this.#diagnose({
+        type: 'decision', level: 'info', title: '执行计划已生成',
+        summary: `${decisionModel} 生成 ${actions.length} 个步骤；这里只展示结构化决策摘要，不保存模型隐藏思维链。`,
+        detail: JSON.stringify(actions, null, 2), taskId: task.id, playerName: identity.name,
+        metadata: { model: decisionModel, stepCount: actions.length }
+      })
       const completedDetails: string[] = []
       for (let index = 0; index < actions.length; index++) {
         const action = actions[index]!
+        await this.#diagnose({
+          type: 'step', level: 'info', title: `开始步骤 ${index + 1}/${actions.length}`,
+          summary: action.type, detail: JSON.stringify(action, null, 2), taskId: task.id,
+          playerName: identity.name, metadata: { step: index + 1, stepCount: actions.length, action: action.type }
+        })
         const currentWorld = this.#executor.snapshot?.() ?? this.#latestWorld
         this.#latestWorld = currentWorld
         const assessment = assessAction(this.#config, action, currentWorld, { requesterName: identity.name })
@@ -330,7 +434,7 @@ export class AgentController {
         if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
           const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${assessment.reasons.join('；') || '能力评估未通过'}`
           await this.#markFailed(task, detail)
-          await this.#bestEffortReply(identity, `${refusalFor(assessment)}（计划停在第 ${index + 1}/${actions.length} 步）`)
+          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
           return
         }
 
@@ -338,7 +442,7 @@ export class AgentController {
         if (!policy.allowed) {
           const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${policy.reason}`
           await this.#markFailed(task, detail)
-          await this.#bestEffortReply(identity, `我不能执行计划的第 ${index + 1}/${actions.length} 步。原因：${policy.reason}。这是本地行为准则的硬性限制。`)
+          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
           return
         }
 
@@ -357,7 +461,7 @@ export class AgentController {
             }
             await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步准备失败：${safeDetail}`)
             await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先核对装备、耐久、食物和当前计划步骤；条件不足时停止后续步骤。', tags: ['plan', action.type, preparationPurpose] })
-            await this.#bestEffortReply(identity, `计划在第 ${index + 1}/${actions.length} 步前停止。装备与物资准备没有通过：${safeDetail}。`)
+            await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
             return
           }
         } else if (this.#proactiveActionRunning) {
@@ -365,15 +469,19 @@ export class AgentController {
         }
 
         if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
+        const autonomy = autonomyConfig(this.#config)
+        const useDynamicWilderness = autonomy.allowVerifiedWilderness && !autonomy.developmentZone?.enabled
         const executionAction: AgentAction = action.type === 'gather_resource'
-          ? { ...action, authorizedPlayer: identity.name }
-          : action
+          ? { ...action, authorizedPlayer: identity.name, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
+          : action.type === 'craft_item' || action.type === 'place_block' || action.type === 'excavate_tunnel' || action.type === 'build_nether_portal' || action.type === 'build_shelter'
+            ? { ...action, ...(useDynamicWilderness ? { verifiedWilderness: true } : {}) }
+            : action
         let actionResult = await this.#executor.execute(executionAction)
         if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
         if (actionResult.ok && action.type === 'gather_resource') {
           const gatheredDetail = actionResult.detail
           if (!gatherWasAutoCollected(gatheredDetail)) {
-            actionResult = await this.#executor.execute({ type: 'collect_own_drops', count: action.count, radius: 16 })
+            actionResult = await this.#executor.execute({ type: 'collect_own_drops', count: remainingGatherDrops(gatheredDetail, action.count), radius: 16 })
             if (actionResult.ok) actionResult = { ok: true, detail: `${gatheredDetail}; ${actionResult.detail}` }
             else actionResult = { ok: false, detail: `方块已采下，但自有掉落没有全部进入背包：${actionResult.detail}` }
           }
@@ -388,9 +496,14 @@ export class AgentController {
           }
           await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步 ${action.type} 失败：${safeDetail}`)
           await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次根据已经完成的步骤和最新背包/世界状态重建剩余计划，不能继续执行后续动作。', tags: ['plan', action.type] })
-          await this.#bestEffortReply(identity, `计划在第 ${index + 1}/${actions.length} 步停止。实际原因：${safeDetail}。前面已验证的步骤不会被谎报为失败。`)
+          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
           return
         }
+        await this.#diagnose({
+          type: 'step', level: 'success', title: `完成步骤 ${index + 1}/${actions.length}`,
+          summary: action.type, detail: actionResult.detail, taskId: task.id, playerName: identity.name,
+          metadata: { step: index + 1, stepCount: actions.length, action: action.type }
+        })
         completedDetails.push(`${index + 1}:${action.type}=${actionResult.detail}`)
         if (index + 1 < actions.length) {
           await delay(1_100)
@@ -400,14 +513,19 @@ export class AgentController {
       const actionResult = { ok: true, detail: completedDetails.join(' | ') }
 
       await this.#tasks.complete(task.id, actionResult.detail)
+      await this.#diagnose({
+        type: 'result', level: 'success', title: '任务完成', summary: `${actions.length} 个步骤均已得到游戏后置条件确认。`,
+        detail: actionResult.detail, taskId: task.id, playerName: identity.name
+      })
       if (decision.remember) {
         const fact = this.#secrets.sanitizeForPersistence(decision.remember)
         if (fact && !fact.includes('[REDACTED]')) {
           await this.#memory.rememberFact(identity, fact).catch(error => this.#logger.warn('任务已完成，但长期事实写入失败', error))
         }
       }
-      const reply = decision.reply || actionResult.detail
-      if (reply) await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
+      const completedFallback = actions.every(action => action.type === 'none') ? '我在听。' : '好了。'
+      const reply = naturalGameText(decision.reply, completedFallback)
+      await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
       this.#logger.info('任务已完成', { taskId: task.id, player: identity.name, model: decisionModel, actions: actions.map(action => action.type) })
     } catch (error) {
       const detail = this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error))
@@ -417,7 +535,7 @@ export class AgentController {
         return
       }
       const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
-      const fallback = timedOut ? '我这次思考超时了，这项任务没有执行；请再说一次。' : '这项任务处理失败了，游戏动作没有被当作完成。请稍后重试。'
+      const fallback = timedOut ? '抱歉，我这次没能及时想好，麻烦再说一次。' : GENERIC_FAILURE_REPLY
       await this.#markFailed(task, detail || fallback)
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${fallback}`)
     }
@@ -426,16 +544,22 @@ export class AgentController {
   async #handleImmediateStop(identity: PlayerIdentity, request: string): Promise<void> {
     this.#cancellationEpoch++
     const cancelled = await this.#tasks.cancelRunning(`cancelled_by_${identity.name}`)
+    if (cancelled) await this.#diagnose({
+      type: 'failure', level: 'warning', title: '正在执行的任务被玩家停止', summary: `由 ${identity.name} 发出停止请求。`,
+      detail: cancelled.request, taskId: cancelled.id, playerName: cancelled.issuer.name
+    })
     const stopTask = await this.#tasks.enqueue({ issuer: identity, request, urgency: 100 })
+    await this.#diagnose({ type: 'request', level: 'info', title: '收到立即停止消息', summary: request, taskId: stopTask.id, playerName: identity.name, metadata: { urgency: 100 } })
     await this.#tasks.markRunning(stopTask.id)
     const result = await this.#executor.execute({ type: 'stop' }).catch(error => ({ ok: false, detail: error instanceof Error ? error.message : String(error) }))
     const detail = this.#secrets.sanitizeForPersistence(result.detail)
     if (result.ok) {
       await this.#tasks.complete(stopTask.id, detail || '已停止当前动作')
+      await this.#diagnose({ type: 'result', level: 'success', title: '停止请求已完成', summary: detail || '已停止当前动作', taskId: stopTask.id, playerName: identity.name })
       await this.#bestEffortReply(identity, cancelled ? '已停止当前动作，正在执行的任务已取消。' : '已停止移动；当前没有正在执行的任务。')
     } else {
       await this.#markFailed(stopTask, detail || '停止动作失败')
-      await this.#bestEffortReply(identity, `停止动作没有成功。实际原因：${detail || '客户端未返回原因'}。`)
+      await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
     }
   }
 
@@ -447,8 +571,13 @@ export class AgentController {
   }
 
   async #markFailed(task: TaskRecord, reason: string): Promise<void> {
-    await this.#tasks.fail(task.id, reason || '任务失败但未提供原因').catch(error => {
+    const safeReason = this.#secrets.sanitizeForPersistence(reason || '任务失败但未提供原因')
+    await this.#tasks.fail(task.id, safeReason).catch(error => {
       this.#logger.error('无法把任务写入失败终态，重连时将由恢复机制重新排队', { taskId: task.id, error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })
+    })
+    await this.#diagnose({
+      type: 'failure', level: 'error', title: '任务无法完成', summary: '完整原因仅保留在本机总控页面。',
+      detail: safeReason, taskId: task.id, playerName: task.issuer.name
     })
   }
 
@@ -456,6 +585,10 @@ export class AgentController {
     this.#drainPausedForDisconnect = true
     await this.#tasks.requeue(task.id, reason).catch(error => {
       this.#logger.error('客户端断线任务无法重新排队', { taskId: task.id, error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })
+    })
+    await this.#diagnose({
+      type: 'lifecycle', level: 'warning', title: '客户端断线，任务已重新排队', summary: reason,
+      taskId: task.id, playerName: task.issuer.name
     })
   }
 
@@ -475,8 +608,22 @@ export class AgentController {
     await this.#experience.add(entry).catch(error => this.#logger.warn('任务失败状态已落盘，但经验文件写入失败', error))
   }
 
+  async #diagnose(event: NewDiagnosticEvent): Promise<void> {
+    if (!this.#diagnostics) return
+    const safe: NewDiagnosticEvent = {
+      ...event,
+      title: this.#secrets.sanitizeForPersistence(event.title).slice(0, 160),
+      summary: this.#secrets.sanitizeForPersistence(event.summary).slice(0, 1_000),
+      ...(event.detail ? { detail: this.#secrets.sanitizeForPersistence(event.detail).slice(0, 12_000) } : {})
+    }
+    await this.#diagnostics.append(safe).catch(error => {
+      this.#logger.warn('本机诊断时间线写入失败', { error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })
+    })
+  }
+
   async #safeChat(message: string): Promise<string> {
-    const guarded = this.#secrets.safeChat(message)
+    const gameFacing = naturalGameText(message, '我在。')
+    const guarded = this.#secrets.safeChat(gameFacing)
     const waitMs = Math.max(0, this.#config.chat.cooldownMs - (Date.now() - this.#lastChatAt))
     if (waitMs > 0) await delay(waitMs)
     await this.#executor.chat(guarded.text)

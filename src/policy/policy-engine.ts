@@ -7,19 +7,28 @@ export type AgentAction =
   | { type: 'come_to_player'; target: string }
   | { type: 'look_at_player'; target: string }
   | { type: 'wander'; radius: number }
+  | { type: 'explore_frontier'; purpose: 'food' | 'wood' | 'village' | 'portal' | 'resource'; radius: number }
   | { type: 'return_to_zone' }
   | { type: 'attack_player'; target: string }
   | { type: 'eat_best_food' }
   | { type: 'equip_best'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
-  | { type: 'attack_hostile'; targetId?: string }
+  | { type: 'attack_hostile'; targetId?: string; protectPlayer?: string }
+  | { type: 'hunt_entity'; purpose: 'food' | 'wool' | 'leather' | 'ender_pearl' | 'blaze_rod'; count: number }
   | { type: 'collect_own_drops'; itemId?: string; count: number; radius: number }
-  | { type: 'gather_resource'; resource: string; count: number; authorizedPlayer?: string; targetBlock?: { x: number; y: number; z: number } }
-  | { type: 'craft_item'; itemId: string; count: number }
-  | { type: 'place_block'; itemId?: string; count: number }
+  | { type: 'gather_resource'; resource: string; count: number; authorizedPlayer?: string; verifiedWilderness?: boolean; targetBlock?: { x: number; y: number; z: number } }
+  | { type: 'craft_item'; itemId: string; count: number; verifiedWilderness?: boolean }
+  | { type: 'place_block'; itemId?: string; count: number; verifiedWilderness?: boolean }
+  | { type: 'smelt_item'; inputItemId?: string; outputItemId?: string; count: number }
+  | { type: 'trade_villager'; desiredItemId?: string; count: number }
+  | { type: 'enchant_item'; itemId?: string; minLevel?: number }
+  | { type: 'sleep_in_bed' }
+  | { type: 'excavate_tunnel'; resource?: string; targetY: number; length: number; verifiedWilderness?: boolean }
+  | { type: 'travel_to_dimension'; dimension: 'minecraft:overworld' | 'minecraft:the_nether' | 'minecraft:the_end' }
+  | { type: 'build_nether_portal'; verifiedWilderness?: boolean }
   | { type: 'drop_item'; itemId?: string; count: number; target: string }
   | { type: 'use_item'; itemId?: string }
   | { type: 'seek_shelter' }
-  | { type: 'build_shelter' }
+  | { type: 'build_shelter'; verifiedWilderness?: boolean }
   | { type: 'wait_safe' }
   | { type: 'prepare_for'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
   | { type: 'break_block'; block: string; ownership: 'natural' | 'player' | 'unknown'; evidence?: 'fabric_verified_zone' | 'bot_placement_ledger' }
@@ -57,11 +66,21 @@ export class PolicyEngine {
         if (action.ownership === 'unknown') return { allowed: false, reason: '无法确认归属时禁止打开容器' }
         return { allowed: true, reason: '允许' }
       case 'gather_resource':
+      case 'excavate_tunnel':
       case 'build_shelter':
         if (!this.#rules.wildernessDevelopmentOnly) return { allowed: true, reason: '运行时仍需验证目标方块与区域' }
         return { allowed: true, reason: '仅在 Fabric 验证为安全荒野开发区后允许' }
       case 'place_block':
         return { allowed: true, reason: '仅允许在 Fabric 验证的管理员批准区域内放置普通建筑方块' }
+      case 'hunt_entity':
+        return { allowed: true, reason: 'Fabric 会筛选未命名、未驯化并远离玩家设施的合法生存目标' }
+      case 'smelt_item':
+      case 'trade_villager':
+      case 'enchant_item':
+      case 'sleep_in_bed':
+      case 'travel_to_dimension':
+      case 'build_nether_portal':
+        return { allowed: true, reason: '允许可验证的生存交互' }
       case 'drop_item':
         return { allowed: true, reason: '只允许把自身背包物品丢给明确指定且在场的玩家' }
       case 'collect_own_drops':

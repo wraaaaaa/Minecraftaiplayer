@@ -19,6 +19,7 @@ import net.minecraft.world.entity.monster.Enemy;
 import net.minecraft.world.entity.monster.piglin.AbstractPiglin;
 import net.minecraft.world.entity.monster.zombie.ZombifiedPiglin;
 import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.food.FoodProperties;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -77,6 +78,9 @@ public final class SurvivalController {
     private final int eatFoodThreshold;
     private final double threatScanRadius;
     private final long threatMemoryMs;
+    private final String protectedPlayerName;
+    private final boolean protectPlayer;
+    private String escortPlayerName = "";
     private final Map<Integer, Long> recentThreats = new HashMap<>();
 
     private long localTick;
@@ -104,10 +108,16 @@ public final class SurvivalController {
     }
 
     public SurvivalController(float eatHealthThreshold, int eatFoodThreshold, double threatScanRadius, long threatMemoryMs) {
+        this(eatHealthThreshold, eatFoodThreshold, threatScanRadius, threatMemoryMs, "", false);
+    }
+
+    public SurvivalController(float eatHealthThreshold, int eatFoodThreshold, double threatScanRadius, long threatMemoryMs, String protectedPlayerName, boolean protectPlayer) {
         this.eatHealthThreshold = Math.max(1.0F, Math.min(19.0F, eatHealthThreshold));
-        this.eatFoodThreshold = Math.max(1, Math.min(19, eatFoodThreshold));
+        this.eatFoodThreshold = Math.max(1, Math.min(20, eatFoodThreshold));
         this.threatScanRadius = Math.max(3.0D, Math.min(32.0D, threatScanRadius));
         this.threatMemoryMs = Math.max(1_000L, Math.min(60_000L, threatMemoryMs));
+        this.protectedPlayerName = protectedPlayerName == null ? "" : protectedPlayerName.trim();
+        this.protectPlayer = protectPlayer && !this.protectedPlayerName.isBlank();
     }
 
     /** Records the responsible entity from a client damage event. */
@@ -148,6 +158,18 @@ public final class SurvivalController {
         LivingEntity threat = findCurrentThreat(client, player, now);
         double threatDistance = threat == null ? Double.POSITIVE_INFINITY : player.distanceTo(threat);
 
+        if (player.isUnderWater() && player.getAirSupply() < player.getMaxAirSupply() * 3 / 4) {
+            cancelEating(client, player);
+            client.options.keyUp.setDown(false);
+            client.options.keyDown.setDown(false);
+            client.options.keyLeft.setDown(false);
+            client.options.keyRight.setDown(false);
+            client.options.keyJump.setDown(true);
+            snapshot = new Snapshot(Mode.UNSAFE, false, List.of("low_air_underwater"), null, "surfacing_for_air");
+            return;
+        }
+        client.options.keyJump.setDown(false);
+
         if (eatingSlot >= 0) {
             if (threat != null && threatDistance <= IMMEDIATE_THREAT_DISTANCE) {
                 cancelEating(client, player);
@@ -158,7 +180,7 @@ public final class SurvivalController {
         }
 
         boolean needsFood = player.getHealth() <= eatHealthThreshold
-            || player.getFoodData().getFoodLevel() <= eatFoodThreshold;
+            || player.getFoodData().getFoodLevel() < eatFoodThreshold;
 
         if (needsFood && (threat == null || threatDistance > IMMEDIATE_THREAT_DISTANCE)) {
             FoodChoice food = chooseSafeHotbarFood(player);
@@ -216,6 +238,11 @@ public final class SurvivalController {
         return snapshot.safeToIdle();
     }
 
+    /** Dynamically protects the player currently being followed, in addition to the owner. */
+    public void setEscortPlayerName(String playerName) {
+        escortPlayerName = playerName == null ? "" : playerName.trim();
+    }
+
     public long completedFoodConsumptionCount() {
         return completedFoodConsumptions;
     }
@@ -233,6 +260,7 @@ public final class SurvivalController {
         if (client == null) return;
         client.options.keyUse.setDown(false);
         client.options.keyAttack.setDown(false);
+        client.options.keyJump.setDown(false);
     }
 
     /** Neutral/high-risk hostiles are deliberately never selected for automatic retaliation. */
@@ -308,7 +336,12 @@ public final class SurvivalController {
         Long expiresAt = recentThreats.get(entity.getId());
         if (expiresAt != null && expiresAt >= now) return true;
         if (player.getLastHurtByMob() == entity) return true;
-        return entity instanceof Mob mob && mob.getTarget() == player;
+        if (!(entity instanceof Mob mob)) return false;
+        if (mob.getTarget() == player) return true;
+        if (!(mob.getTarget() instanceof Player target)) return false;
+        String targetName = target.getGameProfile().name();
+        return protectPlayer && targetName.equalsIgnoreCase(protectedPlayerName)
+            || !escortPlayerName.isBlank() && targetName.equalsIgnoreCase(escortPlayerName);
     }
 
     private FoodChoice chooseSafeHotbarFood(LocalPlayer player) {
@@ -360,8 +393,15 @@ public final class SurvivalController {
         FoodProperties food = stack.get(DataComponents.FOOD);
         Consumable consumable = stack.get(DataComponents.CONSUMABLE);
         if (food == null || consumable == null || !consumable.canConsume(player, stack)) return null;
-        // Deterministic safety: foods with any status-effect callback are left to explicit player tasks.
-        if (!consumable.onConsumeEffects().isEmpty()) return null;
+        String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        // Component-based mod foods are accepted unless they are one of the vanilla foods with a
+        // known harmful/random side effect. This keeps Farmer's Delight and similar cooked meals
+        // usable without trusting translated display names.
+        if (List.of(
+            "minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:poisonous_potato",
+            "minecraft:pufferfish", "minecraft:chicken", "minecraft:suspicious_stew",
+            "minecraft:chorus_fruit"
+        ).contains(id)) return null;
         return food;
     }
 

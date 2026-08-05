@@ -14,12 +14,15 @@ import net.minecraft.client.multiplayer.resolver.ServerAddress;
 import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
@@ -42,21 +45,26 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private UUID activeSession;
     private boolean bridgeWasConnected;
     private MovementTarget movement;
-    private Vec3 movementProgressPosition;
-    private int movementNoProgressTicks;
-    private int movementDetourTicks;
-    private int movementDetourDirection = 1;
-    private int movementRecoveryAttempts;
+    private final LocalPathNavigator movementNavigator = new LocalPathNavigator();
+    private final LocalPathNavigator airRescueNavigator = new LocalPathNavigator();
+    private BlockPos airRescueExit;
+    private int airRescueLastScan = -100;
+    private BlockPos airRescueBreaking;
+    private long airRescueBreakStarted;
     private PendingSurvivalAction pendingSurvivalAction;
+    private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
     private final SurvivalController survival = new SurvivalController(
         (float) environmentNumber("MCAI_LOW_HEALTH_THRESHOLD", 10.0D),
-        (int) environmentNumber("MCAI_EAT_BELOW_FOOD", 16.0D),
+        (int) environmentNumber("MCAI_EAT_BELOW_FOOD", 20.0D),
         environmentNumber("MCAI_HOSTILE_SCAN_RADIUS", 12.0D),
-        10_000L
+        10_000L,
+        ownerName,
+        Boolean.parseBoolean(environment("MCAI_PROTECT_OWNER", "true"))
     );
-    private final WorldStateEncoder worldStateEncoder = new WorldStateEncoder();
+    private final WorldStateEncoder worldStateEncoder = new WorldStateEncoder(ownerName);
     private final PrimitiveTaskController primitives = new PrimitiveTaskController();
+    private final AdvancedTaskController advanced = new AdvancedTaskController(primitives);
     private final ShelterController shelter = new ShelterController();
 
     @Override
@@ -87,14 +95,17 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         boolean bridgeConnected = bridge.isConnected();
         if (bridgeWasConnected && !bridgeConnected) {
             movement = null;
+            movementNavigator.release(client);
             clearMovement(client);
             cancelPendingSurvivalAction("bridge_disconnected");
             primitives.cancel(client, "bridge_disconnected");
+            advanced.cancel(client, "bridge_disconnected");
             shelter.cancel(client, "bridge_disconnected");
             while (bridge.poll() != null) {
                 // Discard commands from the dead controller session; they must never replay.
             }
             drainPrimitiveResults();
+            drainAdvancedResults();
             drainShelterResults();
         }
         bridgeWasConnected = bridgeConnected;
@@ -105,8 +116,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             easyAuthPromptSeen = false;
             dead = false;
             movement = null;
+            movementNavigator.release(client);
             cancelPendingSurvivalAction("world_disconnected");
             primitives.cancel(client, "world_disconnected");
+            advanced.cancel(client, "world_disconnected");
             shelter.cancel(client, "world_disconnected");
             survival.reset(client);
             autoConnect(client);
@@ -125,6 +138,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (handleDeath(client, player)) return;
         if (!easyAuthSent && !easyAuthPromptSeen && tick - joinedTick >= 100 && tick % 20 == 0) sendEasyAuth(player);
         processActions(client, player);
+        survival.setEscortPlayerName(movement != null && movement.follow() ? movement.playerName() : "");
         boolean survivalControlsEnabled = autonomyEnabled || pendingSurvivalAction != null;
         if (survivalControlsEnabled) {
             survival.tick(client);
@@ -132,12 +146,21 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         } else {
             SurvivalController.releaseControls(client);
         }
-        if (survivalControlsEnabled
-            && (survival.mode() == SurvivalController.Mode.EATING || survival.mode() == SurvivalController.Mode.COMBAT)) {
+        boolean advancedCombat = "attack_hostile".equals(advanced.activeType());
+        boolean surfacingForAir = survivalControlsEnabled && "surfacing_for_air".equals(survival.snapshot().detail());
+        if (surfacingForAir) {
+            rescueAir(client, player);
+        } else if (survivalControlsEnabled
+            && (survival.mode() == SurvivalController.Mode.EATING
+                || survival.mode() == SurvivalController.Mode.COMBAT && !advancedCombat)) {
+            stopAirRescue(client);
             clearMovement(client);
         } else {
+            stopAirRescue(client);
             if (!primitives.activeType().isEmpty()) {
                 primitives.tick(client);
+            } else if (!advanced.activeType().isEmpty()) {
+                advanced.tick(client);
             } else if (!shelter.activeType().isEmpty()) {
                 shelter.tick(client);
             } else {
@@ -145,8 +168,132 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             }
         }
         drainPrimitiveResults();
+        drainAdvancedResults();
         drainShelterResults();
         if (tick % 20 == 0) bridge.send(buildState(client, player));
+    }
+
+    private void rescueAir(Minecraft client, LocalPlayer player) {
+        clearMovement(client);
+        if (airRescueBreaking != null
+            && (!client.level.isLoaded(airRescueBreaking) || client.level.getBlockState(airRescueBreaking).isAir())) {
+            if (client.gameMode != null) client.gameMode.stopDestroyBlock();
+            airRescueBreaking = null;
+        }
+        if (airRescueExit == null
+            || tick - airRescueLastScan >= 20
+            || !isBreathableWaterSurface(client, airRescueExit)) {
+            airRescueExit = nearestBreathableWaterSurface(client, player, 12);
+            airRescueLastScan = tick;
+        }
+        BlockPos exit = airRescueExit;
+        if (exit != null) {
+            boolean routed = airRescueNavigator.drive(
+                client, player, Vec3.atBottomCenterOf(exit), 0.45D, false, tick
+            );
+            double dx = player.getX() - (exit.getX() + 0.5D);
+            double dz = player.getZ() - (exit.getZ() + 0.5D);
+            if (dx * dx + dz * dz <= 0.81D && player.getY() >= exit.getY() - 0.8D) {
+                client.options.keyJump.setDown(true);
+            }
+            if (routed) return;
+        }
+
+        airRescueNavigator.release(client);
+        BlockPos roof = reachableNaturalAirRoof(client, player);
+        if (roof != null && client.gameMode != null) {
+            BlockState state = client.level.getBlockState(roof);
+            if (airRescueBreaking == null || !airRescueBreaking.equals(roof)) {
+                if (airRescueBreaking != null) client.gameMode.stopDestroyBlock();
+                airRescueBreaking = roof.immutable();
+                airRescueBreakStarted = tick;
+                selectFastestHotbarTool(player, state);
+                client.gameMode.startDestroyBlock(airRescueBreaking, Direction.DOWN);
+            }
+            lookAt(player, roof.getX() + 0.5D, roof.getY() + 0.15D, roof.getZ() + 0.5D);
+            client.gameMode.continueDestroyBlock(airRescueBreaking, Direction.DOWN);
+            player.swing(InteractionHand.MAIN_HAND);
+            if (client.level.getBlockState(airRescueBreaking).isAir() || tick - airRescueBreakStarted > 100L) {
+                client.gameMode.stopDestroyBlock();
+                airRescueBreaking = null;
+            }
+        }
+        // Continue rising while looking for an edge or bringing a natural ice/snow roof into reach.
+        client.options.keyJump.setDown(true);
+    }
+
+    private void stopAirRescue(Minecraft client) {
+        airRescueNavigator.release(client);
+        if (airRescueBreaking != null && client != null && client.gameMode != null) {
+            client.gameMode.stopDestroyBlock();
+        }
+        airRescueBreaking = null;
+        airRescueExit = null;
+        airRescueLastScan = -100;
+    }
+
+    private static boolean isBreathableWaterSurface(Minecraft client, BlockPos water) {
+        if (water == null || !client.level.isLoaded(water)) return false;
+        BlockPos breathing = water.above();
+        BlockPos head = breathing.above();
+        if (!client.level.isLoaded(breathing) || !client.level.isLoaded(head)
+            || !client.level.getFluidState(water).is(FluidTags.WATER)) return false;
+        BlockState breathingState = client.level.getBlockState(breathing);
+        BlockState headState = client.level.getBlockState(head);
+        return breathingState.getFluidState().isEmpty()
+            && breathingState.getCollisionShape(client.level, breathing).isEmpty()
+            && headState.getCollisionShape(client.level, head).isEmpty();
+    }
+
+    private static BlockPos nearestBreathableWaterSurface(Minecraft client, LocalPlayer player, int radius) {
+        BlockPos origin = player.blockPosition();
+        BlockPos best = null;
+        double bestScore = Double.POSITIVE_INFINITY;
+        for (int y = Math.max(client.level.getMinY(), origin.getY() - 1);
+             y <= Math.min(client.level.getMaxY() - 3, origin.getY() + radius); y++) {
+            for (int x = origin.getX() - radius; x <= origin.getX() + radius; x++) {
+                for (int z = origin.getZ() - radius; z <= origin.getZ() + radius; z++) {
+                    BlockPos water = new BlockPos(x, y, z);
+                    if (!isBreathableWaterSurface(client, water)) continue;
+                    double dx = x + 0.5D - player.getX();
+                    double dz = z + 0.5D - player.getZ();
+                    double score = Math.sqrt(dx * dx + dz * dz) + Math.max(0, y - player.getY()) * 0.35D;
+                    if (score < bestScore) {
+                        best = water.immutable();
+                        bestScore = score;
+                    }
+                }
+            }
+        }
+        return best;
+    }
+
+    private static BlockPos reachableNaturalAirRoof(Minecraft client, LocalPlayer player) {
+        BlockPos origin = player.blockPosition();
+        for (int dy = 1; dy <= 4; dy++) {
+            BlockPos position = origin.above(dy);
+            if (!client.level.isLoaded(position)) return null;
+            BlockState state = client.level.getBlockState(position);
+            if (!state.getFluidState().isEmpty() || state.isAir()) continue;
+            if (player.distanceToSqr(Vec3.atCenterOf(position)) <= 25.0D
+                && WildernessGuard.safeNaturalBreak(client, position)
+                && state.getDestroySpeed(client.level, position) >= 0.0F) return position;
+            return null;
+        }
+        return null;
+    }
+
+    private static void selectFastestHotbarTool(LocalPlayer player, BlockState state) {
+        int bestSlot = player.getInventory().getSelectedSlot();
+        float bestSpeed = player.getInventory().getItem(bestSlot).getDestroySpeed(state);
+        for (int slot = 0; slot < 9; slot++) {
+            float speed = player.getInventory().getItem(slot).getDestroySpeed(state);
+            if (speed > bestSpeed) {
+                bestSpeed = speed;
+                bestSlot = slot;
+            }
+        }
+        player.getInventory().setSelectedSlot(bestSlot);
     }
 
     private void autoConnect(Minecraft client) {
@@ -183,6 +330,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private void configureApprovedZone() {
         double minimumPlayerDistance = environmentNumber("MCAI_WILDERNESS_MIN_PLAYER_DISTANCE", 48.0D);
         primitives.setMinimumPlayerDistance(minimumPlayerDistance);
+        advanced.setMinimumPlayerDistance(minimumPlayerDistance);
         shelter.setMinimumPlayerDistance(minimumPlayerDistance);
         if (!Boolean.parseBoolean(environment("MCAI_DEVELOPMENT_ZONE_ENABLED", "false"))) {
             primitives.clearApprovedZone();
@@ -222,9 +370,11 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             movement = null;
             clearMovement(client);
             primitives.cancel(client, "bot_died");
+            advanced.cancel(client, "bot_died");
             shelter.cancel(client, "bot_died");
             cancelPendingSurvivalAction("bot_died");
             drainPrimitiveResults();
+            drainAdvancedResults();
             drainShelterResults();
             JsonObject event = baseMessage("death");
             event.addProperty("health", player.getHealth());
@@ -283,7 +433,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             JsonObject action = envelope.has("action") && envelope.get("action").isJsonObject() ? envelope.getAsJsonObject("action") : new JsonObject();
             String actionType = string(action, "type");
             if (isSurvivalAction(actionType)) {
-                if (!primitives.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
+                if (!primitives.activeType().isEmpty() || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
                     sendActionResult(id, false, "busy: another verified task is active");
                     continue;
                 }
@@ -292,8 +442,19 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 startSurvivalAction(id, actionType, client, player);
                 continue;
             }
+            if (isAdvancedAction(actionType)) {
+                if (pendingSurvivalAction != null || !primitives.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: active task is " + activeTaskType());
+                    continue;
+                }
+                movement = null;
+                clearMovement(client);
+                advanced.start(id, action, client);
+                drainAdvancedResults();
+                continue;
+            }
             if (isPrimitiveAction(actionType)) {
-                if (pendingSurvivalAction != null || !shelter.activeType().isEmpty()) {
+                if (pendingSurvivalAction != null || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
                     sendActionResult(id, false, "busy: active task is " + activeTaskType());
                     continue;
                 }
@@ -304,7 +465,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 continue;
             }
             if (isShelterAction(actionType)) {
-                if (pendingSurvivalAction != null || !primitives.activeType().isEmpty()) {
+                if (pendingSurvivalAction != null || !primitives.activeType().isEmpty() || !advanced.activeType().isEmpty()) {
                     sendActionResult(id, false, "busy: active task is " + activeTaskType());
                     continue;
                 }
@@ -332,7 +493,15 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     }
 
     private static boolean isSurvivalAction(String type) {
-        return "eat_best_food".equals(type) || "attack_hostile".equals(type);
+        return "eat_best_food".equals(type);
+    }
+
+    private static boolean isAdvancedAction(String type) {
+        return switch (type) {
+            case "attack_hostile", "hunt_entity", "smelt_item", "trade_villager", "enchant_item",
+                "sleep_in_bed", "excavate_tunnel", "explore_frontier", "build_nether_portal", "travel_to_dimension" -> true;
+            default -> false;
+        };
     }
 
     private static boolean isShelterAction(String type) {
@@ -341,6 +510,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private void drainPrimitiveResults() {
         for (PrimitiveTaskController.TaskResult result : primitives.drainResults()) {
+            sendActionResult(result.id(), result.ok(), result.detail());
+        }
+    }
+
+    private void drainAdvancedResults() {
+        for (AdvancedTaskController.TaskResult result : advanced.drainResults()) {
             sendActionResult(result.id(), result.ok(), result.detail());
         }
     }
@@ -414,6 +589,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private String activeTaskType() {
         if (pendingSurvivalAction != null) return pendingSurvivalAction.type();
         if (!primitives.activeType().isEmpty()) return primitives.activeType();
+        if (!advanced.activeType().isEmpty()) return advanced.activeType();
         if (!shelter.activeType().isEmpty()) return shelter.activeType();
         return movement == null ? "" : "movement";
     }
@@ -423,8 +599,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "none" -> new ActionResult(true, "无需动作");
             case "stop" -> {
                 movement = null;
+                movementNavigator.release(client);
                 cancelPendingSurvivalAction("stopped_by_command");
                 primitives.cancel(client, "stopped_by_command");
+                advanced.cancel(client, "stopped_by_command");
                 shelter.cancel(client, "stopped_by_command");
                 clearMovement(client);
                 yield new ActionResult(true, "已停止移动");
@@ -439,13 +617,26 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "follow_player", "come_to_player", "look_at_player" -> {
                 String targetName = string(action, "target");
                 AbstractClientPlayer target = findPlayer(client, targetName);
-                if (target == null) yield new ActionResult(false, "附近找不到玩家 " + targetName);
+                if (target == null && !targetName.equalsIgnoreCase(ownerName)) {
+                    yield new ActionResult(false, "附近找不到玩家 " + targetName);
+                }
                 if ("look_at_player".equals(string(action, "type"))) {
+                    if (target == null) yield new ActionResult(false, "最高优先玩家当前只提供远距离方位，无法精确注视");
                     lookAt(player, target.getX(), target.getEyeY(), target.getZ());
                     yield new ActionResult(true, "已看向 " + targetName);
                 }
-                setMovement(new MovementTarget(targetName, target.getX(), target.getY(), target.getZ(), "follow_player".equals(string(action, "type")), 2.0), player);
-                yield new ActionResult(true, "已开始前往 " + targetName);
+                Vec3 goal;
+                if (target != null) {
+                    goal = target.position();
+                } else {
+                    OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
+                    if (fix == null) yield new ActionResult(false, "服务器没有提供最高优先玩家的定位栏方位");
+                    goal = fix.segmentGoal(player, 22.0D);
+                }
+                if (!setMovement(new MovementTarget(targetName, goal.x, goal.y, goal.z, "follow_player".equals(string(action, "type")), 2.0), player)) {
+                    yield new ActionResult(false, "no collision-safe loaded route to player " + targetName);
+                }
+                yield new ActionResult(true, target == null ? "已按服务器定位栏方位开始寻找最高优先玩家" : "已开始前往 " + targetName);
             }
             case "wander" -> {
                 PrimitiveTaskController.ApprovedZone zone = primitives.approvedZone();
@@ -462,7 +653,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     player.getX() + Math.cos(angle) * radius));
                 double targetZ = Math.max(zone.min().getZ() + 0.5D, Math.min(zone.max().getZ() + 0.5D,
                     player.getZ() + Math.sin(angle) * radius));
-                setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player);
+                if (!setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player)) {
+                    yield new ActionResult(false, "no collision-safe loaded route for approved-zone exploration");
+                }
                 yield new ActionResult(true, "started approved-zone environment exploration");
             }
             case "return_to_zone" -> {
@@ -479,7 +672,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 double targetX = (zone.min().getX() + zone.max().getX() + 1.0D) / 2.0D;
                 double targetZ = (zone.min().getZ() + zone.max().getZ() + 1.0D) / 2.0D;
                 double targetY = Math.max(zone.min().getY(), Math.min(zone.max().getY(), player.getY()));
-                setMovement(new MovementTarget(null, targetX, targetY, targetZ, false, 1.2), player);
+                if (!setMovement(new MovementTarget(null, targetX, targetY, targetZ, false, 1.2), player)) {
+                    yield new ActionResult(false, "no collision-safe loaded route from current position toward approved development AABB");
+                }
                 yield new ActionResult(true, "started returning to approved development AABB");
             }
             case "attack_player" -> {
@@ -508,96 +703,69 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (target.playerName() != null) {
             AbstractClientPlayer targetPlayer = findPlayer(client, target.playerName());
             if (targetPlayer == null) {
-                movement = null;
-                clearMovement(client);
-                return;
+                if (!target.playerName().equalsIgnoreCase(ownerName)) {
+                    movement = null;
+                    movementNavigator.release(client);
+                    clearMovement(client);
+                    return;
+                }
+                double segmentDistance = Math.sqrt(
+                    Math.pow(target.x() - player.getX(), 2.0D) + Math.pow(target.z() - player.getZ(), 2.0D)
+                );
+                if (segmentDistance <= 2.0D || tick % 40 == 0) {
+                    OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
+                    if (fix == null) {
+                        if (segmentDistance <= 2.0D) {
+                            movement = null;
+                            movementNavigator.release(client);
+                            clearMovement(client);
+                        }
+                        return;
+                    }
+                    Vec3 goal = fix.segmentGoal(player, 22.0D);
+                    target = new MovementTarget(target.playerName(), goal.x, goal.y, goal.z, target.follow(), target.stopDistance());
+                    movement = target;
+                }
+            } else {
+                target = new MovementTarget(target.playerName(), targetPlayer.getX(), targetPlayer.getY(), targetPlayer.getZ(), target.follow(), target.stopDistance());
+                movement = target;
             }
-            target = new MovementTarget(target.playerName(), targetPlayer.getX(), targetPlayer.getY(), targetPlayer.getZ(), target.follow(), target.stopDistance());
-            movement = target;
         }
         double dx = target.x() - player.getX();
         double dz = target.z() - player.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
         if (distance <= target.stopDistance()) {
             clearMovement(client);
-            movementNoProgressTicks = 0;
-            movementRecoveryAttempts = 0;
+            movementNavigator.release(client);
             if (!target.follow()) movement = null;
             return;
         }
-        if (movementProgressPosition == null || player.position().distanceToSqr(movementProgressPosition) >= 0.09D) {
-            movementProgressPosition = player.position();
-            movementNoProgressTicks = 0;
-        } else {
-            movementNoProgressTicks++;
+        boolean routed = movementNavigator.drive(
+            client,
+            player,
+            new Vec3(target.x(), target.y(), target.z()),
+            target.stopDistance(),
+            distance > 6.0D,
+            tick
+        );
+        if (!routed && movementNavigator.consecutivePlanFailures() >= 20 && !target.follow()) {
+            movement = null;
+            movementNavigator.release(client);
         }
-        if (movementNoProgressTicks >= 20) {
-            movementNoProgressTicks = 0;
-            movementRecoveryAttempts++;
-            movementDetourDirection *= -1;
-            movementDetourTicks = 30;
-            if (movementRecoveryAttempts >= 5) {
-                movement = null;
-                clearMovement(client);
-                return;
-            }
-        }
-        driveToward(client, player, new Vec3(target.x(), target.y() + 1.5D, target.z()), distance > 6.0D);
     }
 
-    private void setMovement(MovementTarget target, LocalPlayer player) {
+    private boolean setMovement(MovementTarget target, LocalPlayer player) {
         movement = target;
-        movementProgressPosition = player.position();
-        movementNoProgressTicks = 0;
-        movementDetourTicks = 0;
-        movementRecoveryAttempts = 0;
-    }
-
-    private void driveToward(Minecraft client, LocalPlayer player, Vec3 target, boolean sprint) {
-        clearMovement(client);
-        lookAt(player, target.x, target.y, target.z);
-        double dx = target.x - player.getX();
-        double dz = target.z - player.getZ();
-        double length = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
-        double forwardX = dx / length;
-        double forwardZ = dz / length;
-        AABB forward = player.getBoundingBox().move(forwardX * 0.55D, 0.0D, forwardZ * 0.55D);
-        boolean clearAhead = client.level.noCollision(player, forward);
-        boolean supportedAhead = hasSafeLandingBelow(client, player, forward);
-        if ((!clearAhead || !supportedAhead || player.horizontalCollision) && movementDetourTicks <= 0) {
-            boolean headRoom = client.level.noCollision(player, forward.move(0.0D, 1.0D, 0.0D));
-            if (!clearAhead && headRoom && player.onGround()) {
-                client.options.keyUp.setDown(true);
-                client.options.keyJump.setDown(true);
-                return;
-            }
-            movementDetourTicks = 24;
-            movementDetourDirection = chooseDetourDirection(client, player, forwardX, forwardZ);
-        }
-        client.options.keyUp.setDown(true);
-        client.options.keySprint.setDown(sprint && clearAhead && supportedAhead && movementDetourTicks <= 0);
-        if (movementDetourTicks > 0) {
-            if (movementDetourDirection < 0) client.options.keyLeft.setDown(true);
-            else client.options.keyRight.setDown(true);
-            client.options.keyJump.setDown(player.horizontalCollision && player.onGround());
-            movementDetourTicks--;
-        }
-    }
-
-    private int chooseDetourDirection(Minecraft client, LocalPlayer player, double forwardX, double forwardZ) {
-        double leftX = -forwardZ;
-        double leftZ = forwardX;
-        AABB left = player.getBoundingBox().move(forwardX * 0.25D + leftX * 0.7D, 0.0D, forwardZ * 0.25D + leftZ * 0.7D);
-        AABB right = player.getBoundingBox().move(forwardX * 0.25D - leftX * 0.7D, 0.0D, forwardZ * 0.25D - leftZ * 0.7D);
-        boolean leftSafe = client.level.noCollision(player, left) && hasSafeLandingBelow(client, player, left);
-        boolean rightSafe = client.level.noCollision(player, right) && hasSafeLandingBelow(client, player, right);
-        if (leftSafe != rightSafe) return leftSafe ? -1 : 1;
-        return movementDetourDirection == 0 ? 1 : -movementDetourDirection;
-    }
-
-    private static boolean hasSafeLandingBelow(Minecraft client, LocalPlayer player, AABB projected) {
-        return !client.level.noCollision(player, projected.move(0.0D, -0.7D, 0.0D))
-            || !client.level.noCollision(player, projected.move(0.0D, -1.7D, 0.0D));
+        movementNavigator.release(Minecraft.getInstance());
+        double dx = target.x() - player.getX();
+        double dz = target.z() - player.getZ();
+        double distance = Math.sqrt(dx * dx + dz * dz);
+        boolean routed = movementNavigator.drive(
+            Minecraft.getInstance(), player, new Vec3(target.x(), target.y(), target.z()),
+            target.stopDistance(), distance > 6.0D, tick
+        );
+        if (!routed) movement = null;
+        return routed;
     }
 
     private static void clearMovement(Minecraft client) {
@@ -630,6 +798,13 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         JsonObject event = worldStateEncoder.encode(client, autonomyEnabled || pendingSurvivalAction != null ? survival : null);
         event.addProperty("type", "state");
         event.addProperty("activePrimitive", activeTaskType());
+        event.addProperty("navigationStatus", !shelter.activeType().isEmpty()
+            ? shelter.navigationStatus()
+            : !primitives.activeType().isEmpty()
+                ? primitives.navigationStatus()
+                : !advanced.activeType().isEmpty()
+                    ? advanced.navigationStatus()
+                : movement == null ? "idle" : movementNavigator.status());
         event.addProperty("timeOfDay", client.level.getOverworldClockTime());
 
         ShelterController.HomeSnapshot home = shelter.homeSnapshot();
@@ -655,6 +830,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             nearby.addProperty("name", candidate.getGameProfile().name());
             nearby.addProperty("uuid", candidate.getUUID().toString());
             nearby.addProperty("distance", distance);
+            nearby.addProperty("health", candidate.getHealth());
+            JsonObject candidatePosition = new JsonObject();
+            candidatePosition.addProperty("x", candidate.getX());
+            candidatePosition.addProperty("y", candidate.getY());
+            candidatePosition.addProperty("z", candidate.getZ());
+            nearby.add("position", candidatePosition);
             JsonObject pointed = playerPointedBlock(client, candidate);
             if (pointed != null) nearby.add("lookingAtBlock", pointed);
             nearbyPlayers.add(nearby);

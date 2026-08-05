@@ -108,8 +108,34 @@ pre { min-height: 250px; max-height: 420px; margin: 0; padding: 15px; overflow: 
 .memory-grid strong { margin-top: 6px; font-size: 23px; }
 .memory-view { margin-top: 18px; }
 .link-button { display: inline-flex; align-items: center; text-decoration: none; }
+.central-chat-panel { background: linear-gradient(145deg, #fffdf9, #fff3e4); }
+.central-chat-toolbar { margin-bottom: 14px; display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }
+.central-chat-toolbar > label:first-child { width: min(260px, 100%); }
+.central-chat-toolbar .muted { margin-left: auto; padding-bottom: 10px; }
+.central-chat-layout { min-height: 520px; display: grid; grid-template-columns: minmax(0, 1fr) 270px; gap: 14px; }
+.central-chat-timeline { max-height: 680px; overflow: auto; padding: 18px; border: 1px solid #e9cda9; border-radius: 14px; background: rgba(255,255,255,.72); scroll-behavior: smooth; }
+.central-chat-empty { margin: 0; padding: 100px 20px; color: var(--muted); text-align: center; }
+.timeline-event { width: min(82%, 760px); margin-bottom: 13px; padding: 12px 14px; border: 1px solid #ead2b5; border-radius: 13px 13px 13px 4px; background: #fff9f1; box-shadow: 0 6px 18px rgba(132,77,24,.05); }
+.timeline-event.player { margin-left: auto; border-radius: 13px 13px 4px 13px; border-color: #e7ae73; background: #ffead0; }
+.timeline-event.bot { border-color: #edc28e; background: #fff4e5; }
+.timeline-event.diagnostic { width: 100%; border-style: dashed; background: #fffdf9; }
+.timeline-event.error { border-color: #d96654; background: #fff0ed; }
+.timeline-event.warning { border-color: #d79a4f; background: #fff6df; }
+.timeline-event.success { border-color: #e7a05c; background: #fff7e9; }
+.timeline-meta { margin-bottom: 7px; display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 10px; }
+.timeline-meta strong { color: var(--text); font-size: 11px; }
+.timeline-event p { margin: 0; line-height: 1.62; white-space: pre-wrap; word-break: break-word; }
+.timeline-event details { margin-top: 9px; }
+.timeline-event details summary { color: #b66428; font-size: 11px; }
+.timeline-event details pre { min-height: 0; max-height: 300px; margin-top: 8px; font-size: 10px; }
+.central-task-panel { padding: 16px; border: 1px solid #efd1ad; border-radius: 14px; background: #fff8ef; }
+.central-task-panel > p { margin-top: 18px; font-size: 10px; line-height: 1.65; }
+.central-task-summary { display: grid; gap: 8px; }
+.task-pill { padding: 10px; border-radius: 9px; background: #fff; font-size: 11px; line-height: 1.5; }
+.task-pill strong, .task-pill span { display: block; }
+.task-pill span { margin-top: 3px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
 #toast { position: fixed; right: 24px; bottom: 24px; z-index: 20; max-width: min(420px, calc(100vw - 48px)); padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; color: #fff; background: #c7762d; box-shadow: var(--shadow); opacity: 0; transform: translateY(10px); pointer-events: none; transition: .2s; }
 #toast.show { opacity: 1; transform: translateY(0); }
 #toast.error { border-color: #a74437; background: #b84f42; }
-@media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; display: flex; overflow-x: auto; } .sidebar a { white-space: nowrap; } .status-grid, .world-strip { grid-template-columns: repeat(2, 1fr); } .form-grid.three, .policy-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .coordinate-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 1050px) { .layout { grid-template-columns: 1fr; } .sidebar { position: static; display: flex; overflow-x: auto; } .sidebar a { white-space: nowrap; } .status-grid, .world-strip { grid-template-columns: repeat(2, 1fr); } .form-grid.three, .policy-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .coordinate-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } .central-chat-layout { grid-template-columns: 1fr; } }
 @media (max-width: 680px) { .topbar { align-items: flex-start; padding: 14px 16px; } .save-state, #reloadButton { display: none; } .layout { padding: 12px; gap: 12px; } .panel { padding: 20px 16px; border-radius: 14px; } .status-grid, .world-strip, .form-grid.two, .form-grid.three, .policy-grid, .log-grid, .mod-list, .memory-grid, .skin-layout, .autonomy-groups, .coordinate-grid { grid-template-columns: 1fr; } .span-two, .autonomy-capabilities { grid-column: span 1; } .section-heading, .autonomy-summary, .development-zone-heading { display: grid; grid-template-columns: 1fr; } }

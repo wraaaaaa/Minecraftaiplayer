@@ -167,6 +167,7 @@ public final class ShelterController {
     private enum MaterialStatus { READY, WAITING, MISSING, INVALID_MENU }
 
     private final ArrayDeque<TaskResult> results = new ArrayDeque<>();
+    private final LocalPathNavigator navigator = new LocalPathNavigator();
     private final Path homeFile;
     private final boolean homePersistenceConfigured;
     private String persistenceIssue;
@@ -266,6 +267,10 @@ public final class ShelterController {
         return active == null ? "" : active.type;
     }
 
+    public String navigationStatus() {
+        return navigator.status();
+    }
+
     public void setApprovedZone(String dimension, BlockPos min, BlockPos max) {
         approvedZone = new ApprovedZone(dimension, min, max);
     }
@@ -299,8 +304,20 @@ public final class ShelterController {
     private BuildTask createBuildTask(String id, JsonObject action, Minecraft client) {
         ApprovedZone zone = approvedZone;
         if (zone == null) {
-            results.add(new TaskResult(id, false, "refused: build_shelter requires an explicit approved AABB"));
-            return null;
+            boolean verifiedWilderness = action.has("verifiedWilderness")
+                && action.get("verifiedWilderness").isJsonPrimitive()
+                && action.get("verifiedWilderness").getAsBoolean();
+            WildernessGuard.Assessment assessment = WildernessGuard.assess(
+                client, client.player.blockPosition(), WildernessGuard.DEFAULT_SCAN_RADIUS,
+                minimumPlayerDistance, null
+            );
+            if (!verifiedWilderness || !assessment.allowed()) {
+                results.add(new TaskResult(id, false, "refused: build_shelter requires an explicit approved AABB or verified wilderness: "
+                    + String.join(",", assessment.reasons())));
+                return null;
+            }
+            PrimitiveTaskController.ApprovedZone workZone = WildernessGuard.workZone(client, client.player.blockPosition(), 8, 8);
+            zone = new ApprovedZone(workZone.dimension(), workZone.min(), workZone.max());
         }
         String dimension = dimensionId(client);
         if (!zone.dimension().equals(dimension)) {
@@ -493,7 +510,7 @@ public final class ShelterController {
                     return;
                 }
                 if (outcome == MovementOutcome.BLOCKED) {
-                    finish(client, this, false, "no conservative direct step to shelter interior" + progressSuffix());
+                    finish(client, this, false, "no collision-safe loaded route to shelter interior" + progressSuffix());
                     return;
                 }
                 checkMovementProgress(client, player, this, site.home());
@@ -638,6 +655,7 @@ public final class ShelterController {
             if (expected) {
                 stableTicks++;
                 if (stableTicks >= PLACEMENT_CONFIRM_TICKS) {
+                    OwnedBlockRegistry.registerPlacedStructure(client, target, blockId(observed));
                     verifiedPlacements += placement.kind() == PlacementKind.DOOR ? 2 : 1;
                     switch (placement.kind()) {
                         case DOOR, LIGHT -> fixtureStep++;
@@ -813,7 +831,7 @@ public final class ShelterController {
             BlockPos waypoint = target.waypoints().get(Math.min(waypointIndex, target.waypoints().size() - 1));
             MovementOutcome outcome = moveConservatively(client, player, waypoint);
             if (outcome == MovementOutcome.BLOCKED) {
-                finish(client, this, false, "no conservative direct path to waypoint " + waypoint + progressSuffix());
+                finish(client, this, false, "no collision-safe loaded route to waypoint " + waypoint + progressSuffix());
                 return;
             }
             if (outcome == MovementOutcome.MOVING) {
@@ -910,7 +928,7 @@ public final class ShelterController {
                 BlockPos outside = target.waypoints().get(0);
                 MovementOutcome outcome = moveConservatively(client, player, outside);
                 if (outcome == MovementOutcome.BLOCKED) {
-                    finish(client, this, false, "no conservative direct path to recorded home entrance"
+                    finish(client, this, false, "no collision-safe loaded route to recorded home entrance"
                         + progressSuffix());
                     return;
                 }
@@ -960,7 +978,7 @@ public final class ShelterController {
             if (homePhase == HomePhase.MOVE_INSIDE) {
                 MovementOutcome outcome = moveConservatively(client, player, target.goal());
                 if (outcome == MovementOutcome.BLOCKED) {
-                    finish(client, this, false, "open recorded door did not provide a conservative path inside"
+                    finish(client, this, false, "open recorded door did not provide a collision-safe path inside"
                         + progressSuffix());
                     return;
                 }
@@ -1567,43 +1585,13 @@ public final class ShelterController {
 
     private MovementOutcome moveConservatively(Minecraft client, LocalPlayer player, BlockPos target) {
         if (arrived(player, target)) {
-            clearMovement(client);
+            navigator.release(client);
             return MovementOutcome.ARRIVED;
         }
-        double dx = target.getX() + 0.5D - player.getX();
-        double dz = target.getZ() + 0.5D - player.getZ();
-        double length = Math.sqrt(dx * dx + dz * dz);
-        if (length < 0.001D) {
-            clearMovement(client);
-            return MovementOutcome.BLOCKED;
-        }
-        double stepX = dx / length * 0.55D;
-        double stepZ = dz / length * 0.55D;
-        AABB future = player.getBoundingBox().move(stepX, 0.0D, stepZ);
-        BlockPos projected = BlockPos.containing(player.getX() + stepX, player.getY(), player.getZ() + stepZ);
-        boolean levelStep = isPhysicalStandPosition(client, player, projected)
-            && client.level.noCollision(player, future);
-        BlockPos stepUp = projected.above();
-        boolean canStepUp = player.onGround() && isPhysicalStandPosition(client, player, stepUp)
-            && client.level.noCollision(player, future.move(0.0D, 1.0D, 0.0D));
-        if (!levelStep && !canStepUp) {
-            clearMovement(client);
-            return MovementOutcome.BLOCKED;
-        }
-        if (dangerNear(client, levelStep ? projected : stepUp)) {
-            clearMovement(client);
-            return MovementOutcome.BLOCKED;
-        }
-
-        lookAt(player, new Vec3(target.getX() + 0.5D, player.getEyeY(), target.getZ() + 0.5D));
-        client.options.keyDown.setDown(false);
-        client.options.keyLeft.setDown(false);
-        client.options.keyRight.setDown(false);
-        client.options.keySprint.setDown(false);
-        client.options.keyShift.setDown(false);
-        client.options.keyUp.setDown(true);
-        client.options.keyJump.setDown(canStepUp && (player.horizontalCollision || !levelStep));
-        return MovementOutcome.MOVING;
+        Vec3 goal = new Vec3(target.getX() + 0.5D, target.getY(), target.getZ() + 0.5D);
+        return navigator.drive(client, player, goal, ARRIVAL_DISTANCE, false, tick)
+            ? MovementOutcome.MOVING
+            : MovementOutcome.BLOCKED;
     }
 
     private void checkMovementProgress(
@@ -1763,6 +1751,7 @@ public final class ShelterController {
 
     private void finish(Minecraft client, ShelterTask task, boolean ok, String detail) {
         if (active != task) return;
+        navigator.release(client);
         clearMovement(client);
         active = null;
         results.add(new TaskResult(task.id, ok, detail == null || detail.isBlank() ? "no_detail" : detail));
