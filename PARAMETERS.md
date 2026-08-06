@@ -11,9 +11,10 @@ MINECRAFT_LOGIN_PASSWORD=EasyAuth登录密码
 DEEPSEEK_API_KEY=DeepSeek密钥
 ARK_API_KEY=火山方舟密钥
 OPENAI_API_KEY=OpenAI密钥
+MIMO_API_KEY=小米MiMo密钥
 ```
 
-`config/bot.json` 的 `model.apiKeyEnv` 决定当前模型读取上述哪个变量；`easyAuth.passwordEnv` 决定 EasyAuth 读取哪个变量。WebUI 只返回“已配置/未配置”，不会把密钥内容发回浏览器。页面里的“清空本机全部密钥”会清空四项；结束测试后还应确认 `.env` 不存在或全部为空。已经在聊天中发送过的 Key 无法由本项目删除，应到供应商控制台撤销并换新。
+`config/bot.json` 的 `model.apiKeyEnv` 决定当前模型读取上述哪个变量；`easyAuth.passwordEnv` 决定 EasyAuth 读取哪个变量。WebUI 只返回“已配置/未配置”，不会把密钥内容发回浏览器。页面里的“清空本机全部密钥”会清空五项；结束测试后还应确认 `.env` 不存在或全部为空。已经在聊天中发送过的 Key 无法由本项目删除，应到供应商控制台撤销并换新。
 
 `data/bridge-token.txt` 是每次启动控制器时自动生成的本机桥会话令牌，Java 客户端必须持有相同令牌才会被 Node 接受。它不需要手工填写，位于被 Git 忽略的 `data` 目录；模型密钥只留在 Node 进程，启动 Java 前会显式从 Java 子进程环境中移除。
 
@@ -57,15 +58,29 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 - DeepSeek：`provider:"deepseek"`、`baseUrl:"https://api.deepseek.com"`、`apiKeyEnv:"DEEPSEEK_API_KEY"`。
 - 火山方舟/豆包 Seed 2.1 Pro：`provider:"volcengine"`，`model` 填方舟端点/模型 ID，`apiKeyEnv:"ARK_API_KEY"`，`baseUrl` 填方舟提供的 OpenAI 兼容地址。
 - OpenAI：`provider:"openai"`、`apiKeyEnv:"OPENAI_API_KEY"`，使用 Responses API。旗舰模型填 `gpt-5.6-sol`，也可用会路由到 Sol 的 `gpt-5.6` 别名；`gpt-5.6-terra` 是平衡档，`gpt-5.6-luna` 面向高吞吐。以账号实际权限和 [OpenAI 官方 GPT-5.6 指南](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6) 为准。
+- 小米 MiMo：`provider:"mimo"`、`model:"mimo-v2.5"`（或 `mimo-v2.5-pro`）、`apiKeyEnv:"MIMO_API_KEY"`、`baseUrl:"https://api.xiaomimimo.com/v1"`。使用官方 OpenAI 兼容 Chat Completions；模型列表可通过 `/models` 核对。
 
 `reasoningEffort` 可设：`none`、`low`、`medium`、`high`、`xhigh`、`max`。从左到右通常更慢、更贵。供应商不支持某个粒度时适配器会映射到其可用档位；实际请求档位写入日志。
 
 - `timeoutMs`：单次 API 请求超时，默认 `120000` 毫秒，允许 `1000-600000`。
-- `maxOutputTokens`：单次模型最大生成预算，默认 `4096`，允许 `128-131072`。DeepSeek/豆包映射为 `max_tokens`，OpenAI Responses 映射为 `max_output_tokens`。游戏决策不应盲目调大，否则会增加延迟和费用。DeepSeek JSON 模式若返回空 `content`，程序会仅用非思考模式重试一次；该兼容无需新增参数，也不会无限重试。
-- `agentMaxSteps`：一个玩家任务最多执行的原子工具次数，默认 `48`，允许 `1-128`。每一步都会把真实结果和新世界状态交回模型再规划；它不是预写动作列表长度。
-- `autonomousAgentMaxSteps`：一次空闲自主发展最多执行的原子工具次数，默认 `16`，允许 `1-64`。玩家新消息会抢占并停止空闲循环。
+- `maxOutputTokens`：普通聊天、上下文压缩等单次最大生成预算，默认 `4096`，允许 `128-131072`。DeepSeek/豆包映射为 `max_tokens`，MiMo 映射为 `max_completion_tokens`，OpenAI Responses 映射为 `max_output_tokens`。
+- `agentMaxSteps`：一个玩家任务最多接受的模型工具调用，默认 `12`，允许 `1-128`。连续技能内部可执行许多方块/移动 Tick，但不再次调用模型。
+- `autonomousAgentMaxSteps`：一次空闲自主发展最多工具步骤，默认 `8`，允许 `1-64`。玩家新消息会抢占并停止空闲循环。
+- `agentMaxApiCalls`：每玩家任务模型 API 次数硬上限，默认 `8`，允许 `1-32`。观察调用同样占 API 次数。
+- `agentMaxTaskTokens`：任务累计输入+输出硬上限，默认 `160000`，允许 `10000-2000000`。供应商返回 `usage` 时使用实际值；未返回时使用保守估算。发送下一轮前会把估算输入和完整 `agentMaxOutputTokens` 一起预留，预计可能越界时不发送。
+- `agentMaxInputTokensPerCall`：单次请求发送前估算上限，默认 `48000`，允许 `4000-1000000`。中文按接近一字一 Token 估算，避免沿用 ASCII 的四字符估值而低估。
+- `agentMaxOutputTokens`：Agent 单轮工具决策输出，默认 `1024`，允许 `128-16384`。
+- `agentFollowupReasoningEffort`：第一次规划仍使用 `reasoningEffort`；工具成功后的续轮默认 `none`，可改成所有受支持强度。失败、新威胁等仍可由模型结合真实结果重规划，但不再为每个重复动作开启长思考。
 
-DeepSeek 和豆包使用 Chat Completions `tools`；OpenAI 使用 Responses API 的 function calling。DeepSeek 开启思考后，适配器会把上一轮助手消息中的 `reasoning_content` 与 `tool_calls` 原样留在会话，再追加工具结果，否则供应商会拒绝下一轮。隐藏推理不写入诊断或游戏聊天。OpenAI 后续轮使用 `previous_response_id` 与 `function_call_output` 保持状态。
+DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Responses API function calling。DeepSeek 开启思考后，适配器会把上一轮助手消息中的 `reasoning_content` 与 `tool_calls` 原样留在会话，再追加工具结果，否则供应商会拒绝下一轮。隐藏推理不写入诊断或游戏聊天。OpenAI 后续轮使用 `previous_response_id` 与 `function_call_output` 保持状态。
+
+### 多模态参数
+
+`model.multimodal` 包含：`autoDetect`、`visionEnabled`、`audioEnabled`、`onlineResearchEnabled` 和 `sensoryDirectory`。默认全部开启并使用 `data/sensory`，但只有检测到模型具备对应能力才真正发送。DeepSeek 固定为纯文本；MiMo 2.5/2.5 Pro 自动识别为视觉、音频、视频理解和攻略搜索模型。未知模型可把 `autoDetect:false` 后用三个开关人工声明，修改后必须用 WebUI 最小测试确认。
+
+- 视觉：优先读取 15 秒内、最大 1.5 MiB 的 `data/sensory/latest.png`；没有时由 `WorldState` 生成 128×128 PNG 语义俯视图。只在 Agent 首轮发送一次。
+- 语音：读取 `data/sensory/latest-audio.json`，格式为 `{"capturedAt":"ISO时间","mimeType":"audio/wav","dataBase64":"..."}`；只接受 15 秒内、最大 2 MiB 的 wav/mpeg/mp3/ogg/webm/flac。Simple Voice Chat 当前尚无生产帧写入桥，所以默认显示 `unavailable`，不会伪造听觉。
+- 攻略搜索：只有模型能力与开关同时为真时向 Agent 暴露 `search_game_guide`；实际使用 `agentWorkspace.selfImprovement.researchProvider` 的百度/SearXNG，查询会脱敏、结果限长并在当前任务缓存。
 
 ## 5. 人设、OpenClaw 风格提示词与自我改进
 
@@ -80,7 +95,7 @@ DeepSeek 和豆包使用 Chat Completions `tools`；OpenAI 使用 Responses API 
 - `rules.md`：解释硬规则与权限边界，优先级最高；真正不可绕过的限制仍在策略、SecretGuard 和 Fabric。
 - `IDENTITY.md`：Bot 名称、类型、职责和输出基线；已写可修改示例。
 - `SOUL.md`：核心人设、价值观、语气和判断风格；这是主要人设文件，已写完整示例。
-- `TOOLS.md`：Agent 循环、原子接口、后置条件和失败处理；运行时 JSON Schema 才是参数真值。包含仅允许程序写入的 `AI_LEARNED` 托管段。
+- `TOOLS.md`：Agent 循环、原子接口、连续技能、多模态感知、后置条件和失败处理；运行时 JSON Schema 才是参数真值。包含仅允许程序写入的 `AI_LEARNED` 托管段。
 - `MEMORY.md`：记忆召回、分玩家隔离、摘要、压缩和过期规则；不存放秘密。
 - `USER.md`：当前玩家的兴趣、表达方式、协作偏好和稳定事实；模型只加载正在对话玩家对应的一份。
 
@@ -129,7 +144,7 @@ DeepSeek 和豆包使用 Chat Completions `tools`；OpenAI 使用 Responses API 
 
 游戏聊天出口固定为“玩家交互通道”：自然陪聊、接受/完成确认和一句简短拒绝。程序会拦截 JSON、代码块、动作内部名、`minecraft:` 命名空间 ID、工具/函数调用术语和接口参数；任务失败统一提示到 WebUI 查看，不把步骤号或底层错误广播给服务器玩家。完整诊断自动写入 `data/diagnostics.json`，WebUI“总聊天”每 4 秒独立刷新，筛选控件不会把设置页标成“未保存”。
 
-空闲发展与玩家任务都使用同一个原生工具调用循环：模型每轮只调用一个原子接口，收到 Fabric 的真实结果和新观察后再决定下一步。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版确定性规划器与高层动作契约只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包和 OpenAI 默认不会进入。
+空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
 
 行为准则另存 `config/behavior-rules.json`，它是模型输出之后的程序级硬限制，不应只依赖提示词。
 
@@ -142,7 +157,7 @@ DeepSeek 和豆包使用 Chat Completions `tools`；OpenAI 使用 Responses API 
 
 `memory.json` 仍是便于灾难恢复的统一原始记忆：`players` 按 UUID/名称隔离，`events` 保存消息、回复、游戏事件和长期事实，`globalSummary` 保存全局摘要。事件和合规 `remember` 立即原子写入并先生成 `.bak`。
 
-当提示词估算接近 `contextBudgetChars × compressionTriggerRatio`，`ContextCompressor` 使用当前模型总结当前玩家较旧事件，更新 `conversationSummary`、`globalSummary` 和该玩家 `USER.md` 的托管画像段，再按事件 ID 原子移除已压缩内容；最近 `retainRecentEvents` 条不删除。模型失败或结果触发 SecretGuard 时取消压缩，原事件不丢失。WebUI 可查看/编辑玩家画像，并导出记忆和经验；迁移时建议保留整个 `data` 文件夹。
+当真实记忆提示估算接近 `contextBudgetChars × compressionTriggerRatio`，`ContextCompressor` 使用当前模型总结较旧事件，更新 `conversationSummary`、`globalSummary` 和对应 `USER.md`，再按事件 ID 原子移除已压缩内容。世界快照不计入记忆压力；压缩在玩家任务离开关键路径后延迟执行，格式错误只写警告，绝不再让当前游戏任务失败。最近 `retainRecentEvents` 条不删除；模型失败或触发 SecretGuard 时原事件不丢失。
 
 ## 7. 持久任务、自主生存与动态环境安全
 

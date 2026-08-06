@@ -150,6 +150,26 @@ function renderCentralChat(snapshot) {
     item.append(status, requestText)
     taskSummary.append(item)
   }
+  const modelTurns = (snapshot.diagnostics?.events || []).filter(event => event.metadata?.source === 'native-tool-loop' && Number(event.metadata?.apiCall) > 0)
+  const recentCutoff = Date.now() - 24 * 60 * 60 * 1000
+  const recentTurns = modelTurns.filter(event => Date.parse(event.at) >= recentCutoff)
+  const lastTaskId = modelTurns.at(-1)?.taskId
+  const lastTaskTurns = lastTaskId ? modelTurns.filter(event => event.taskId === lastTaskId) : []
+  const sum = (events, key) => events.reduce((total, event) => total + Number(event.metadata?.[key] || 0), 0)
+  const costSummary = $('centralCostSummary')
+  costSummary.replaceChildren()
+  if (!modelTurns.length) costSummary.textContent = '暂无模型轮次'
+  else {
+    for (const [titleText, detailText] of [
+      ['最近任务', `${lastTaskTurns.length} 次 API · ${sum(lastTaskTurns, 'totalTokens').toLocaleString()} Token · ${sum(lastTaskTurns, 'elapsedMs').toLocaleString()} ms`],
+      ['最近 24 小时', `${recentTurns.length} 次 API · ${sum(recentTurns, 'totalTokens').toLocaleString()} Token`]
+    ]) {
+      const item = document.createElement('div'); item.className = 'task-pill'
+      const title = document.createElement('strong'); title.textContent = titleText
+      const detail = document.createElement('span'); detail.textContent = detailText
+      item.append(title, detail); costSummary.append(item)
+    }
+  }
 }
 
 function renderStatus(snapshot) {
@@ -234,7 +254,10 @@ function populate(snapshot) {
   setNumber('connectTimeout', c.server.connectTimeoutMs); setNumber('reconnectDelay', c.server.reconnectDelayMs); setChecked('autoRespawn', c.server.autoRespawn ?? true); setNumber('respawnDelay', c.server.respawnDelayMs ?? 3000); setNumber('actionTimeout', c.server.actionTimeoutMs)
   set('bridgeHost', c.server.bridgeHost); setNumber('bridgePort', c.server.bridgePort)
   setChecked('easyAuthEnabled', c.easyAuth.enabled); setChecked('registerIfNeeded', c.easyAuth.registerIfNeeded); set('passwordEnv', c.easyAuth.passwordEnv); setNumber('loginDelay', c.easyAuth.loginDelayMs)
-  set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096); setNumber('agentMaxSteps', c.model.agentMaxSteps ?? 48); setNumber('autonomousAgentMaxSteps', c.model.autonomousAgentMaxSteps ?? 16)
+  set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096); setNumber('agentMaxSteps', c.model.agentMaxSteps ?? 12); setNumber('autonomousAgentMaxSteps', c.model.autonomousAgentMaxSteps ?? 8)
+  setNumber('agentMaxApiCalls', c.model.agentMaxApiCalls ?? 8); setNumber('agentMaxTaskTokens', c.model.agentMaxTaskTokens ?? 160000); setNumber('agentMaxInputTokensPerCall', c.model.agentMaxInputTokensPerCall ?? 48000); setNumber('agentMaxOutputTokens', c.model.agentMaxOutputTokens ?? 1024); set('agentFollowupReasoningEffort', c.model.agentFollowupReasoningEffort ?? 'none')
+  const multimodal = { autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory', ...(c.model.multimodal || {}) }
+  setChecked('multimodalAutoDetect', multimodal.autoDetect); setChecked('visionEnabled', multimodal.visionEnabled); setChecked('audioEnabled', multimodal.audioEnabled); setChecked('onlineResearchEnabled', multimodal.onlineResearchEnabled); set('sensoryDirectory', multimodal.sensoryDirectory)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
   setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
@@ -263,7 +286,7 @@ function collect() {
   if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Bot 游戏名只能使用 3-16 位英文字母、数字或下划线')
   Object.assign(c.server, { connectionMode: value('connectionMode'), adapter: value('serverAdapter'), host: value('serverHost').trim(), port: number('serverPort'), lanDiscoveryTimeoutMs: number('lanDiscoveryTimeout'), version: value('serverVersion').trim(), username, auth: value('serverAuth'), connectTimeoutMs: number('connectTimeout'), reconnectDelayMs: number('reconnectDelay'), autoRespawn: checked('autoRespawn'), respawnDelayMs: number('respawnDelay'), bridgeHost: value('bridgeHost').trim(), bridgePort: number('bridgePort'), actionTimeoutMs: number('actionTimeout') })
   Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
-  Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens'), agentMaxSteps: number('agentMaxSteps'), autonomousAgentMaxSteps: number('autonomousAgentMaxSteps') })
+  Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens'), agentMaxSteps: number('agentMaxSteps'), autonomousAgentMaxSteps: number('autonomousAgentMaxSteps'), agentMaxApiCalls: number('agentMaxApiCalls'), agentMaxTaskTokens: number('agentMaxTaskTokens'), agentMaxInputTokensPerCall: number('agentMaxInputTokensPerCall'), agentMaxOutputTokens: number('agentMaxOutputTokens'), agentFollowupReasoningEffort: value('agentFollowupReasoningEffort'), multimodal: { autoDetect: checked('multimodalAutoDetect'), visionEnabled: checked('visionEnabled'), audioEnabled: checked('audioEnabled'), onlineResearchEnabled: checked('onlineResearchEnabled'), sensoryDirectory: value('sensoryDirectory').trim() } })
   Object.assign(c.chat, { requireMention: checked('requireMention'), replyPrefix: value('replyPrefix'), cooldownMs: number('cooldownMs'), proactiveEnabled: checked('proactiveEnabled'), proactiveIdleMs: number('proactiveIdleMs'), proactiveMinIntervalMs: number('proactiveMinIntervalMs') })
   const ownerName = value('ownerName').trim()
   if (!/^[A-Za-z0-9_]{3,16}$/.test(ownerName)) throw new Error('最高优先玩家名只能使用 3-16 位英文字母、数字或下划线')
@@ -320,9 +343,9 @@ async function savePlayerProfile() {
 
 async function saveSecrets() {
   try {
-    const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey') }
+    const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey'), MIMO_API_KEY: value('mimoKey') }
     await request('/api/secrets', { method: 'PUT', body: JSON.stringify(secrets) })
-    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey']) set(id, '')
+    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey', 'mimoKey']) set(id, '')
     toast('密钥已保存到本机 .env，不会在页面中回显')
     await refreshStatus()
   } catch (error) { toast(error.message, true) }
@@ -405,10 +428,21 @@ $('startButton').addEventListener('click', () => action('/api/runtime/start', 'B
 $('stopButton').addEventListener('click', () => action('/api/runtime/stop', 'Bot 已停止'))
 $('restartButton').addEventListener('click', () => action('/api/runtime/restart', 'Bot 已重新启动'))
 $('syncModsButton').addEventListener('click', async () => { try { if (dirty) await save(); await request('/api/mods/sync', { method: 'POST', body: '{}' }); toast('服务器模组同步完成'); await load() } catch (error) { toast(error.message, true) } })
-$('testModelButton').addEventListener('click', async () => { try { $('modelTestResult').textContent = '正在进行一次最小请求…'; const result = await request('/api/model/test', { method: 'POST', body: '{}' }); $('modelTestResult').textContent = `${result.model} · ${result.elapsedMs}ms · ${result.effectiveEffort}`; toast('模型接口测试成功') } catch (error) { $('modelTestResult').textContent = ''; toast(error.message, true) } })
+$('testModelButton').addEventListener('click', async () => { try { $('modelTestResult').textContent = '正在进行一次最小请求…'; const result = await request('/api/model/test', { method: 'POST', body: '{}' }); $('modelTestResult').textContent = `${result.model} · ${result.elapsedMs}ms · ${result.effectiveEffort} · ${result.usage?.totalTokens ?? '未返回'} Token · 视觉${result.capabilities?.vision ? '开' : '关'}/语音${result.capabilities?.audio ? '开' : '关'}/搜索${result.capabilities?.webSearch ? '开' : '关'}`; toast('模型接口测试成功') } catch (error) { $('modelTestResult').textContent = ''; toast(error.message, true) } })
 $('refreshLogsButton').addEventListener('click', refreshStatus)
 $('refreshCentralChatButton').addEventListener('click', refreshCentralChat)
 $('centralChatFilter').addEventListener('change', () => renderCentralChat(state))
+$('modelProvider').addEventListener('change', () => {
+  const presets = {
+    deepseek: { model: 'deepseek-v4-flash', key: 'DEEPSEEK_API_KEY', url: 'https://api.deepseek.com' },
+    volcengine: { model: 'doubao-seed-2.1-pro', key: 'ARK_API_KEY', url: 'https://ark.cn-beijing.volces.com/api/v3' },
+    openai: { model: 'gpt-5.6-sol', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1' },
+    mimo: { model: 'mimo-v2.5', key: 'MIMO_API_KEY', url: 'https://api.xiaomimimo.com/v1' }
+  }
+  const preset = presets[value('modelProvider')]
+  if (!preset) return
+  set('modelName', preset.model); set('apiKeyEnv', preset.key); set('modelBaseUrl', preset.url); setDirty(true)
+})
 document.querySelectorAll('input:not(.ui-only), select:not(.ui-only), textarea:not(.ui-only)').forEach(control => control.addEventListener('input', () => setDirty(true)))
 document.querySelectorAll('.sidebar a').forEach(link => link.addEventListener('click', () => { document.querySelectorAll('.sidebar a').forEach(item => item.classList.remove('active')); link.classList.add('active') }))
 window.addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = '' } })

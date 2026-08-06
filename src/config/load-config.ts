@@ -63,10 +63,10 @@ export function validateConfig(config: BotConfig): void {
   requirePositiveInteger(config.server?.actionTimeoutMs, 'server.actionTimeoutMs')
   if (!['offline', 'microsoft'].includes(config.server.auth)) throw new Error('server.auth 只能是 offline 或 microsoft')
   requireString(config.model?.provider, 'model.provider')
-  if (!['deepseek', 'volcengine', 'openai'].includes(config.model.provider)) throw new Error('model.provider 只能是 deepseek、volcengine 或 openai')
+  if (!['deepseek', 'volcengine', 'openai', 'mimo'].includes(config.model.provider)) throw new Error('model.provider 只能是 deepseek、volcengine、openai 或 mimo')
   requireString(config.model?.model, 'model.model')
   requireString(config.model?.apiKeyEnv, 'model.apiKeyEnv')
-  if (!['DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY'].includes(config.model.apiKeyEnv)) throw new Error('model.apiKeyEnv 只能使用受支持的模型密钥环境变量')
+  if (!['DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY'].includes(config.model.apiKeyEnv)) throw new Error('model.apiKeyEnv 只能使用受支持的模型密钥环境变量')
   requireString(config.model?.baseUrl, 'model.baseUrl')
   const modelUrl = new URL(config.model.baseUrl)
   if (modelUrl.protocol !== 'https:' && !['127.0.0.1', 'localhost', '::1'].includes(modelUrl.hostname)) throw new Error('model.baseUrl 必须使用 HTTPS；仅本机测试地址可使用 HTTP')
@@ -79,6 +79,17 @@ export function validateConfig(config: BotConfig): void {
   }
   if (config.model.agentMaxSteps !== undefined && (!Number.isInteger(config.model.agentMaxSteps) || config.model.agentMaxSteps < 1 || config.model.agentMaxSteps > 128)) throw new Error('model.agentMaxSteps 必须是 1-128 的整数')
   if (config.model.autonomousAgentMaxSteps !== undefined && (!Number.isInteger(config.model.autonomousAgentMaxSteps) || config.model.autonomousAgentMaxSteps < 1 || config.model.autonomousAgentMaxSteps > 64)) throw new Error('model.autonomousAgentMaxSteps 必须是 1-64 的整数')
+  if (config.model.agentMaxApiCalls !== undefined && (!Number.isInteger(config.model.agentMaxApiCalls) || config.model.agentMaxApiCalls < 1 || config.model.agentMaxApiCalls > 32)) throw new Error('model.agentMaxApiCalls 必须是 1-32 的整数')
+  if (config.model.agentMaxTaskTokens !== undefined && (!Number.isInteger(config.model.agentMaxTaskTokens) || config.model.agentMaxTaskTokens < 10_000 || config.model.agentMaxTaskTokens > 2_000_000)) throw new Error('model.agentMaxTaskTokens 必须是 10000-2000000 的整数')
+  if (config.model.agentMaxInputTokensPerCall !== undefined && (!Number.isInteger(config.model.agentMaxInputTokensPerCall) || config.model.agentMaxInputTokensPerCall < 4_000 || config.model.agentMaxInputTokensPerCall > 1_000_000)) throw new Error('model.agentMaxInputTokensPerCall 必须是 4000-1000000 的整数')
+  if (config.model.agentMaxOutputTokens !== undefined && (!Number.isInteger(config.model.agentMaxOutputTokens) || config.model.agentMaxOutputTokens < 128 || config.model.agentMaxOutputTokens > 16_384)) throw new Error('model.agentMaxOutputTokens 必须是 128-16384 的整数')
+  if (config.model.agentFollowupReasoningEffort !== undefined && !VALID_EFFORTS.has(config.model.agentFollowupReasoningEffort)) throw new Error('model.agentFollowupReasoningEffort 无效')
+  if (config.model.multimodal !== undefined) {
+    for (const key of ['autoDetect', 'visionEnabled', 'audioEnabled', 'onlineResearchEnabled'] as const) {
+      if (typeof config.model.multimodal[key] !== 'boolean') throw new Error(`model.multimodal.${key} 必须是布尔值`)
+    }
+    requireString(config.model.multimodal.sensoryDirectory, 'model.multimodal.sensoryDirectory')
+  }
   requireString(config.storage?.memoryFile, 'storage.memoryFile')
   requireString(config.storage?.experienceFile, 'storage.experienceFile')
   if (config.storage.taskFile !== undefined) requireString(config.storage.taskFile, 'storage.taskFile')

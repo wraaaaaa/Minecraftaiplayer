@@ -30,8 +30,20 @@
     "reasoningEffort": "high",
     "timeoutMs": 120000,
     "maxOutputTokens": 4096,
-    "agentMaxSteps": 48,
-    "autonomousAgentMaxSteps": 16
+    "agentMaxSteps": 12,
+    "autonomousAgentMaxSteps": 8,
+    "agentMaxApiCalls": 8,
+    "agentMaxTaskTokens": 160000,
+    "agentMaxInputTokensPerCall": 48000,
+    "agentMaxOutputTokens": 1024,
+    "agentFollowupReasoningEffort": "none",
+    "multimodal": {
+      "autoDetect": true,
+      "visionEnabled": true,
+      "audioEnabled": true,
+      "onlineResearchEnabled": true,
+      "sensoryDirectory": "data/sensory"
+    }
   },
   "chat": {
     "requireMention": true,

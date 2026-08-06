@@ -75,7 +75,7 @@
         </div>
         <div class="central-chat-layout">
           <div id="centralChatTimeline" class="central-chat-timeline" aria-live="polite"><p class="central-chat-empty">暂无对话或诊断记录</p></div>
-          <aside class="central-task-panel"><h3>当前任务队列</h3><div id="centralTaskSummary" class="central-task-summary">暂无任务</div><p class="muted">失败详情只在本机保存；API Key、登录密码、令牌、服务器地址和项目绝对路径会在写入前脱敏。</p></aside>
+          <aside class="central-task-panel"><h3>当前任务队列</h3><div id="centralTaskSummary" class="central-task-summary">暂无任务</div><h3>模型消耗</h3><div id="centralCostSummary" class="central-task-summary">暂无模型轮次</div><p class="muted">失败详情只在本机保存；API Key、登录密码、令牌、服务器地址和项目绝对路径会在写入前脱敏。</p></aside>
         </div>
       </section>
 
@@ -109,18 +109,29 @@
       <section id="model" class="panel">
         <div class="section-heading"><div><p class="eyebrow">INTELLIGENCE</p><h2>大模型</h2></div><details><summary>推理强度说明</summary><p>强度越高通常思考更久、费用更高。DeepSeek 会把 low/medium/high 映射到 high，把 xhigh/max 映射到 max；none 会关闭思考。</p></details></div>
         <div class="form-grid three">
-          <label>供应商<select id="modelProvider"><option value="deepseek">DeepSeek</option><option value="volcengine">火山方舟 / 豆包</option><option value="openai">OpenAI</option></select></label>
+          <label>供应商<select id="modelProvider"><option value="deepseek">DeepSeek</option><option value="volcengine">火山方舟 / 豆包</option><option value="openai">OpenAI</option><option value="mimo">小米 MiMo</option></select></label>
           <label>模型或端点 ID<input id="modelName" type="text" placeholder="例如 gpt-5.6-sol；也可填任意账号可用 ID"></label>
           <label>推理强度<select id="reasoningEffort"><option>none</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select></label>
           <label class="span-two">API Base URL<input id="modelBaseUrl" type="url"></label>
           <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000" max="600000"><small>高推理建议 120000；超时会在游戏内明确提示。</small></label>
           <label>最大输出 Token<input id="maxOutputTokens" type="number" min="128" max="131072"><small>游戏决策建议 4096，防止模型长时间思考而卡住。</small></label>
-          <label>玩家任务最大工具步数<input id="agentMaxSteps" type="number" min="1" max="128"><small>每一步都会重新观察和调用模型；建议 48。</small></label>
-          <label>空闲发育每轮工具步数<input id="autonomousAgentMaxSteps" type="number" min="1" max="64"><small>每次空闲心跳的闭环预算；建议 16。</small></label>
+          <label>玩家任务最大工具步数<input id="agentMaxSteps" type="number" min="1" max="128"><small>连续技能内部不计逐方块步骤；建议 12。</small></label>
+          <label>空闲发育每轮工具步数<input id="autonomousAgentMaxSteps" type="number" min="1" max="64"><small>每次空闲心跳的闭环预算；建议 8。</small></label>
+          <label>每任务最多 API 次数<input id="agentMaxApiCalls" type="number" min="1" max="32"><small>硬上限；建议 8，避免逐动作失控调用。</small></label>
+          <label>每任务总 Token 上限<input id="agentMaxTaskTokens" type="number" min="10000" max="2000000"><small>输入与输出累计硬上限；建议 160000。</small></label>
+          <label>单次输入 Token 上限<input id="agentMaxInputTokensPerCall" type="number" min="4000" max="1000000"><small>发送前按中英文保守估算；建议 48000。</small></label>
+          <label>Agent 单轮输出 Token<input id="agentMaxOutputTokens" type="number" min="128" max="16384"><small>只限制游戏工具决策；建议 1024。</small></label>
+          <label>成功步骤后推理强度<select id="agentFollowupReasoningEffort"><option>none</option><option>low</option><option>medium</option><option>high</option><option>xhigh</option><option>max</option></select><small>首次策略仍使用上方强度；后续建议 none。</small></label>
           <label>密钥变量名<input id="apiKeyEnv" type="text"></label>
           <label>DeepSeek API Key<input id="deepseekKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
           <label>火山方舟 API Key<input id="arkKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
           <label>OpenAI API Key<input id="openaiKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+          <label>小米 MiMo API Key<input id="mimoKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+        </div>
+        <div class="subpanel">
+          <h3>多模态与攻略检索</h3>
+          <div class="toggle-row"><label class="switch"><input id="multimodalAutoDetect" type="checkbox"><span></span>按供应商和模型自动识别能力</label><label class="switch"><input id="visionEnabled" type="checkbox"><span></span>启用视觉</label><label class="switch"><input id="audioEnabled" type="checkbox"><span></span>启用语音输入</label><label class="switch"><input id="onlineResearchEnabled" type="checkbox"><span></span>允许联网搜索攻略</label></div>
+          <div class="form-grid three"><label>感知文件目录<input id="sensoryDirectory" type="text"><small>无摄像帧时自动生成附近方块/实体语义图；语音桥可写入 latest-audio.json。</small></label></div>
         </div>
         <div class="inline-actions"><button id="saveSecretsButton" class="button ghost">安全保存密钥</button><button id="clearSecretsButton" class="button danger">清空本机全部密钥</button><button id="testModelButton" class="button ghost">最小额度测试模型</button><span id="modelTestResult" class="muted"></span></div>
       </section>

@@ -35,12 +35,24 @@ npm test
 6. 修改 Java 桥后必须重新构建并把新 jar 复制到隔离客户端；只运行 TypeScript 构建不会更新游戏内代码。
 7. 正式推送前必须删除本地测试 API Key，并扫描当前工作树和 Git 历史。
 
-### 0.1 2026-08-05 最新交接增量（优先于历史记录）
+### 0.1 2026-08-07 紧急延迟/Token 重构（优先级最高）
+
+- 现场任务 `0e6f...`（公开文档只保留截断 ID）在约十分钟内进行了 48 次模型工具轮，只从 Y=69 挖到 Y=52，最后以 `agent_step_budget_exhausted:48` 结束。用户侧观察到接近五百万 Token。直接原因是旧版要求模型每挖一格重新决策、每轮重复完整工具表/大世界状态，并且将世界状态在用户目标和 Agent 上下文中发送了两次；4096 输出预算和每轮高推理又放大了耗时与费用。
+- 当前默认是“模型策略 Agent + 原子接口 + 连续运动技能”三层：模型根据自然语言和环境自行选择工具、参数、顺序和替代方案；`gather_resource`、`excavate_safely`、`craft_item`、`smelt_items`、`hunt_for`、`return_to_task_start` 等连续技能只负责逐 Tick 重复运动、安全检查和后置条件，不按聊天关键词自动运行，也不替模型决定总目标。不要把连续运动控制删回逐方块模型调用。
+- 首轮只发送一次压缩 WorldState（附近方块最多 32）；后续工具结果只发位置、生命/饥饿、背包变化和最多 12 个近邻方块的增量观察。玩家目标不再内嵌第二份世界状态。连续技能完成、环境显著变化或失败后才重新调用模型；已删除动作后的固定 350 ms 等待。
+- 默认玩家任务最多 12 个工具步、8 次云 API、累计 160000 Token、单次输入估算 48000 Token、单轮输出 1024 Token；第一次策略沿用管理员推理强度，后续重规划默认 `none`。优先使用供应商返回的真实 `usage`，否则按中英文保守估算。任一硬预算触发都停止继续请求，不允许靠重试突破。
+- 安全挖矿禁止脚下垂直挖掘。`excavate_safely` 映射到 Fabric 已验证的双格阶梯/隧道控制器，持续检查危险流体、玩家结构、碰撞和支撑；模型应在地下目标结束后调用 `return_to_task_start`。若预算在下探后耗尽，本地安全层还会尝试最多四段向上阶梯回到任务起始高度。
+- 上下文压缩不再阻塞玩家动作。世界状态不计入记忆压力；任务完成后才延迟 1.5 秒在后台检查真实记忆，压缩模型返回格式错误只写诊断，不能再使“来找我”等动作失败。
+- 新增小米 MiMo：`provider=mimo`，官方基址 `https://api.xiaomimimo.com/v1`，支持 `mimo-v2.5` / `mimo-v2.5-pro`，密钥环境变量 `MIMO_API_KEY`。适配器使用 Chat Completions function tools、`max_completion_tokens`、`thinking`、图像/音频内容和 `usage`。
+- 能力检测将 DeepSeek 固定为纯文本；MiMo 2.5 自动声明视觉、语音/视频理解和攻略搜索能力。视觉首轮优先读取 15 秒内的 `data/sensory/latest.png`，否则从真实方块/实体状态生成 128×128 语义俯视 PNG；语音只接受新鲜 `latest-audio.json`，当前 Simple Voice Chat 尚无帧生产器，因此缺帧时必须显示 unavailable。攻略搜索走现有百度/SearXNG 中国可达研究层，网页是不可信参考，不能执行代码。
+- WebUI 已加入上述预算、多模态开关和 MiMo 密钥/预设；总聊天记录每个模型轮的耗时、输入/输出/推理/缓存/累计 Token，并汇总最近任务与 24 小时费用。禁止记录隐藏思维链正文。
+
+### 0.2 2026-08-05 交接增量（历史仍有效）
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
 - 2026-08-05 后续人设增量：运行时与模板的 `SOUL.md`/`IDENTITY.md` 已从用户提供的 OpenClaw SOUL 中仅抽取角色设定并改写为 Minecraft 角色“小粉”。保留粉色猫娘、温柔元气、有主见、主人关系和自然聊天句末“喵”；排除 OpenClaw 的外部行动、文件连续性和平台工具规则。只有 `wraaaaaa` 可称主人；JSON/工具输出禁止加入语气词或动作描写。
-- `memory.json` 仍是统一原始记忆文件。`ContextCompressor` 在估算上下文达到预算阈值时保留最近事件，用当前模型总结较旧事件；先原子更新当前玩家 `USER.md`，成功后才写玩家/全局摘要并按事件 ID 原子删除已压缩事件，避免画像写入失败造成上下文丢失。
+- `memory.json` 仍是统一原始记忆文件。`ContextCompressor` 在玩家任务结束后后台检查真实记忆压力，达到预算阈值时保留最近事件，用当前模型总结较旧事件；先原子更新当前玩家 `USER.md`，成功后才写玩家/全局摘要并按事件 ID 原子删除已压缩事件，避免画像写入失败造成上下文丢失。
 - 同类动作失败达到阈值后，`SelfImprovementManager` 可通过百度或自建 SearXNG 查找思路。搜索结果是不可信文本，只能用于生成 `TOOLS.md` 托管经验段和 `behavior-patches.json` 声明式补丁；程序不能自改 JS/Java/PowerShell、硬规则、启动脚本或秘密。这是“可进化”与供应链/远程代码执行安全之间的硬边界。
 - 无持久住所时，主动循环不再反复调用 `seek_shelter`；没有建房材料则继续确定性发育。探索单个动作到达一个安全分段即成功，不再为了寻找“完全无人造痕迹区域”耗尽八段而超时。矿道使用导航器真实落脚格修复两格上行判断错误。
 - 实服发现 `eat_best_food` 可因客户端长用物状态不释放而重复超时。现同时用物品数量、饥饿值和生命值判定成功，60 tick 卡住会释放并短暂退避，RPC 超时也强制清理。最新重启后饥饿值已从 19 实际升到 20，随后成功放置工作台、合成并放置熔炉。
@@ -56,7 +68,7 @@ npm test
 
 - 目标服务器是 `online-mode=false`，正式无界面启动当前只支持离线账号。
 - 目标版本固定为 Minecraft 26.2、Fabric Loader 0.19.3、Fabric API 0.156.0+26.2、Java 25。
-- Bot 没有人类视觉、听觉或鼠标键盘输入；DeepSeek 等模型只接收结构化游戏状态和文本。
+- DeepSeek 等纯文本模型只接收结构化游戏状态和文本。多模态模型可额外接收真实/语义视觉帧及外部语音桥提供的音频帧；项目不伪造不存在的感官，也不把多模态能力等同于直接控制鼠标键盘。
 - 正式适配器是 `fabric_bridge`。`mineflayer` 只保留为诊断回退，不能代表 26.2 模组服兼容性。
 - Bot 进程、Minecraft 客户端和 WebUI 均应可静默后台运行。
 - 不破坏玩家建筑、容器、农田、红石和物品；不确定归属时拒绝破坏。
@@ -98,7 +110,7 @@ npm test
 | EasyAuth | 识别 `/register`、`/login` 提示并发送命令；无提示时约 100 tick 后回退登录 | Fabric 路径没有使用 `easyAuth.loginDelayMs`，当前回退时间是 Java 固定逻辑 |
 | 自动复活 | 死亡后取消当前控制器动作，按配置延迟调用正常客户端复活 | 必须在实际服务器确认死亡界面和插件没有改变流程 |
 | 聊天/回复 | 支持点名、`!`、近距离语境寻址；游戏出口经过密钥和内部调用术语双重过滤，只输出自然对话、完成确认或简短拒绝 | 寻址是规则启发式，不是完整语义理解；历史 `memory.json` 仍会保留升级前真实发出的详细回复 |
-| 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁；单次模型可输出最多 12 步工具计划 | `actions[]` 是当前任务内的顺序计划，不是可跨重启恢复的依赖 DAG |
+| 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁；模型逐轮选择原子接口或连续技能 | 当前任务不是可跨重启恢复的依赖 DAG；连续技能中途断线仍要按真实结果重新确认 |
 | 跟随/前往/探索 | 有界 A* 保存路线并重规划；探索无路可破坏安全天然障碍；主人可用定位栏分段全图寻找；跟随目标被怪物攻击时暂停移动保护 | 不是全局 Baritone；门、梯子、藤蔓、跑酷和未知模组碰撞仍可能阻塞 |
 | 自动进食/烹饪 | 饱食低于 20 即吃；26.2 `FOOD`/`CONSUMABLE` 支持模组熟食；储备不足会狩猎、准备自有工作台/熔炉并烹饪 | 未知模组食物副作用只靠已知有害名单；农业/繁殖未实现 |
 | 自动对敌/狩猎 | 对实际威胁自卫和保护主人/跟随者；可狩猎成年未命名、未驯服、未拴绳的动物/鱼/任务怪并追踪掉落 | 中立高风险怪的自动反击仍保守；战斗 AI 不是竞技级走位 |
@@ -114,7 +126,7 @@ npm test
 | 经验/进化 | 失败写入经验；重复失败可研究公开资料并更新托管工具经验与声明式补丁 | 不是训练模型；不允许自改可执行代码、硬规则或秘密，补丁仍须通过原有能力/策略/Fabric 验证 |
 | WebUI 总聊天 | 聚合记忆中的玩家/Bot 对话与 `data/diagnostics.json` 的结构化决策、步骤、后置条件和完整脱敏错误；独立 4 秒刷新和三种筛选 | 明确只展示可验证决策摘要，不提供或伪造模型隐藏思维链；诊断文件不是长期记忆输入 |
 | 皮肤 | 校验标准皮肤 PNG，并可生成其他玩家客户端安装包 | LocalSkin 不会由 Bot 广播；每位观察者都要装包或共同使用在线皮肤站 |
-| 语音 | 服务器语音 mod 可作为普通客户端 mod 同步 | 没有语音收发接口；Headless 环境通常没有 OpenAL 音频设备 |
+| 语音 | 多模态输入协议可读取新鲜的外部音频帧 | Simple Voice Chat 尚无音频帧生产桥，也没有 TTS/麦克风/扬声器管线；Headless 环境通常没有 OpenAL 音频设备 |
 
 ## 3. 总体架构
 
@@ -424,11 +436,11 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - 断线发生在服务器已经执行动作、但结果尚未返回时，重试可能重复非幂等动作。当前没有跨重启的动作幂等账本，采集/建造测试必须关注这一点。
 - 任务文件当前不自动裁剪；长期运行需要后续增加归档或保留策略。
 
-### 8.4 顺序工具计划，不是持久 DAG
+### 8.4 历史 JSON 计划器（兼容分支，不是当前默认）
 
-每条被寻址的玩家消息产生一个持久记录，并始终进入模型（秘密提取与带外停止除外）。模型先返回 `intent=chat|action`：`chat` 不执行工具；`action` 可返回单个 `action` 或最多 12 个按依赖顺序排列的 `actions[]`。玩家指令不再经过关键词动作脚本。`AgentController` 对模型选择的每一步重新读取 Fabric 快照，依次执行能力检查、策略检查、危险准备和服务器后置条件验证，任一步失败即停止后续步骤并记录第 N/总步数。
+旧的 `intent=chat|action`、单个 `action` / `actions[]` JSON 计划器仍为不支持原生工具调用的适配器和旧测试保留，但 DeepSeek、豆包、MiMo 与 OpenAI 的当前 provider 默认进入第 28 节分层工具 Agent。任何新玩法都不得只增加自然语言关键词到旧分支。
 
-整个数组仍只属于一个 TaskRecord，未逐步持久化程序计数器；进程在非幂等步骤后断线重试时可能重复动作。因此它不是可跨重启恢复的依赖 DAG，也不会自动把熔炼、附魔、长期采矿、建城或通关目标无限拆解。
+历史数组仍只属于一个 TaskRecord，未逐步持久化程序计数器；进程在非幂等步骤后断线重试时可能重复动作。当前分层 Agent 同样不是可跨重启恢复的任意依赖 DAG，连续技能完成后仍以服务端后置条件为真值。
 
 ## 9. 模型接入和决策流水线
 
@@ -436,6 +448,7 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 
 - `deepseek`：`<baseUrl>/chat/completions`，JSON object 输出。`none` 关闭 thinking；`low/medium/high` 当前统一映射成有效 `high`，`xhigh/max` 映射成 `max`。若官方已知的 JSON 空 `content` 问题发生，适配器记录不含思维链的响应元数据，并仅以 `thinking=disabled` 和强化非空 JSON 提示重试一次；第二次仍空则失败，不读取 `reasoning_content`。
 - `volcengine`：`<baseUrl>/chat/completions`，原样传递 `reasoning_effort`。
+- `mimo`：`<baseUrl>/chat/completions`，官方基址为 `https://api.xiaomimimo.com/v1`；使用 function tools、`max_completion_tokens` 与 `thinking.enabled/disabled`，解析标准图像/音频输入和 `usage`。`mimo-v2.5` / `mimo-v2.5-pro` 自动声明多模态与攻略研究能力。
 - `openai`：`<baseUrl>/responses`，使用 Responses API 的 `reasoning.effort`、低 verbosity 和 `max_output_tokens`。
 
 `model.model` 是开放字符串，代码不会维护“全系模型白名单”。某个模型是否接受 `response_format`、thinking 或 reasoning 参数，必须用 WebUI 的最小模型测试确认；不能因为 provider 名称受支持就声称该供应商所有模型都通过。
@@ -762,15 +775,16 @@ WebUI 固定绑定 `127.0.0.1`，验证 Host/Origin，设置 CSP、nosniff 和 n
 WebUI 当前可：
 
 - 编辑 bot、persona、prompts、skin、behavior rules、mods。
-- 安全保存或删除 `.env` 中四类秘密，只显示存在状态。
-- 选择 DeepSeek、火山引擎、OpenAI，模型名、Base URL、推理强度、超时和输出预算。
+- 安全保存或删除 `.env` 中 DeepSeek、火山引擎、MiMo、OpenAI 与 EasyAuth 秘密，只显示存在状态。
+- 选择 DeepSeek、火山引擎、MiMo、OpenAI，模型名、Base URL、推理强度、超时、API/Token 硬预算和多模态能力。
 - 设置服务器、LAN、EasyAuth、自动复活、聊天、任务仲裁、生存阈值、荒野距离、动态验证、提示词工作区和自我改进。
 - 查看 Node/Java PID 状态、运行 phase、最后世界状态、日志尾部、任务、记忆和经验。
 - 启动、停止、重启 Bot。
 - 发现 LAN 世界、同步 mod。
 - 导入并校验皮肤、生成玩家分发包。
 - 下载 memory/experience JSON。
-- 发起一个最小模型连通性测试。
+- 发起一个最小模型连通性测试，并显示延迟、实际 Token 与检测出的视觉/语音/搜索能力。
+- 总聊天按任务显示每轮工具、耗时与供应商 `usage`，侧栏汇总最近任务及 24 小时 API/Token 消耗；不保存隐藏推理正文。
 
 保存全部设置后，正在运行的 Node/Java 不会热重载；必须点“重新启动”。Memory/experience 当前只能查看和下载，不能在运行中安全编辑或恢复上传。
 
@@ -830,11 +844,11 @@ WebUI 只接受标准 Minecraft PNG：现代 64x64 或旧版 64x32，手臂模�
 
 长期多人服更适合所有玩家共同配置兼容在线皮肤站，并让离线 Bot 名对应同名角色。`microsoft` 模式只是配置预留；当前 Headless Microsoft 自动登录未实现。
 
-### 16.2 披风和语音
+### 16.2 披风和多模态语音
 
 `skin.capeFile` 和 `data/capes` 只预留本地路径。正版官方披风不能用普通 PNG 伪造，必须由实际拥有披风的 Microsoft 账号提供；离线多人披风也需要共同皮肤站/客户端资源方案。
 
-Simple Voice Chat 目前没有 API 适配、语音识别、TTS、麦克风或扬声器管线。历史环境曾能把其 jar 作为客户端 mod 加载，但 Headless 环境无音频设备不等于“已适配语音”。文本和结构化动作不依赖语音。
+多模态 Agent 已定义外部音频帧入口 `data/sensory/latest-audio.json`，只读取 15 秒内、最大 2 MiB 的受支持 MIME，并只在首个模型轮发送一次。Simple Voice Chat 目前仍没有把实际语音写入该文件的桥，也没有 TTS、麦克风或扬声器管线；历史环境能加载其 jar 不等于语音适配完成。没有真实帧时状态必须为 `audio:unavailable`，文本和结构化动作不依赖语音。
 
 ## 17. 中国大陆网络设计
 
@@ -847,7 +861,7 @@ Simple Voice Chat 目前没有 API 适配、语音识别、TTS、麦克风或扬
 - Fabric API 固定版本和 SHA-256，可用 `MCAI_FABRIC_API_URL` 指定可达镜像。
 - 万用皮肤加载器二进制随仓库 vendor 并固定 SHA-256，运行时不必再访问 GitHub。
 - WebUI 的 HTML/CSS/JS 全部本地提供，不依赖境外 CDN。
-- 大模型可优先选择 DeepSeek 或火山引擎国内端点；OpenAI 是否可达取决于部署网络。
+- 大模型可优先选择 DeepSeek、火山引擎或小米 MiMo 国内端点；OpenAI 是否可达取决于部署网络。
 
 仍未完成的正式证明：
 
@@ -1311,9 +1325,9 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 
 运行目录历史日志和 2026-08-06 单次真实 API 检查都复现了 HTTP 成功但 `choices[0].message.content` 为空。DeepSeek 官方 JSON Output 文档将其列为偶发现象；思考模式文档说明隐藏推理位于同级 `reasoning_content`，不能当最终答案。`ChatCompletionsProvider` 现在先按用户配置的推理强度请求；空内容时只记录 `choiceCount/finishReason/contentType/hasReasoningContent`，不记录思维链正文，然后修改系统提示、删除 `reasoning_effort`、设置 `thinking.disabled` 重试一次。返回值的 `requestedEffort` 保留原配置，实际降级时 `effectiveEffort=none`。单测验证两次请求体、最多一次重试及隐藏推理不泄漏。
 
-## 27. 2026-08-06：原生工具调用 Agent 重构（当前默认架构）
+## 27. 2026-08-06：原生原子工具 Agent（历史架构，已被第 28 节取代）
 
-本节取代第 23–26 节关于“模型一次输出 action/actions JSON”和第 25 节关于“确定性规划器负责默认自主主链”的描述。旧解析器、高层 Java 控制器和 `planSurvivalProgression` 暂时留在源码中，仅用于不实现 `LlmProvider.toolTurn` 的兼容适配器/旧测试；当前 `createLlmProvider()` 创建的 DeepSeek、火山方舟和 OpenAI provider 都实现 `toolTurn`，所以正式运行不会进入旧链。
+本节保留 2026-08-06 的原子工具演进证据，但“每一步只调用一个原子工具、每格重新请求模型”已因严重延迟和 Token 放大在 2026-08-07 被第 28 节取代。旧解析器、高层控制器仍可被复用为经验证的执行器；正式 DeepSeek、火山方舟、MiMo 和 OpenAI provider 都进入第 28 节分层 Agent。
 
 ### 27.1 实际控制流
 
@@ -1332,11 +1346,11 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 
 空闲路径同样创建 `ToolAgent`，目标为“根据当前环境自主推进生存发育，最终进入末地”。`model.autonomousAgentMaxSteps` 限制单轮工具数，玩家消息增加 cancellation epoch、发送 `stop` 并抢占空闲循环。Java 的进食、氧气、燃烧、近身威胁和死亡复活仍是硬实时反射：这些反射不依赖云模型延迟，但不负责决定采矿、建房或长期发展。
 
-`src/agent/tool-agent.ts` 是核心循环；`src/agent/agent-controller.ts#processToolTask` 是玩家入口；`#onWorld` 中 `provider.toolTurn` 分支是空闲入口。`AGENT_V2_SYSTEM_RULES` 明确要求一次一个原子工具、必须用新结果重规划、普通聊天直接回答、不得泄露内部调用。若供应商违反 `parallel_tool_calls:false` 同时返回多个调用，程序只执行第一个，并给其余 call id 返回 `skipped: replan after the first concrete tool result`，保证不会并发修改世界且保持协议完整。
+`src/agent/tool-agent.ts` 仍是核心循环，且仍只接受一次一个模型 tool call；区别是模型现在可以选择原子接口或连续运动技能。连续技能内部可执行许多 Tick/方块而不请求模型，在技能里持续做碰撞、安全和后置条件检查；模型在里程碑、失败或环境显著变化后重规划。
 
 ### 27.2 模型可见工具（唯一公开动作面）
 
-`AGENT_TOOLS` 只含可组合原子能力，不含 `follow_player`、`gather_resource`、`go_mining`、`build_shelter`、`prepare_for`、`travel_to_dimension` 等整套行为：
+下表是保留的原子能力。当前 `AGENT_TOOLS` 还包含第 28 节列出的连续技能；它们不是聊天关键词绑定的整套任务脚本，而是由模型选择参数的快速运动/生产原语：
 
 | 工具 | 作用与真实边界 |
 | --- | --- |
@@ -1375,7 +1389,7 @@ ToolAgent 会在 continuation 较长时只压缩较旧 tool message 中的大型
 
 `autonomy.allowTeleportCommand` 默认 `false`。`scripts/start-headless-client.ps1` 映射为 `MCAI_TP_COMMAND_ENABLED`；Java 环境变量未显式为 true 时返回 `permission_not_configured`，不会盲发命令。即使开关打开，Node PolicyEngine 和 Java 都只接受正则意义上的 `tp|teleport <普通玩家名>`，拒绝斜杠嵌套、坐标、选择器和其他命令。管理员必须先在服务器权限系统中给 Bot 账号相应权限，再从 WebUI 打开开关；没有权限时 Agent 收到失败结果后应走路或说明当前到不了。
 
-`model.agentMaxSteps` 默认 48、范围 1–128；`model.autonomousAgentMaxSteps` 默认 16、范围 1–64。达到上限会停止本轮并向玩家给自然说明，不会继续后台执行未确认的假计划。
+`model.agentMaxSteps` 当前默认 12、范围 1–128；`model.autonomousAgentMaxSteps` 当前默认 8、范围 1–64。第 28 节另有 API 次数、任务累计 Token、单次输入和单轮输出四道硬上限；不要再提高步数来掩盖执行速度问题。
 
 ### 27.6 提示词、WebUI 与诊断
 
@@ -1395,3 +1409,110 @@ WebUI 增加玩家/空闲 Agent 步数和 TP 权限开关。每次工具调用�
 本次候选在 Java 25 下完成 Fabric Gradle build，`npm run check` 和 93 项 Node 测试全部通过，仓库审计为 0 问题。同步实际运行目录、更新 Fabric jar 并后台重启后，客户端重新达到 `in_world`，上报 `nearbyBlocks=256`。真实 DeepSeek 思考模式先调用 `craft_recipe(minecraft:torch,20)`，Fabric 返回 `verified_crafted_count=20` 且状态背包确认 20 个火把；模型读取该结果后第二轮调用 `select_hotbar(3)`，状态确认选中槽 3。随后 15 个实际工具步中，Agent 移动约 60 格；针对“附近玩家不足荒野 48 格”“无安全路线”“物品栏换位未确认”“缺自有 3×3 工作台”等失败分别重规划；成功制作木棍和工作台、第一次放置失败后选择快捷栏再成功放置，并破坏一块经验证的天然草方块。第 16 步预算耗尽后以 `agent_step_budget_exhausted:16` 安全结束。全部诊断来源都是 `model-tool-loop`，证明没有落入旧 `local-deterministic` 分支。
 
 该轮同时定位到 `normalizeAgentPrimitive(craft_recipe)` 没有写入内部 `verifiedWilderness`，所以 `createCraftTask` 无法创建动态安全工作窗口，即使工作台已经成功登记也会提前拒绝 3×3 配方。现已在 Java 归一化层补入该内部标志：模型 schema 仍没有该字段，Fabric 仍须调用 `WildernessGuard.workZone` 并在 `OwnedBlockRegistry` 找到服务端现状一致的自有工作台。修复后 Java 25 build 成功，更新运行 jar 并重启实服客户端；第二轮 Agent 自行 `craft_recipe(crafting_table)`、`place_block(crafting_table)`，随后 `craft_recipe(furnace)` 得到 `verified_crafted_count=1; itemId=minecraft:furnace; grid=3x3`，再成功 `place_block(furnace)`，因此 3×3 修复已有真实后置条件证据。该证据仍不等于从零自主通关；TP 无权限实服回退、战斗和跨维度长链也需继续验收。当前没有通用容器槽点击工具，铁砧、锻造、酿造与任意模组菜单仍需新增“菜单观察 + 原子槽操作”后才能称为 Agent 可自由操作，不能借旧高级脚本宣称已经满足。
+
+## 28. 2026-08-07：低延迟分层 Agent、费用硬预算与 MiMo 多模态
+
+本节是当前实现真值，并取代第 27 节中“一次原子动作后必定重新请求模型”的控制频率。目标不是退回关键词脚本，而是像通用 Agent 使用 skill 一样，把策略判断留给模型，把无需语言推理的重复运动交给本地、可取消、可验证的执行器。
+
+### 28.1 Token 事故复盘
+
+`data/diagnostics.json` 中的现场任务显示：任务启动后先同步等待约 16 秒的上下文压缩；随后进行了 48 个模型工具轮，模型几乎每轮只选择一个 `break_block`，相邻动作通常间隔 7–27 秒，约十分钟后在 Y=52 以步数耗尽失败。该任务没有供应商 `usage` 字段，用户账单侧观测接近五百万 Token，因此不能把日志估算伪装成精确结算值。
+
+四个根因同时存在：
+
+1. 一个方块对应一次云端策略调用，网络、推理和排队延迟直接变成挖掘速度。
+2. 完整 function tools 和不断增长的 Chat Completions 会话每轮重发。
+3. `#processToolTask` 把 WorldState 放进玩家目标，`ToolAgent` 又追加一份，起始世界重复。
+4. 单轮输出允许 4096 Token，且每轮沿用高推理；没有 API 次数、累计 Token 或单次输入硬闸。
+
+### 28.2 当前控制流
+
+```text
+玩家自然语言 / 空闲目标
+  → 模型读取一次紧凑世界、该玩家画像、人设、记忆和经验
+  → 模型自行选择一个原子接口或连续技能，并填写参数
+  → Node 能力/策略检查
+  → Fabric 逐 Tick 执行、碰撞避障、安全验证、服务端后置条件
+  → 只把增量观察返回模型
+  → 模型在完成一个里程碑、环境改变或失败时重新规划
+  → 自然聊天回复；完整脱敏诊断只进 WebUI
+```
+
+模型仍负责“为什么做、先做什么、目标在哪、参数多少、失败换哪条路”；连续技能只负责“怎样连续走、挖、放、合成、熔炼或攻击并确认成功”。没有任何聊天关键词可以直接启动这些技能。普通聊天可以直接结束，不会因为出现“钻石/挖矿”等词就行动；玩家命令只有在模型产生 tool call 后才进入执行层。
+
+### 28.3 模型可选的连续技能
+
+| 模型工具 | 映射的验证动作 | 边界 |
+| --- | --- | --- |
+| `gather_resource` | `gather_resource` + 成功后 `collect_own_drops` | 模型选资源/数量；Fabric 逐目标验明天然性、财产、危险和掉落 |
+| `craft_item` | `craft_item` | 模型选最终物品/数量；控制器处理具体配方链并验证背包增量 |
+| `smelt_items` | `smelt_item` | 模型选输入/数量；只使用自有或动态验证的生产设施 |
+| `excavate_safely` | `excavate_tunnel` | 模型选目标资源、Y 和长度；Fabric 开双格阶梯/隧道，禁止脚下垂直挖 |
+| `return_to_task_start` | 向任务起始 Y 的 `excavate_tunnel` | 用安全上行阶梯和自身普通方块支撑返程；不是 TP，也不保证回到精确 X/Z |
+| `collect_own_drops` | `collect_own_drops` | 只收本控制器登记的掉落实体 |
+| `give_item_to_player` | `drop_item` | 模型选玩家/物品/数量；先定位接近，再从自身背包交付 |
+| `equip_for` | `equip_best` | 模型选战斗/采矿/下界等用途；装备评分仍由可审计本地规则实现 |
+| `hunt_for` | `hunt_entity` | 模型选实体/数量；硬规则保护玩家、命名/驯服/拴绳实体 |
+| `search_game_guide` | `SelfImprovementManager.research` | 只在模型具备搜索能力且管理员开启时出现；百度/SearXNG 结果为不可信参考文本 |
+
+原子工具仍用于精确方块/实体交互和连续技能无法覆盖的新情况。新增能力的原则是先增加可观察状态及受限接口；严禁开放任意 JS、系统命令、任意数据包或未审计的模型生成代码。
+
+### 28.4 世界状态和会话大小
+
+- 首轮紧凑 WorldState 保留维度、位置、生命/饥饿/氧气、天气/时间、快捷栏和背包摘要，附近方块最多 32，玩家/实体/掉落/调查结果均有严格上限。
+- `buildToolAgentGoal()` 只构造目标、玩家和当前任务上下文，世界由 `ToolAgent.run({world})` 唯一追加。
+- 工具回执包含实际 `AgentActionResult` 及 `observationDelta`。增量只有当前位置/生命/饥饿/氧气/快捷栏变化、背包增减和最多 12 个近邻方块；不再把完整 WorldState 堆进每轮会话。
+- 首轮多模态附件只发送一次。输入预算估算包含附件 Base64，因此超大帧会在请求前被硬拒绝。
+- DeepSeek Chat Completions 为满足思考工具续轮协议仍保留 assistant 的 `reasoning_content` 字段，但正文绝不写日志/诊断/聊天；后续请求的推理强度默认关闭。
+
+### 28.5 费用、延迟和停止条件
+
+配置真值位于 `config/bot.json` 的 `model`：
+
+| 字段 | 默认 | 语义 |
+| --- | ---: | --- |
+| `agentMaxSteps` / `autonomousAgentMaxSteps` | 12 / 8 | 玩家/空闲任务最多接受的模型工具步骤 |
+| `agentMaxApiCalls` | 8 | 一个任务最多发送的 provider 请求数，范围 1–32 |
+| `agentMaxTaskTokens` | 160000 | 一个任务累计输入+输出硬上限 |
+| `agentMaxInputTokensPerCall` | 48000 | 发送前的单次请求保守估算上限 |
+| `agentMaxOutputTokens` | 1024 | 每个 Agent 策略轮最大输出 |
+| `agentFollowupReasoningEffort` | `none` | 第一次工具成功后的重规划推理强度 |
+
+`LlmUsage` 统一记录 `inputTokens/outputTokens/totalTokens/reasoningTokens/cachedTokens`。MiMo、DeepSeek、豆包工具轮按响应 `usage` 解析；供应商缺失时 `ToolAgent` 用保守估算：ASCII 约四字符一 Token，非 ASCII 约 1.1 字符一 Token，再加输出文本/工具参数。发送前会同时预留整段 `agentMaxOutputTokens`，因此不会明知下一轮可能超过任务预算仍发送。估算只用于提前停止，账单仍以供应商为准。
+
+触发步数、API、任务 Token 或单次输入任一上限后，不再向模型发送请求。若本轮曾下探，安全层会用最多四个 64 格上行阶梯尝试回到起始 Y；每段仍经过 Fabric 的财产/流体/碰撞检查。WebUI 总聊天事件 `模型工具轮 n` 包含该轮耗时、真实或估算 usage 和累计值；侧栏按 `taskId` 汇总最近任务，另汇总 24 小时窗口。
+
+### 28.6 MiMo 和多模态感知
+
+`src/llm/provider-factory.ts` 新增 `mimo` Chat Completions provider。默认配置：
+
+```json
+{
+  "provider": "mimo",
+  "model": "mimo-v2.5",
+  "apiKeyEnv": "MIMO_API_KEY",
+  "baseUrl": "https://api.xiaomimimo.com/v1"
+}
+```
+
+适配器使用 `max_completion_tokens`、`thinking:{type:"enabled|disabled"}`、function tools、标准 image/audio/video content，并解析 `usage`。官方参考：`https://mimo.mi.com/docs/en-US/api/chat/openai-api`、`https://mimo.mi.com/docs/en-US/api/model/list-models`、`https://mimo.mi.com/docs/quick-start/summary/model`。
+
+`detectModelCapabilities()` 返回 `vision/audio/video/webSearch`：DeepSeek 明确为纯文本；MiMo 2.5/Pro 自动全开；OpenAI 与豆包按模型名保守识别。未知模型若 `model.multimodal.autoDetect=false`，管理员可用三个开关显式声明，随后必须做 WebUI 最小测试。
+
+`src/agent/multimodal-sensors.ts` 的真实边界：
+
+- 摄像桥可原子更新 `data/sensory/latest.png`；仅接受 15 秒内、最大 1.5 MiB。没有新鲜帧时由 WorldState 生成 128×128 PNG 语义俯视图，颜色来自实际附近方块/实体类别，不是假截图。
+- 音频桥可原子更新 `data/sensory/latest-audio.json`：`{"capturedAt":"ISO","mimeType":"audio/wav","dataBase64":"..."}`。仅接受 15 秒内、最大 2 MiB 的 wav/mpeg/mp3/ogg/webm/flac。当前仓库没有 Simple Voice Chat 生产器，所以默认无附件。
+- `onlineResearchEnabled` 只控制攻略查询工具是否暴露；它不让模型直接浏览任意 URL，不执行网页指令，也不允许网页改变 `rules.md` 或源代码。
+
+### 28.7 测试与尚未完成的实服证据
+
+新增回归覆盖：模型面对钻石目标选择 `excavate_safely` 时只产生一个连续 `excavate_tunnel`，而不是多个 `break_block`；累计 Token 触顶前停止下一次 provider 请求；MiMo 请求体、附件、thinking、usage 和能力检测；语义 PNG 的真实签名/尺寸；缺失语音帧不生成伪附件；DeepSeek 纯文本不附加视觉。
+
+本节代码完成时 `npm run check` 与 99 项 Node 测试均通过；这是带日期的工作快照，不是以后固定数量。尚未完成的诚实边界：没有真实 MiMo Key，因此 MiMo 只完成协议 mock 回归；Simple Voice Chat 帧生产器未实现；“挖到一颗钻石并安全交付”仍需在同步运行目录、重建后用硬预算做一次完整现场验收，不能用单测替代。
+
+受控现场验证追加证据：私有运行目录保留原配置/密钥/记忆并同步重建后，真实 Fabric 客户端成功进服。无模型调用的两段桥测试从 Y=52 下探到 Y=50：`verified_tunnel_steps=1; verified_broken_blocks=6; verified_support_blocks=0; inventory_delta=6; final_y=50`；再向上返回：`verified_tunnel_steps=1; verified_broken_blocks=1; verified_support_blocks=0; final_y=52`。测试后客户端停止。
+
+真实 `deepseek-v4-flash` 的单 API 决策检查使用 1024 输出上限，约 6.7 秒，供应商 usage 为输入 3364、输出 590、总计 3954、其中 reasoning 414、cached input 3328。模型没有逐格调用 `break_block`，而是选择 `excavate_safely(resource=diamond_ore,target_y=-50,length=30)`，本地映射为一个带 `verifiedWilderness` 的连续 `excavate_tunnel`。该检查使用 mock executor，验证的是策略选择和真实计费，不修改世界；与上段 Fabric 测试组合证明“模型选连续技能”和“客户端快速连续执行/返程”两层均贯通，但仍不能宣称已经实际取得钻石。
+
+同日还观测到：人为把 Agent 输出压到 512 时，DeepSeek 高思考偶尔只返回隐藏推理而没有工具/正文，provider 会安全报错且不执行动作。不要为此增加无界隐式重试；默认 1024 已在受控请求成功，WebUI 可按模型需要调大，但任务总 Token/API 硬预算必须保留。

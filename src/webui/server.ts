@@ -24,7 +24,7 @@ const publicRoot = path.join(projectRoot, 'public', 'webui')
 const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
-const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY'] as const
+const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY'] as const
 
 type WebUiBotConfig = BotConfig
 
@@ -168,6 +168,7 @@ function ensureProjectPaths(config: WebUiBotConfig): void {
     [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', path.join(projectRoot, 'data')],
     [workspace.promptDirectory, path.join(projectRoot, 'data')],
     [workspace.playerProfilesDirectory, path.join(projectRoot, 'data')],
+    [config.model.multimodal?.sensoryDirectory ?? 'data/sensory', path.join(projectRoot, 'data')],
     [config.logging.file, path.join(projectRoot, 'logs')]
   ]
   for (const [configured, allowedRoot] of checks) {
@@ -414,7 +415,7 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     const provider = createLlmProvider(loaded.config.model, loaded.apiKey, logger)
     const result = await provider.complete({ system: 'Return only a compact JSON object.', user: 'Reply with {"ok":true}. Do not add any other fields.' })
     await logger.flush()
-    return json(response, 200, { ok: true, model: result.model, requestedEffort: result.requestedEffort, effectiveEffort: result.effectiveEffort, elapsedMs: Date.now() - started })
+    return json(response, 200, { ok: true, model: result.model, requestedEffort: result.requestedEffort, effectiveEffort: result.effectiveEffort, elapsedMs: Date.now() - started, usage: result.usage ?? null, capabilities: provider.capabilities ?? null })
   }
   json(response, 404, { ok: false, error: '接口不存在' })
 }

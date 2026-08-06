@@ -51,3 +51,29 @@ export function buildPlayerRequest(input: {
     structuredGameState: input.world
   })
 }
+
+/**
+ * Native tool Agent goals deliberately exclude the world snapshot. ToolAgent appends one
+ * compact observation and subsequent deltas, avoiding the former double-send of 50-80 KB.
+ */
+export function buildToolAgentGoal(input: {
+  player: PlayerMemory
+  message: string
+  recentEvents: MemoryEvent[]
+  globalSummary: string
+  experiences: ExperienceEntry[]
+}): string {
+  return JSON.stringify({
+    playerMessage: input.message,
+    currentPlayer: {
+      name: input.player.currentName,
+      facts: input.player.facts.slice(-24),
+      conversationSummary: input.player.conversationSummary.slice(0, 4_000)
+    },
+    recentRelevantEvents: input.recentEvents.slice(-12).map(({ at, type, content }) => ({ at, type, content: content.slice(0, 500) })),
+    globalSummary: input.globalSummary.slice(0, 4_000),
+    relevantExperience: input.experiences.slice(0, 8).map(({ task, outcome, lesson, correction, verified }) => ({
+      task: task.slice(0, 300), outcome, lesson: lesson.slice(0, 500), correction: correction.slice(0, 500), verified
+    }))
+  })
+}

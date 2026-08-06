@@ -2,7 +2,7 @@
 
 让大模型以真正的 Minecraft 客户端玩家身份进入 Java Edition `26.2` Fabric 模组服务器，在后台接收聊天指令、区分玩家、保存记忆，并执行受行为准则约束的游戏动作。
 
-当前默认运行方式是原生工具调用 Agent，不是关键词选择器，也不是让模型从“采集、建房、下矿”等整套脚本中挑一个。模型每轮读取结构化世界状态，只调用一个可组合的原子接口（观察、寻路、看向、选择物品栏、逐块破坏/放置、攻击/交互实体、使用/丢弃物品、执行具体配方、等待或停止），等 Fabric 返回真实成功/失败和新状态后再决定下一步。复杂玩法因此由模型动态分解和重规划；本地仅保留密钥保护、财产/战斗安全、紧急生存反射及服务端后置条件等不可绕过的边界。完整从零到末地的连续实服旅程仍未跑完，不能把“Agent 闭环已实现”误写成“已经自动通关”。
+当前默认运行方式是分层工具调用 Agent，不是关键词选择器。模型像 Agent 一样理解完整目标、制定策略，并自由组合原子接口与连续技能；原子接口负责一次精确交互，连续技能负责寻路、避障、采集、阶梯挖掘、制作、熔炼、狩猎、拾取和返程等需要逐 Tick 重复的运动控制。连续技能的参数、顺序与失败替代方案仍由模型依据环境决定，客户端只负责在技能内部快速执行、安全拦截和后置条件验证。因此不会再发生“每挖一个方块都等待一次模型”的高延迟/高 Token 循环。完整从零到末地的连续实服旅程仍未跑完，不能把“Agent 闭环已实现”误写成“已经自动通关”。
 
 ## 当前能力
 
@@ -11,15 +11,15 @@
 - Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2` 原生客户端桥。
 - Windows 无界面启动，控制器与游戏客户端均隐藏在后台；提供安全启动、停止和 PID 记录。
 - 本机 Web 总控台：可视化编辑所有 Bot 参数、人设、规则、模组路径和秘密，并查看运行进程、世界坐标、生命、饱食度、维度、附近玩家及日志；“总聊天”把分玩家对话、结构化决策摘要、动作步骤、后置条件和完整脱敏错误合并成一条本机时间线。
-- DeepSeek、火山方舟（豆包）原生 function calling 与 OpenAI Responses function calling；模型名、端点、推理强度和单任务 Agent 步数均可配置。DeepSeek 思考模式会在工具轮之间正确回传 `reasoning_content`，但不会把隐藏思维链写入日志、WebUI 或游戏聊天。
-- 通过结构化世界状态和动作接口控制游戏，不依赖屏幕、图像、声音或鼠标模拟，适合 DeepSeek 等纯文本模型。
+- DeepSeek、火山方舟（豆包）、小米 MiMo Chat Completions function calling 与 OpenAI Responses function calling；模型名、端点、推理强度、API/Token 硬预算均可配置。DeepSeek 思考模式会在工具轮之间正确回传 `reasoning_content`，但不会把隐藏思维链写入日志、WebUI 或游戏聊天。
+- DeepSeek 等纯文本模型使用结构化世界状态。识别到多模态模型后自动在首轮加入视觉图；小米 `mimo-v2.5`/`mimo-v2.5-pro` 会启用视觉、可用语音帧与攻略搜索。无摄像帧时生成真实方块/实体语义图；没有语音桥帧时明确保持“听觉不可用”，不会伪造听见。
 - 玩家聊天、系统消息、位置、生命、饱食度、空气、着火/入水、维度、时间、光照、装备/附魔/耐久、背包、附近玩家、敌对生物和掉落物状态。
 - 按玩家 UUID 保存独立档案和事件的单一 `memory.json`；经验另存为 `experience.json`；两者原子写入并保留 `.bak`。
 - 自定义人设、真实回复限频、近距离/语境寻址、显式名称或 `!` 寻址，以及限频的空闲 AI 决策/偶尔聊天；近距离自然命令无需每次喊 Bot 名。
 - EasyAuth 根据服务器提示自动执行 `/login`，首次使用新名称时可选自动 `/register`；密码只从环境变量读取且日志脱敏。
 - 持久任务队列：`wraaaaaa` 始终最高优先；其他玩家按当前距离由近到远，同一玩家内部按紧急度和先入先出；全局只执行一项。明确“停止/取消”绕过模型立即抢占。
 - 本地生存反射：低生命/低饱食时选择无负面效果的安全食物；只攻击正在威胁 Bot 的敌对生物，自动选择快捷栏最佳武器；死亡后自动复活。
-- Agent 原子工具：刷新观察、坐标寻路、看向坐标、选择快捷栏、逐块破坏、逐块放置、单次攻击/实体交互/方块交互、使用手持物、按背包槽丢弃、执行一个具体配方、尝试安全 TP 命令、停止和短暂等待。运行时一次只执行一个调用并把真实结果交回模型，没有预生成的动作数组。
+- Agent 原子工具覆盖刷新观察、坐标寻路、看向、快捷栏、精确破坏/放置、实体与方块交互、使用/丢弃物品、具体配方、安全 TP、停止和等待；连续技能覆盖采集、通用制作、熔炼/烹饪、安全阶梯矿道与返程、自有掉落、物品交付、自动装备和狩猎。一次只接受一个模型工具调用，技能内部的多 Tick 动作不会重复调用模型。
 - 危险度准备：末地/末影龙任务在执行跟随等主动作前也会强制检查装备，最低为四件附魔黄金等效护甲、同等级武器、安全耐久和至少 16 个安全食物；不足时选择现有最佳装备后详细拒绝。
 - 住所：AI 自行选择候选环境，Fabric 对施工点逐格验证天然性、玩家结构、容器、危险源、碰撞、撤退路线和其他玩家距离；施工前要求门、普通火把和 23 个同类安全实心方块，住所坐标持久化到单独文件。
 - 独立行为准则：禁止破坏玩家物品、禁止打开玩家容器、未知归属时拒绝破坏、仅允许短时针对实际攻击者自卫。
@@ -32,22 +32,22 @@
 - 默认角色示例已改为粉色猫娘“小粉”：`wraaaaaa` 是唯一使用“主人”称呼的玩家，其他玩家仍按独立 `USER.md` 作为朋友或队友交流。自然语言聊天以“喵”类语尾收束；动作 JSON、工具参数和机器输出严格保持纯格式，不受猫娘语气影响。
 - 受限自我改进：同类动作重复失败达到阈值后，可经百度或自建 SearXNG 检索公开解决思路；网页内容按不可信文本处理。AI 只可写 `TOOLS.md` 的托管经验段和声明式 `behavior-patches.json`，不能修改可执行源码、启动脚本、硬规则或秘密。
 - 纯净 Windows 一键部署入口，可安装 Node.js LTS、Java 25 并完成全套构建、资源准备和总控台启动。
-- 持久自主目标 `reach_end`：空闲时也由同一个 Agent 闭环根据当前世界、物资和工具结果逐步推进；玩家任务、受击和紧急生存会抢占本轮。旧确定性生存规划器只留作不支持工具调用的兼容代码，DeepSeek、豆包和 OpenAI 默认路径不会进入它。
-- 旧兼容控制器保留并曾实现狩猎、熔炼、交易、附魔、阶梯矿道、固定小屋、床、下界门和末地搜索等高层闭环；它们现在不在默认模型工具目录中。原生 Agent 必须通过现有原子工具完成可组合部分，菜单和跨维度等尚缺原子接口的能力不能借旧脚本冒充完成。
+- 持久自主目标 `reach_end`：空闲时也由 Agent 根据当前世界、物资和真实结果逐步推进；玩家任务、受击和紧急生存会抢占本轮。旧一次性 JSON 规划器只留作不支持工具调用的兼容代码，DeepSeek、豆包、MiMo 和 OpenAI 默认路径不会进入它。
+- Java 中已经有后置条件完备的连续控制器（狩猎、熔炼、阶梯矿道等）；当前把其中可安全复用的能力作为“技能”开放给模型。它们不是按聊天关键词自动启动的整套任务脚本：只有模型可以选择技能、填写目标参数并根据结果组合下一步。尚未开放的通用菜单和跨维度长链不能冒充完成。
 - 路径与水下生存：有界 A* 记录逐格路线、重新规划、绕开危险落脚点；阶梯挖掘可清理头顶、在洞穴内放置自有垫脚块并以稳定落地作为后置条件；游泳时搜索可呼吸水面，冰下无出口时可破坏天然冰/雪顶部自救。
 - 最高优先玩家定位状态仍可提供方位/距离线索；原生 Agent 可对已观察坐标持续分段寻路，或在管理员授权并开启开关后尝试 TP。它不再调用旧 `come_to_player`/`follow_player` 整套脚本，因此未观察到精确位置且无 TP 权限时会如实说明或继续探索，而不是伪造全图到达。
 - 自有方块账本：工作台、熔炉、床、附魔台、住所和上行垫脚块按维度/坐标写入 `data/owned-blocks.json`；只把账本中仍与服务端实际方块一致的设施当作自己的，避免借用或破坏玩家设施。
 
 当前明确限制：
 
-- 当前原子工具覆盖移动、方块、实体、物品与具体配方，但还没有向模型开放任意容器槽点击、铁砧/锻造台/酿造台等完整菜单通用接口；既有 Java 高级控制器仍只作为兼容实现，不属于默认模型工具目录。需要新增能力时应增加可观察状态和原子接口，不应再增加自然语言关键词脚本。
+- 当前接口覆盖移动、方块、实体、物品、配方及上述连续生存技能，但还没有向模型开放任意容器槽点击、铁砧/锻造台/酿造台等完整菜单通用接口。需要新增能力时应增加可观察状态、原子接口或可验证连续技能，不应增加自然语言关键词旁路。
 - 寻路仍是围绕当前已加载区块的本地规划，不是全局 Baritone。长距离依靠分段加载；门、梯子、藤蔓、复杂跑酷、动态船只和未知模组地形仍可能阻塞。普通探索最多尝试有限方向，只会破坏经 `WildernessGuard` 判定的天然障碍。
 - 自主发展检查点会持久化，但它不是通用依赖 DAG；客户端在单个长动作中断线时由 Node 重新排队，已完成的局部世界修改不会自动回滚。完整下界要塞、要塞传送门和末地链必须在目标服继续长时间验收。
 - 自动采集只读取已加载范围；矿道是安全的双格阶梯/隧道搜索，不具备透视。人造结构、方块实体、危险流体或归属不明方块会停止并在 WebUI 说明原因。
 - 已实现熔炼、村民交易、附魔和床，但没有农业种植/繁殖、药水酿造、铁砧组合、锻造台升级或任意建筑设计器。住所目前是固定 3×3 安全小屋。
 - 村民交易只在成年、未占用且已加载的村民旁选择当前背包付得起的有益交易；不会自动刷职业或重置交易。附魔只使用当前附魔台可提供且经验/青金石付得起的选项。
 - 模组食物通过 26.2 的 `FOOD`/`CONSUMABLE` 数据组件识别；已知有害原版食物被拒绝，但未知模组副作用无法完全推断。模组矿物、装备、容器和配方需要后续注册表扩展。
-- Microsoft 正版登录自动化、正版披风上传、Simple Voice Chat 语音收发和自动通关尚未实现。语音模组可完成网络握手，但无界面环境没有音频设备。
+- Microsoft 正版登录自动化、正版披风上传和自动通关尚未实现。多模态语音输入协议已接入，但 Simple Voice Chat 仍缺少把实际语音帧写入感知目录的桥；Headless 环境没有音频设备时状态会显示 `unavailable`。
 
 ### 2026-08-05 实服回归结果
 
@@ -69,6 +69,7 @@
 - 这个真实结果和新世界状态回到同一模型会话后，DeepSeek 第二轮自行选择 `select_hotbar(slot=3)`；Fabric 与状态文件均确认快捷栏切换为 3。随后模型实际移动约 60 格，遇到“玩家距离荒野采集点不足 48 格”、无路、物品栏换位和 3×3 工作台前置条件失败时都读取错误后改变了下一步，而没有继续原计划。
 - 同轮后续由模型自行完成制作木棍、制作工作台、第一次放置失败后切换快捷栏再成功放置工作台，以及破坏一块验证过的天然草方块；第 16 步预算耗尽后安全结束。全部诊断来源都是 `model-tool-loop`，不是旧 `local-deterministic` 规划器。
 - 这证明“观察→一个原子工具→服务端结果→模型重新决策”在真实 DeepSeek API、真实 Fabric 26.2 客户端和实际服务器之间已经贯通，也证明安全拒绝会反馈给模型。该轮还发现并修复了 `craft_recipe` 归一化漏开 Fabric 动态荒野验证的问题；更新 jar 重启后，Agent 自行制作并放置工作台，随后得到 `verified_crafted_count=1; itemId=minecraft:furnace; grid=3x3`，又成功放置熔炉，真实复测已经通过。战斗、通用菜单和跨维度长链仍需要继续按后置条件验收。
+- 2026-08-07 低延迟改造后的受控实服测试不调用模型：Bot 从 Y=52 用一次连续技能下探到 Y=50，结果 `verified_tunnel_steps=1; verified_broken_blocks=6; inventory_delta=6; final_y=50`；随后一次上行技能返回 Y=52，结果 `verified_tunnel_steps=1; verified_broken_blocks=1; final_y=52`。真实 DeepSeek 单轮检查耗时约 6.7 秒、总计 3954 Token（输入 3364、输出 590、推理 414、缓存输入 3328），自行选择一次 `excavate_safely`，映射为 30 格连续安全矿道，而不是逐方块调用。该受控检查没有真的挖到钻石；完整“找到钻石→返程→交付”仍需继续实服验收。
 
 ## 运行结构
 
@@ -78,9 +79,9 @@
 Minecraft 26.2 + Fabric 桥（无界面）
         ↕ 仅本机 127.0.0.1:8765，JSON Lines
 Node.js AI 控制器
-        ├─ 模型原生工具调用（DeepSeek / 豆包 / OpenAI）
+        ├─ 模型原生工具调用（DeepSeek / 豆包 / MiMo / OpenAI）
         ├─ 人设、多人记忆、经验、持久任务调度
-        ├─ Agent 循环：观察 → 一个原子工具 → 真实结果 → 重规划
+        ├─ 分层 Agent：策略 → 原子工具/连续技能 → 真实结果 → 里程碑重规划
         └─ 密钥/行为硬规则 → Fabric 后置条件
 ```
 
@@ -99,10 +100,10 @@ npm run dashboard
 - 运行概览：控制器和 Minecraft 进程、PID、游戏阶段、坐标、生命、饱食度、维度、附近玩家、模组数量。
 - 启停：启动、停止、重启整个 Bot。
 - 服务器/EasyAuth：地址、名称、离线模式、超时、首次注册、登录密码。
-- 模型：DeepSeek/豆包/OpenAI、模型 ID、端点、推理强度、密钥以及一次最小额度测试。
-- Agent：玩家任务最大工具步数、空闲发展最大工具步数，以及“已获管理员 TP 权限”开关。步数是单轮安全上限，不是预写脚本长度；每一步都会再次调用模型。
+- 模型：DeepSeek/豆包/MiMo/OpenAI、模型 ID、端点、推理强度、密钥、能力检测与一次最小额度测试。
+- Agent：工具步数、API 次数、总 Token、单次输入/输出和后续推理强度硬预算；连续技能内部动作不会再次调用模型。还可配置视觉、语音帧、攻略搜索及“已获管理员 TP 权限”。
 - 聊天、人设、安全、记忆、日志等全部可设置项；难理解的区域带有可展开说明。
-- 总聊天：自动刷新玩家消息、Bot 游戏内回复、任务计划、逐步执行结果与完整错误；可切换“全部 / 仅游戏对话 / 仅警告与错误”。这里显示的是可验证的结构化决策摘要，不是模型隐藏思维链。
+- 总聊天：自动刷新玩家消息、Bot 游戏内回复、技能/工具结果、完整错误和每轮实际 Token/耗时；右侧汇总最近任务与 24 小时模型消耗。这里显示的是可验证诊断，不是模型隐藏思维链。
 - 模组：填写服务器客户端模组来源文件夹，保存后点“立即同步”；以后新增或升级 mod 仍使用同一个入口。
 - 局域网：选择“局域网自动发现”，在人类世界开放 LAN 后扫描并自动填写动态端口。
 - 皮肤：导入标准 PNG、选择手臂模型、安装万用皮肤加载器并生成其他玩家使用的皮肤包。
@@ -114,7 +115,7 @@ npm run dashboard
 
 ### Agent 与 TP 的设置
 
-WebUI“模型”区域的“玩家任务最大工具步数”对应 `config/bot.json` 的 `model.agentMaxSteps`，默认 `48`；“空闲发展最大工具步数”对应 `model.autonomousAgentMaxSteps`，默认 `16`。复杂任务需要多轮模型调用，调高会提高连续操作能力、延迟和 API 消耗；达到上限时 Bot 会安全停止，不会把未执行步骤当成成功。
+WebUI“模型”区域的“玩家任务最大工具步数”对应 `model.agentMaxSteps`，默认 `12`；“空闲发展最大工具步数”默认 `8`。更重要的费用硬限制是 `agentMaxApiCalls=8`、`agentMaxTaskTokens=160000`、`agentMaxInputTokensPerCall=48000` 和 `agentMaxOutputTokens=1024`。首次策略使用所选推理强度，成功工具的后续轮默认 `agentFollowupReasoningEffort:none`。达到任一上限会停止继续请求；若安全阶梯任务已下探，本地还会尝试返回任务起始高度。
 
 远距离传送默认关闭。先由服务器管理员给 Bot 游戏账号授予 `/tp` 或 `/teleport` 权限，再在 WebUI 勾选“已获管理员 TP 权限”，它会保存为 `autonomy.allowTeleportCommand:true` 并在下次启动传给 Fabric。模型只被允许发送 `tp <玩家名>` 或 `teleport <玩家名>`，含坐标、选择器和其他命令一律由硬策略拒绝。当前没有权限时不要打开；工具失败会返回模型，模型应改用寻路或自然说明无法抵达。
 
@@ -219,13 +220,21 @@ Copy-Item config\persona.example.json config\persona.json
     "baseUrl": "https://api.deepseek.com",
     "reasoningEffort": "high",
     "timeoutMs": 120000,
-    "maxOutputTokens": 4096
+    "maxOutputTokens": 4096,
+    "agentMaxSteps": 12,
+    "agentMaxApiCalls": 8,
+    "agentMaxTaskTokens": 160000,
+    "agentMaxInputTokensPerCall": 48000,
+    "agentMaxOutputTokens": 1024,
+    "agentFollowupReasoningEffort": "none",
+    "multimodal": { "autoDetect": true, "visionEnabled": true, "audioEnabled": true, "onlineResearchEnabled": true, "sensoryDirectory": "data/sensory" }
   }
 }
 ```
 
 - `provider:"deepseek"`：使用 `/chat/completions`；`none` 关闭思考，其余强度映射为 DeepSeek 当前支持的 `high/max`。
 - `provider:"volcengine"`：把 `model` 改成方舟控制台创建的豆包 Seed 2.1 Pro 端点/模型 ID，把 `baseUrl` 改成控制台给出的 OpenAI 兼容地址，密钥变量建议用 `ARK_API_KEY`。
+- `provider:"mimo"`：推荐 `model:"mimo-v2.5"`、`baseUrl:"https://api.xiaomimimo.com/v1"`、`apiKeyEnv:"MIMO_API_KEY"`。也支持 `mimo-v2.5-pro`；适配器按[小米 Chat Completions 官方文档](https://mimo.mi.com/docs/en-US/api/chat/openai-api)使用 `max_completion_tokens`、`thinking`、function tools、图像/音频输入并解析 `usage`，可用模型以[官方模型列表](https://mimo.mi.com/docs/en-US/api/model/list-models)为准。
 - `provider:"openai"`：使用 `/responses`，密钥变量建议用 `OPENAI_API_KEY`。GPT-5.6 旗舰可填 `gpt-5.6-sol`（或会路由到 Sol 的 `gpt-5.6` 别名），平衡/高吞吐角色可分别选择 `gpt-5.6-terra` / `gpt-5.6-luna`；以账号实际权限为准。官方说明见 [Using GPT-5.6](https://developers.openai.com/api/docs/guides/latest-model?model=gpt-5.6)。
 
 ### 3. 注入秘密
@@ -243,7 +252,7 @@ $env:DEEPSEEK_API_KEY='你的 API Key'
 $env:MINECRAFT_LOGIN_PASSWORD='你的 EasyAuth 密码'
 ```
 
-改用豆包或 OpenAI 时设置 `ARK_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。没有模型 Key 时 Bot 仍会进入游戏并保持后台连接，但收到 AI 请求会明确失败，不会伪造回答。
+改用豆包、MiMo 或 OpenAI 时设置 `ARK_API_KEY`、`MIMO_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。没有模型 Key 时 Bot 仍会进入游戏并保持后台连接，但收到 AI 请求会明确失败，不会伪造回答。
 
 ### 4. 构建控制器和 Fabric 桥
 
@@ -359,7 +368,7 @@ CialloAI 跟着我
 
 `memory.json`、`experience.json`、`tasks.json` 和 `diagnostics.json` 正常写入时会生成同名 `.bak`。误删这些主文件但备份仍在时，应先停止程序，再把对应 `.bak` 复制回原文件名。`.env` 也不会随源码或 Git 自动迁移，必须通过安全渠道在新机器重新配置，不能发进游戏聊天、提交记录或问题截图。
 
-原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。接近上下文预算时，`ContextCompressor` 保留最近事件，把更早内容总结到该玩家摘要、全局摘要和对应 `USER.md`，随后原子删除已经压缩的事件 ID。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `data/agent-prompts/`。
+原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。只有真实记忆/画像接近预算时，`ContextCompressor` 才保留最近事件并总结更早内容；世界快照不再误算成记忆压力。压缩在玩家任务结束后后台启动，返回格式错误会记录到总控台但不会让“来找我”等游戏任务失败。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `data/agent-prompts/`。
 
 ## 离线皮肤与多人可见
 
@@ -418,7 +427,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/index.ts` | 后台控制器入口，加载配置并处理停止信号 |
 | `src/config/types.ts` | 所有配置、规则、人设和推理强度的 TypeScript 契约 |
 | `src/config/load-config.ts` | 读取 `.env`/JSON、校验必填值，进程环境变量优先于 `.env` |
-| `src/llm/provider-factory.ts` | 用统一接口分别生成 DeepSeek/方舟 Chat Completions 与 OpenAI Responses 请求 |
+| `src/llm/provider-factory.ts` | DeepSeek/方舟/MiMo Chat Completions、OpenAI Responses、能力检测、附件和 usage 解析 |
 | `src/llm/types.ts` | 模型请求/响应边界，使核心逻辑不绑定供应商 SDK |
 | `src/agent/prompt.ts` | 旧 `prompts.json` 兼容提示词；新部署由 Markdown 工作区接管 |
 | `src/agent/decision.ts` | 解析模型的 `chat/action` 意图，把行动 JSON 清洗成有限工具；显式聊天即使误带动作也不会执行 |
@@ -427,8 +436,10 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/agent/addressing.ts` | 根据显式名称、`!`、玩家距离、语气和最近对话判断消息是否在叫 Bot |
 | `src/agent/capability-assessor.ts` | 在动作前检查开关、目标、食物和装备门槛；逐格环境与玩家距离由 Fabric 硬检查 |
 | `src/agent/world-state.ts` | 结构化世界状态，包括生命、物理环境、装备/附魔、实体、动作和住所 |
+| `src/agent/tool-agent.ts` | 分层 Agent 循环、原子工具/连续技能映射、增量观察、API/Token 硬预算与地下自动返程 |
+| `src/agent/multimodal-sensors.ts` | 读取新鲜画面/语音帧；没有画面时把真实方块和实体渲染成小尺寸 PNG 语义图 |
 | `src/memory/memory-store.ts` | 单文件长期记忆、UUID 玩家隔离和事件裁剪 |
-| `src/memory/context-compressor.ts` | 上下文接近预算时压缩旧事件，更新摘要和当前玩家 `USER.md` |
+| `src/memory/context-compressor.ts` | 只按真实记忆压力压缩旧事件；在玩家任务后后台运行，更新摘要和当前玩家 `USER.md` |
 | `src/prompts/prompt-workspace.ts` | 管理五份 Markdown 提示词、分玩家画像和声明式行为补丁，限制运行时写入边界 |
 | `src/self-improvement/self-improvement-manager.ts` | 聚合同类失败、可选检索公开资料，并只写受限经验段/声明式补丁 |
 | `src/experience/experience-store.ts` | 独立经验文件及任务关键词检索 |
@@ -497,13 +508,20 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `easyAuth.registerIfNeeded` | `true` | 新名称收到提示时是否允许注册 |
 | `easyAuth.passwordEnv` | `MINECRAFT_LOGIN_PASSWORD` | 从哪个环境变量读取密码 |
 | `easyAuth.loginDelayMs` | `1500` | Mineflayer 诊断路线等待时间；Fabric 使用提示优先/5 秒回退 |
-| `model.provider` | `deepseek` | `deepseek`、`volcengine` 或 `openai` |
+| `model.provider` | `deepseek` | `deepseek`、`volcengine`、`mimo` 或 `openai` |
 | `model.model` | `deepseek-v4-flash` | 实际模型名或方舟端点 ID |
 | `model.apiKeyEnv` | `DEEPSEEK_API_KEY` | 当前供应商密钥变量名 |
 | `model.baseUrl` | `https://api.deepseek.com` | API 根地址，可换兼容网关 |
 | `model.reasoningEffort` | `high` | `none/low/medium/high/xhigh/max` |
 | `model.timeoutMs` | `120000` | 单次模型请求超时；高推理建议至少 120 秒 |
 | `model.maxOutputTokens` | `4096` | 单次最大生成量；同时约束推理内容，避免游戏决策长时间卡住 |
+| `model.agentMaxSteps` / `autonomousAgentMaxSteps` | `12` / `8` | 玩家/空闲单轮最多模型工具步骤；连续技能内部低层动作不计入 |
+| `model.agentMaxApiCalls` | `8` | 一个玩家任务最多模型 API 次数，发送第 9 次前硬停止 |
+| `model.agentMaxTaskTokens` | `160000` | 一个任务累计输入+输出 Token 硬上限；优先使用供应商实际 `usage` |
+| `model.agentMaxInputTokensPerCall` | `48000` | 每次请求发送前的保守中英文 Token 估算上限 |
+| `model.agentMaxOutputTokens` | `1024` | Agent 单轮决策输出上限，不改变普通聊天/压缩的 `maxOutputTokens` |
+| `model.agentFollowupReasoningEffort` | `none` | 首次策略后成功工具续轮的推理强度，降低重复思考延迟/费用 |
+| `model.multimodal.*` | 自动检测且全开 | 按模型能力开启视觉、语音帧、攻略搜索与 `data/sensory` 目录 |
 | `chat.requireMention` | `true` | 无充分近距离/连续对话语境时是否要求提到 Bot 或用 `!`；并非关闭语境判断 |
 | `chat.replyPrefix` | 空 | 每次游戏回复前缀 |
 | `chat.cooldownMs` | `2500` | 防止连续回复刷屏 |
@@ -522,7 +540,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `autonomy.directAddressDistance` | `8` | 无点名直接命令的近距离范围 |
 | `autonomy.conversationWindowMs` | `60000` | 同一玩家自然续接对话的时间 |
 | `autonomy.lowHealthThreshold` / `criticalHealthThreshold` | `10` / `6` | 进食与避免普通主动战斗的阈值 |
-| `autonomy.eatBelowFood` / `hostileScanRadius` | `16` / `12` | 自主进食饱食阈值与威胁扫描距离 |
+| `autonomy.eatBelowFood` / `hostileScanRadius` | `20` / `12` | 饱食度不满即自主进食，与威胁扫描距离 |
 | `autonomy.wildernessMinPlayerDistance` | `48` | 采集/建房开始及运行期间与其他玩家的硬距离 |
 | `autonomy.safeIdleEnabled` | `true` | 任务完成后寻找住所/安全点并停止等待 |
 | `autonomy.autoGather/autoCraft/autoBuildShelter` | `true` | 允许规划对应原语，仍需安全前置条件 |
@@ -597,6 +615,10 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 **Bot 回复“我刚才处理失败了，稍后再试”**
 
 先在 WebUI 点击“测试模型接口”。若最小测试成功而真人消息仍失败，查看 Bot 日志是否为 `TimeoutError`。V4 思考模式可能生成很长的推理内容；按照 [DeepSeek JSON Output 官方说明](https://api-docs.deepseek.com/guides/json_mode/)应合理设置输出上限，且官方明确说明 JSON 模式偶尔会返回空内容。项目首次请求仍使用配置的推理强度；只有 `content` 为空时才修改提示并以非思考模式重试一次，绝不把 `reasoning_content` 当成聊天答案，也不会无限重试消耗额度。默认最大输出为 4096 Token、超时为 120000 毫秒，可在“大模型”页面调整。超时时游戏内会自然地请玩家再说一次，详细错误留在总控台。
+
+**挖一个方块等约 10 秒、短时间消耗百万 Token**
+
+这是旧版“一个方块一次模型决策”造成的，不应通过继续提高 `agentMaxSteps` 解决。当前版本让模型一次选择 `excavate_safely` / `gather_resource` 等连续技能，本地逐 Tick 执行；每次工具结果只回传增量观察，起始世界状态不再重复两份。WebUI 总聊天会显示每一模型轮的实际 `usage` 与耗时；默认 8 次 API、16 万总 Token、4.8 万单次输入和 1024 单轮输出均为硬上限。若升级后仍看到几十次 `break_block`，说明运行目录没有同步/重建，应停止 Bot、重新构建并确认总聊天标题为“启动分层 Agent 工具闭环”。
 
 ## 测试状态
 

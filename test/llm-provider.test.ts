@@ -160,3 +160,36 @@ test('OpenAI Responses 工具循环用 previous_response_id 回传 function_call
     assert.equal(second.text, '完成观察。')
   } finally { await logger.flush(); await api.close() }
 })
+
+test('小米 MiMo 使用官方 Chat Completions 参数、原生工具调用和用量统计', async () => {
+  const api = await mockApi({
+    model: 'mimo-v2.5',
+    choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'm1', type: 'function', function: { name: 'observe_world', arguments: '{}' } }] } }],
+    usage: { prompt_tokens: 321, completion_tokens: 45, total_tokens: 366, completion_tokens_details: { reasoning_tokens: 12 } }
+  })
+  const logger = new Logger({ file: path.join(tmpdir(), `minecraft-ai-mimo-${process.pid}.log`), level: 'error', console: false })
+  try {
+    const mimo = config('mimo', api.baseUrl)
+    mimo.model = 'mimo-v2.5'
+    mimo.apiKeyEnv = 'MIMO_API_KEY'
+    const provider = createLlmProvider(mimo, 'test-key', logger)
+    const result = await provider.toolTurn!({
+      system: 's', user: 'u', maxOutputTokens: 768, reasoningEffort: 'high',
+      attachments: [{ type: 'image', mimeType: 'image/png', dataBase64: 'aW1hZ2U=' }],
+      tools: [{ name: 'observe_world', description: 'observe', parameters: { type: 'object', properties: {}, additionalProperties: false } }]
+    })
+    const received = await api.request
+    assert.equal(received.url, '/chat/completions')
+    assert.equal(received.body.max_completion_tokens, 768)
+    assert.deepEqual(received.body.thinking, { type: 'enabled' })
+    const messages = received.body.messages as Array<Record<string, unknown>>
+    assert.ok(Array.isArray(messages[1]?.content))
+    assert.match(JSON.stringify(messages[1]?.content), /data:image\/png;base64,aW1hZ2U=/u)
+    assert.equal(result.toolCalls[0]?.name, 'observe_world')
+    assert.equal(result.usage?.totalTokens, 366)
+    assert.equal(result.usage?.reasoningTokens, 12)
+    assert.equal(provider.capabilities?.vision, true)
+    assert.equal(provider.capabilities?.audio, true)
+    assert.equal(provider.capabilities?.webSearch, true)
+  } finally { await logger.flush(); await api.close() }
+})

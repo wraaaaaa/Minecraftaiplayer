@@ -69,3 +69,62 @@ test('一个工具失败后不会继续旧计划，而是把失败交还模型�
   assert.match(second.toolResults?.[0]?.output ?? '', /permission_denied/u)
   assert.equal(result.reply, '我没有传送权限，只能正常赶过去。')
 })
+
+test('模型可选择安全挖掘技能，一次工具调用连续完成多格而不是逐方块请求模型', async () => {
+  let providerCalls = 0
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('unexpected') },
+    toolTurn: async () => {
+      providerCalls++
+      if (providerCalls === 1) return {
+        text: '',
+        toolCalls: [{ id: 'mine-1', name: 'excavate_safely', arguments: '{"resource":"diamond_ore","target_y":-53,"length":48}' }],
+        continuation: [{ role: 'assistant' }], model: 'mock', requestedEffort: 'high', effectiveEffort: 'high',
+        usage: { inputTokens: 800, outputTokens: 60, totalTokens: 860 }
+      }
+      return {
+        text: '我已经沿着安全阶梯挖到目标高度了。', toolCalls: [], model: 'mock',
+        requestedEffort: 'none', effectiveEffort: 'none', usage: { inputTokens: 300, outputTokens: 20, totalTokens: 320 }
+      }
+    }
+  }
+  const actions: AgentAction[] = []
+  const result = await new ToolAgent({
+    provider,
+    executor: {
+      execute: async action => { actions.push(action); return { ok: true, detail: 'verified_tunnel_steps=48; inventory_delta=1' } },
+      chat: async () => {}, snapshot: () => initial
+    },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 8, maxApiCalls: 4, maxTaskTokens: 10_000
+  }).run({ system: 'system', goal: '挖一个钻石', initialWorld: initial })
+  assert.equal(providerCalls, 2)
+  assert.deepEqual(actions, [{ type: 'excavate_tunnel', resource: 'diamond_ore', targetY: -53, length: 48, verifiedWilderness: true }])
+  assert.equal(result.steps, 1)
+  assert.equal(result.apiCalls, 2)
+  assert.equal(result.usage.totalTokens, 1180)
+})
+
+test('任务 Token 硬预算会在下一次请求前停止，避免失控循环', async () => {
+  let providerCalls = 0
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('unexpected') },
+    toolTurn: async () => {
+      providerCalls++
+      return {
+        text: '', toolCalls: [{ id: `wait-${providerCalls}`, name: 'wait_ticks', arguments: '{"ticks":1}' }],
+        continuation: [], model: 'mock', requestedEffort: 'high', effectiveEffort: 'high',
+        usage: { inputTokens: 900, outputTokens: 100, totalTokens: 1000 }
+      }
+    }
+  }
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async () => ({ ok: true, detail: 'ok' }), chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 20, maxApiCalls: 20, maxTaskTokens: 1_500, maxOutputTokens: 128,
+    estimateTokens: () => 600
+  }).run({ system: 'system', goal: '等待', initialWorld: initial })
+  assert.equal(providerCalls, 1)
+  assert.equal(result.ok, false)
+  assert.match(result.detail, /agent_token_budget_exhausted/u)
+  assert.equal(result.usage.totalTokens, 1000)
+})

@@ -4,6 +4,9 @@ import type {
   LlmProvider,
   LlmRequest,
   LlmResponse,
+  LlmInputAttachment,
+  LlmUsage,
+  ModelCapabilities,
   LlmToolCall,
   LlmToolTurnRequest,
   LlmToolTurnResponse
@@ -31,6 +34,13 @@ interface ChatPayload {
       tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>
     }
   }>
+  usage?: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+    completion_tokens_details?: { reasoning_tokens?: number }
+    prompt_tokens_details?: { cached_tokens?: number } | null
+  }
 }
 
 type ChatMessage = Record<string, unknown>
@@ -57,6 +67,66 @@ function emptyChatMetadata(payload: unknown): Record<string, unknown> {
     finishReason: choice?.finish_reason ?? 'missing',
     contentType: choice?.message?.content === null ? 'null' : typeof choice?.message?.content,
     hasReasoningContent: typeof choice?.message?.reasoning_content === 'string' && choice.message.reasoning_content.length > 0
+  }
+}
+
+function numeric(value: unknown): number { return typeof value === 'number' && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0 }
+
+function chatUsage(payload: unknown): LlmUsage | undefined {
+  const usage = (payload as ChatPayload).usage
+  if (!usage) return undefined
+  const inputTokens = numeric(usage.prompt_tokens)
+  const outputTokens = numeric(usage.completion_tokens)
+  return {
+    inputTokens,
+    outputTokens,
+    totalTokens: numeric(usage.total_tokens) || inputTokens + outputTokens,
+    ...(numeric(usage.completion_tokens_details?.reasoning_tokens) > 0 ? { reasoningTokens: numeric(usage.completion_tokens_details?.reasoning_tokens) } : {}),
+    ...(numeric(usage.prompt_tokens_details?.cached_tokens) > 0 ? { cachedInputTokens: numeric(usage.prompt_tokens_details?.cached_tokens) } : {})
+  }
+}
+
+function attachmentContent(text: string, attachments: LlmInputAttachment[] | undefined): unknown {
+  if (!attachments?.length) return text
+  return [
+    { type: 'text', text },
+    ...attachments.map(attachment => attachment.type === 'image'
+      ? { type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } }
+      : attachment.type === 'audio'
+        ? { type: 'input_audio', input_audio: { data: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } }
+        : { type: 'video_url', video_url: { url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } })
+  ]
+}
+
+export function detectModelCapabilities(config: BotConfig['model']): ModelCapabilities {
+  const model = config.model.toLowerCase()
+  let detected: Omit<ModelCapabilities, 'detection'> = { vision: false, audio: false, video: false, webSearch: false }
+  let detection: ModelCapabilities['detection'] = 'provider_model_registry'
+  if (config.provider === 'mimo' && /^mimo-v2\.5(?:-pro)?(?:$|[-_])/u.test(model)) {
+    detected = { vision: true, audio: true, video: true, webSearch: true }
+  } else if (config.provider === 'openai' && /(?:gpt-4o|gpt-5(?:\.|-|$))/u.test(model)) {
+    detected = { vision: true, audio: /(?:audio|realtime)/u.test(model), video: false, webSearch: true }
+  } else if (config.provider === 'volcengine' && /(?:vision|doubao-seed-2\.1)/u.test(model)) {
+    detected = { vision: true, audio: false, video: false, webSearch: false }
+  } else if (config.provider !== 'deepseek') {
+    detection = 'unknown'
+  }
+  const enabled = config.multimodal
+  if (enabled?.autoDetect === false) {
+    return {
+      vision: enabled.visionEnabled,
+      audio: enabled.audioEnabled,
+      video: false,
+      webSearch: enabled.onlineResearchEnabled,
+      detection: 'configured_override'
+    }
+  }
+  return {
+    vision: detected.vision && (enabled?.visionEnabled ?? true),
+    audio: detected.audio && (enabled?.audioEnabled ?? true),
+    video: detected.video && (enabled?.visionEnabled ?? true),
+    webSearch: detected.webSearch && (enabled?.onlineResearchEnabled ?? true),
+    detection
   }
 }
 
@@ -89,10 +159,15 @@ async function postJson(url: string, apiKey: string, body: unknown, timeoutMs: n
 }
 
 class ChatCompletionsProvider implements LlmProvider {
+  readonly capabilities: ModelCapabilities
   readonly #options: ProviderOptions
-  readonly #provider: 'deepseek' | 'volcengine'
+  readonly #provider: 'deepseek' | 'volcengine' | 'mimo'
 
-  constructor(provider: 'deepseek' | 'volcengine', options: ProviderOptions) { this.#provider = provider; this.#options = options }
+  constructor(provider: 'deepseek' | 'volcengine' | 'mimo', options: ProviderOptions, capabilities: ModelCapabilities) {
+    this.#provider = provider
+    this.#options = options
+    this.capabilities = capabilities
+  }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
     const requested = this.#options.effort
@@ -118,8 +193,9 @@ class ChatCompletionsProvider implements LlmProvider {
     const endpoint = `${normalizeBaseUrl(this.#options.baseUrl)}/chat/completions`
     const payload = await postJson(endpoint, this.#options.apiKey, body, this.#options.timeoutMs)
     const firstText = chatText(payload)
-    if (firstText) return { text: firstText, model: this.#options.model, requestedEffort: requested, effectiveEffort: effective }
-    if (this.#provider !== 'deepseek') return { text: requireChatText(payload), model: this.#options.model, requestedEffort: requested, effectiveEffort: effective }
+    const usage = chatUsage(payload)
+    if (firstText) return { text: firstText, model: this.#options.model, requestedEffort: requested, effectiveEffort: effective, ...(usage ? { usage } : {}) }
+    if (this.#provider !== 'deepseek') return { text: requireChatText(payload), model: this.#options.model, requestedEffort: requested, effectiveEffort: effective, ...(usage ? { usage } : {}) }
 
     // DeepSeek documents that JSON Output may occasionally return an empty content field.
     // Retry once with a changed prompt and thinking disabled: this caps extra spend, avoids
@@ -141,16 +217,17 @@ class ChatCompletionsProvider implements LlmProvider {
       this.#options.logger.warn('DeepSeek JSON Output 重试后仍为空', emptyChatMetadata(retried))
       throw new Error('DeepSeek 连续两次返回空的 JSON content')
     }
-    return { text: retriedText, model: this.#options.model, requestedEffort: requested, effectiveEffort: 'none' }
+    const retryUsage = chatUsage(retried)
+    return { text: retriedText, model: this.#options.model, requestedEffort: requested, effectiveEffort: 'none', ...(retryUsage ? { usage: retryUsage } : {}) }
   }
 
   async toolTurn(request: LlmToolTurnRequest): Promise<LlmToolTurnResponse> {
-    const requested = this.#options.effort
+    const requested = request.reasoningEffort ?? this.#options.effort
     let effective = requested
     const previous = Array.isArray(request.continuation) ? request.continuation as ChatMessage[] : undefined
     const messages: ChatMessage[] = previous
       ? structuredClone(previous)
-      : [{ role: 'system', content: request.system }, { role: 'user', content: request.user }]
+      : [{ role: 'system', content: request.system }, { role: 'user', content: attachmentContent(request.user, request.attachments) }]
     for (const result of request.toolResults ?? []) {
       messages.push({ role: 'tool', tool_call_id: result.callId, content: result.output })
     }
@@ -164,7 +241,9 @@ class ChatCompletionsProvider implements LlmProvider {
       } })),
       parallel_tool_calls: false,
       stream: false,
-      max_tokens: this.#options.maxOutputTokens
+      ...(this.#provider === 'mimo'
+        ? { max_completion_tokens: request.maxOutputTokens ?? this.#options.maxOutputTokens }
+        : { max_tokens: request.maxOutputTokens ?? this.#options.maxOutputTokens })
     }
     if (this.#provider === 'deepseek') {
       if (requested === 'none') body.thinking = { type: 'disabled' }
@@ -173,6 +252,9 @@ class ChatCompletionsProvider implements LlmProvider {
         body.thinking = { type: 'enabled' }
         body.reasoning_effort = effective
       }
+    } else if (this.#provider === 'mimo') {
+      effective = requested === 'none' ? 'none' : 'high'
+      body.thinking = { type: requested === 'none' ? 'disabled' : 'enabled' }
     } else {
       body.reasoning_effort = requested
     }
@@ -191,20 +273,23 @@ class ChatCompletionsProvider implements LlmProvider {
       ...(assistant.tool_calls ? { tool_calls: assistant.tool_calls } : {})
     }
     messages.push(assistantMessage)
+    const usage = chatUsage(payload)
     return {
       text,
       toolCalls: calls,
       continuation: messages,
       model: this.#options.model,
       requestedEffort: requested,
-      effectiveEffort: effective
+      effectiveEffort: effective,
+      ...(usage ? { usage } : {})
     }
   }
 }
 
 class OpenAiResponsesProvider implements LlmProvider {
+  readonly capabilities: ModelCapabilities
   readonly #options: ProviderOptions
-  constructor(options: ProviderOptions) { this.#options = options }
+  constructor(options: ProviderOptions, capabilities: ModelCapabilities) { this.#options = options; this.capabilities = capabilities }
 
   async complete(request: LlmRequest): Promise<LlmResponse> {
     const effort = this.#options.effort
@@ -219,13 +304,17 @@ class OpenAiResponsesProvider implements LlmProvider {
   }
 
   async toolTurn(request: LlmToolTurnRequest): Promise<LlmToolTurnResponse> {
-    const effort = this.#options.effort
+    const effort = request.reasoningEffort ?? this.#options.effort
     const state = request.continuation && typeof request.continuation === 'object'
       ? request.continuation as { previousResponseId?: string }
       : undefined
     const input = state?.previousResponseId
       ? (request.toolResults ?? []).map(result => ({ type: 'function_call_output', call_id: result.callId, output: result.output }))
-      : [{ role: 'system', content: request.system }, { role: 'user', content: request.user }]
+      : [{ role: 'system', content: request.system }, { role: 'user', content: request.attachments?.length
+        ? [{ type: 'input_text', text: request.user }, ...request.attachments.flatMap(attachment => attachment.type === 'image'
+          ? [{ type: 'input_image', image_url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` }]
+          : [])]
+        : request.user }]
     const body: Record<string, unknown> = {
       model: this.#options.model,
       input,
@@ -236,7 +325,7 @@ class OpenAiResponsesProvider implements LlmProvider {
       parallel_tool_calls: false,
       reasoning: { effort },
       text: { verbosity: 'low' },
-      max_output_tokens: this.#options.maxOutputTokens
+      max_output_tokens: request.maxOutputTokens ?? this.#options.maxOutputTokens
     }
     if (state?.previousResponseId) body.previous_response_id = state.previousResponseId
     const payload = await postJson(`${normalizeBaseUrl(this.#options.baseUrl)}/responses`, this.#options.apiKey, body, this.#options.timeoutMs)
@@ -244,6 +333,7 @@ class OpenAiResponsesProvider implements LlmProvider {
       id?: string
       output_text?: string
       output?: Array<{ type?: string; call_id?: string; name?: string; arguments?: string; content?: Array<{ type?: string; text?: string }> }>
+      usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } }
     }
     if (!response.id) throw new Error('OpenAI Responses 工具调用返回缺少 id')
     const toolCalls: LlmToolCall[] = (response.output ?? []).flatMap(item =>
@@ -259,30 +349,39 @@ class OpenAiResponsesProvider implements LlmProvider {
       }
     }
     if (toolCalls.length === 0 && !text) throw new Error('OpenAI 既未调用工具，也未返回最终文本')
+    const usage = response.usage ? {
+      inputTokens: numeric(response.usage.input_tokens), outputTokens: numeric(response.usage.output_tokens),
+      totalTokens: numeric(response.usage.total_tokens) || numeric(response.usage.input_tokens) + numeric(response.usage.output_tokens),
+      ...(numeric(response.usage.output_tokens_details?.reasoning_tokens) > 0 ? { reasoningTokens: numeric(response.usage.output_tokens_details?.reasoning_tokens) } : {}),
+      ...(numeric(response.usage.input_tokens_details?.cached_tokens) > 0 ? { cachedInputTokens: numeric(response.usage.input_tokens_details?.cached_tokens) } : {})
+    } : undefined
     return {
       text,
       toolCalls,
       continuation: { previousResponseId: response.id },
       model: this.#options.model,
       requestedEffort: effort,
-      effectiveEffort: effort
+      effectiveEffort: effort,
+      ...(usage ? { usage } : {})
     }
   }
 }
 
 class MissingKeyProvider implements LlmProvider {
+  readonly capabilities: ModelCapabilities
   readonly #variable: string
-  constructor(variable: string) { this.#variable = variable }
+  constructor(variable: string, capabilities: ModelCapabilities) { this.#variable = variable; this.capabilities = capabilities }
   async complete(): Promise<LlmResponse> { throw new Error(`缺少模型 API Key 环境变量：${this.#variable}`) }
   async toolTurn(): Promise<LlmToolTurnResponse> { throw new Error(`缺少模型 API Key 环境变量：${this.#variable}`) }
 }
 
 export function createLlmProvider(config: BotConfig['model'], apiKey: string, logger: Logger): LlmProvider {
+  const capabilities = detectModelCapabilities(config)
   if (!apiKey) {
     logger.warn('模型 API Key 未配置；Bot 仍可进入游戏，但不会处理 AI 请求', { variable: config.apiKeyEnv })
-    return new MissingKeyProvider(config.apiKeyEnv)
+    return new MissingKeyProvider(config.apiKeyEnv, capabilities)
   }
   const options: ProviderOptions = { model: config.model, apiKey, baseUrl: config.baseUrl, effort: config.reasoningEffort, timeoutMs: config.timeoutMs, maxOutputTokens: config.maxOutputTokens ?? 4096, logger }
-  if (config.provider === 'openai') return new OpenAiResponsesProvider(options)
-  return new ChatCompletionsProvider(config.provider, options)
+  if (config.provider === 'openai') return new OpenAiResponsesProvider(options, capabilities)
+  return new ChatCompletionsProvider(config.provider, options, capabilities)
 }

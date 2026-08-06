@@ -25,7 +25,7 @@ export interface BotConfig {
     loginDelayMs: number
   }
   model: {
-    provider: 'deepseek' | 'volcengine' | 'openai'
+    provider: 'deepseek' | 'volcengine' | 'openai' | 'mimo'
     model: string
     apiKeyEnv: string
     baseUrl: string
@@ -36,6 +36,23 @@ export interface BotConfig {
     agentMaxSteps?: number
     /** Smaller per-heartbeat budget for idle self-development. */
     autonomousAgentMaxSteps?: number
+    /** Hard provider-call budget for one player task. */
+    agentMaxApiCalls?: number
+    /** Hard total input+output token budget for one player task. */
+    agentMaxTaskTokens?: number
+    /** Estimated/actual input ceiling for any single Agent request. */
+    agentMaxInputTokensPerCall?: number
+    /** Smaller output ceiling for one Agent decision. */
+    agentMaxOutputTokens?: number
+    /** Successful tool follow-ups normally do not need another long chain of thought. */
+    agentFollowupReasoningEffort?: ReasoningEffort
+    multimodal?: {
+      autoDetect: boolean
+      visionEnabled: boolean
+      audioEnabled: boolean
+      onlineResearchEnabled: boolean
+      sensoryDirectory: string
+    }
   }
   chat: {
     requireMention: boolean

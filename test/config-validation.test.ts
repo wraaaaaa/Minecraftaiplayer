@@ -33,3 +33,16 @@ test('auto-respawn delay is validated while old configs remain compatible', () =
   invalid.server.respawnDelayMs = 60001
   assert.throws(() => validateConfig(invalid), /0-60000/)
 })
+
+test('小米 MiMo 与 Agent 费用硬预算配置可通过校验', () => {
+  const config = structuredClone(baseConfig)
+  config.model = {
+    provider: 'mimo', model: 'mimo-v2.5', apiKeyEnv: 'MIMO_API_KEY', baseUrl: 'https://api.xiaomimimo.com/v1',
+    reasoningEffort: 'high', timeoutMs: 120_000, maxOutputTokens: 2048,
+    agentMaxSteps: 12, agentMaxApiCalls: 8, agentMaxTaskTokens: 160_000,
+    agentMaxInputTokensPerCall: 48_000, agentMaxOutputTokens: 1024,
+    agentFollowupReasoningEffort: 'none',
+    multimodal: { autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory' }
+  }
+  assert.doesNotThrow(() => validateConfig(config))
+})
