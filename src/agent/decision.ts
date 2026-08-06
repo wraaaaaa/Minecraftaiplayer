@@ -1,6 +1,7 @@
 import type { AgentAction } from '../policy/policy-engine.js'
 
 export interface AgentDecision {
+  intent: 'chat' | 'action'
   reply: string
   action: AgentAction
   actions?: AgentAction[]
@@ -168,7 +169,19 @@ export function parseAgentDecision(text: string, options: { currentPlayerName?: 
   const firstError = normalizedActions.find(result => result.error)?.error
   const actions = normalizedActions.map(result => result.action).filter(action => action.type !== 'none')
   const primary = actions[0] ?? normalized.action
+  const requestedIntent = root.intent === 'chat' || root.intent === 'action' ? root.intent : undefined
+  const intent: AgentDecision['intent'] = requestedIntent
+    ?? (actions.length > 0 || primary.type !== 'none' || Boolean(firstError ?? normalized.error) ? 'action' : 'chat')
+  if (intent === 'chat') {
+    return {
+      intent,
+      reply,
+      action: { type: 'none' },
+      ...(remember ? { remember } : {})
+    }
+  }
   return {
+    intent,
     reply,
     action: primary,
     ...(actions.length > 0 ? { actions } : {}),

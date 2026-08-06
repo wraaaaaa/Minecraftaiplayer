@@ -22,4 +22,7 @@ test('旧 prompts.json 也会获得受保护破坏方块兼容入口', () => {
   const prompt = buildSystemPrompt(persona, legacy)
   assert.match(prompt, /可输出 break_block（block\/count）或 gather_resource（resource\/count）/u)
   assert.match(prompt, /Fabric 会逐目标验证天然方块、玩家结构、危险源和撤退路径/u)
+  assert.match(prompt, /普通聊天、分享、提问、玩笑、感叹/u)
+  assert.match(prompt, /只有明确的游戏行动请求才使用 intent=action/u)
+  assert.match(prompt, /把自己当作平等联机的 Minecraft 玩家/u)
 })

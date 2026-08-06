@@ -14,10 +14,33 @@ interface ProviderOptions {
 
 function normalizeBaseUrl(value: string): string { return value.replace(/\/+$/u, '') }
 
-function parseChatText(payload: unknown): string {
-  const root = payload as { choices?: Array<{ message?: { content?: string } }> }
+interface ChatPayload {
+  choices?: Array<{
+    finish_reason?: string | null
+    message?: { content?: string | null; reasoning_content?: string | null }
+  }>
+}
+
+function chatText(payload: unknown): string | undefined {
+  const root = payload as ChatPayload
   const text = root.choices?.[0]?.message?.content
-  if (typeof text !== 'string' || text.trim() === '') throw new Error('模型返回中缺少 choices[0].message.content')
+  return typeof text === 'string' && text.trim() ? text : undefined
+}
+
+function emptyChatMetadata(payload: unknown): Record<string, unknown> {
+  const root = payload as ChatPayload
+  const choice = root.choices?.[0]
+  return {
+    choiceCount: root.choices?.length ?? 0,
+    finishReason: choice?.finish_reason ?? 'missing',
+    contentType: choice?.message?.content === null ? 'null' : typeof choice?.message?.content,
+    hasReasoningContent: typeof choice?.message?.reasoning_content === 'string' && choice.message.reasoning_content.length > 0
+  }
+}
+
+function requireChatText(payload: unknown): string {
+  const text = chatText(payload)
+  if (!text) throw new Error('模型返回中缺少 choices[0].message.content')
   return text
 }
 
@@ -70,8 +93,33 @@ class ChatCompletionsProvider implements LlmProvider {
       body.reasoning_effort = requested
     }
     if (effective !== requested) this.#options.logger.warn('供应商调整了推理强度', { provider: this.#provider, requested, effective })
-    const payload = await postJson(`${normalizeBaseUrl(this.#options.baseUrl)}/chat/completions`, this.#options.apiKey, body, this.#options.timeoutMs)
-    return { text: parseChatText(payload), model: this.#options.model, requestedEffort: requested, effectiveEffort: effective }
+    const endpoint = `${normalizeBaseUrl(this.#options.baseUrl)}/chat/completions`
+    const payload = await postJson(endpoint, this.#options.apiKey, body, this.#options.timeoutMs)
+    const firstText = chatText(payload)
+    if (firstText) return { text: firstText, model: this.#options.model, requestedEffort: requested, effectiveEffort: effective }
+    if (this.#provider !== 'deepseek') return { text: requireChatText(payload), model: this.#options.model, requestedEffort: requested, effectiveEffort: effective }
+
+    // DeepSeek documents that JSON Output may occasionally return an empty content field.
+    // Retry once with a changed prompt and thinking disabled: this caps extra spend, avoids
+    // treating reasoning_content as the final answer, and still keeps the normal request at
+    // the administrator-selected reasoning effort.
+    this.#options.logger.warn('DeepSeek JSON Output 返回空内容，使用非思考模式重试一次', emptyChatMetadata(payload))
+    const retryBody: Record<string, unknown> = {
+      ...body,
+      messages: [
+        { role: 'system', content: `${request.system}\n\n重要：直接输出一个非空 JSON 对象，不要输出空白内容。` },
+        { role: 'user', content: request.user }
+      ],
+      thinking: { type: 'disabled' }
+    }
+    delete retryBody.reasoning_effort
+    const retried = await postJson(endpoint, this.#options.apiKey, retryBody, this.#options.timeoutMs)
+    const retriedText = chatText(retried)
+    if (!retriedText) {
+      this.#options.logger.warn('DeepSeek JSON Output 重试后仍为空', emptyChatMetadata(retried))
+      throw new Error('DeepSeek 连续两次返回空的 JSON content')
+    }
+    return { text: retriedText, model: this.#options.model, requestedEffort: requested, effectiveEffort: 'none' }
   }
 }
 

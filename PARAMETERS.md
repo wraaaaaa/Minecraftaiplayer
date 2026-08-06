@@ -61,7 +61,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 `reasoningEffort` 可设：`none`、`low`、`medium`、`high`、`xhigh`、`max`。从左到右通常更慢、更贵。供应商不支持某个粒度时适配器会映射到其可用档位；实际请求档位写入日志。
 
 - `timeoutMs`：单次 API 请求超时，默认 `120000` 毫秒，允许 `1000-600000`。
-- `maxOutputTokens`：单次模型最大生成预算，默认 `4096`，允许 `128-131072`。DeepSeek/豆包映射为 `max_tokens`，OpenAI Responses 映射为 `max_output_tokens`。游戏决策不应盲目调大，否则会增加延迟和费用。
+- `maxOutputTokens`：单次模型最大生成预算，默认 `4096`，允许 `128-131072`。DeepSeek/豆包映射为 `max_tokens`，OpenAI Responses 映射为 `max_output_tokens`。游戏决策不应盲目调大，否则会增加延迟和费用。DeepSeek JSON 模式若返回空 `content`，程序会仅用非思考模式重试一次；该兼容无需新增参数，也不会无限重试。
 
 ## 5. 人设、OpenClaw 风格提示词与自我改进
 

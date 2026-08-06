@@ -7,6 +7,25 @@ test('解析模型 JSON 并限制聊天和闲逛半径', () => {
   assert.equal(decision.reply, '我来了！ 马上到。')
   assert.deepEqual(decision.action, { type: 'wander', radius: 16 })
   assert.equal(decision.remember, 'Alice 喜欢建造')
+  assert.equal(decision.intent, 'action')
+})
+
+test('显式聊天意图不会因句中动作词或错误附带动作而调用工具', () => {
+  const decision = parseAgentDecision(JSON.stringify({
+    intent: 'chat',
+    reply: '钻石运气不错呀，下次带我一起看看喵~',
+    action: { type: 'gather_resource', resource: 'diamond', count: 64 },
+    actions: [{ type: 'excavate_tunnel', targetY: -53, length: 64 }]
+  }))
+  assert.equal(decision.intent, 'chat')
+  assert.deepEqual(decision.action, { type: 'none' })
+  assert.equal(decision.actions, undefined)
+  assert.equal(decision.validationError, undefined)
+})
+
+test('没有显式 intent 的旧模型输出按实际动作保持兼容', () => {
+  assert.equal(parseAgentDecision('{"reply":"嗯，我在听。","action":{"type":"none"}}').intent, 'chat')
+  assert.equal(parseAgentDecision('{"reply":"来了","action":{"type":"come_to_player","target":"Alice"}}').intent, 'action')
 })
 
 test('未知或缺参动作降级为 none', () => {

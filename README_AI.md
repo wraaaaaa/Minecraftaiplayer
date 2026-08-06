@@ -172,8 +172,7 @@ Node.js AI 控制器
 | `src/agent/agent-controller.ts` | 任务入队、串行执行、准备阶段、拒绝、回复、经验写入 |
 | `src/agent/addressing.ts` | 点名、强制前缀、距离和会话延续判定 |
 | `src/agent/capability-assessor.ts` | 执行前条件与危险任务装备门槛 |
-| `src/agent/decision.ts` | 模型 JSON 解析、动作白名单和参数归一化 |
-| `src/agent/basic-command.ts` | 高置信度自然命令的本地确定性动作与基础工具顺序计划，避免基本玩法依赖模型抽签 |
+| `src/agent/decision.ts` | 模型 `chat/action` 意图、JSON 解析、动作白名单和参数归一化；显式聊天强制无工具 |
 | `src/agent/autonomous-development.ts` | `reach_end` 确定性阶段规划：生存、食物/烹饪、住所/床、全套工具护甲、矿物、交易、附魔、下界、要塞和末地 |
 | `src/agent/prompt.ts` | 旧 `prompts.json` 兼容组装；新部署由 PromptWorkspace 动态构建 |
 | `src/agent/world-state.ts` | Node 内部规范化世界状态类型 |
@@ -395,7 +394,7 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 
 精确优先级：
 
-1. 纯“停止/取消”消息走带外停止路径，立即取消当前全局运行任务并向 Java 发送 `stop`。任何被寻址玩家都能触发，当前没有主人专属限制。
+1. 纯“停止/取消”以及“不要再跟着我/不用跟我了”等解除跟随消息走带外停止路径，立即取消当前全局运行任务并向 Java 发送 `stop`。持续跟随早已从任务队列完成也能被解除。任何被寻址玩家都能触发，当前没有主人专属限制。
 2. 普通队列中，只要有 `ownerName` 的任务，所有非主人任务都等待。
 3. 主人的多项任务按 `urgency` 降序，再按入队序号 FIFO。
 4. 没有主人任务时，先按发令者分组，选择与 Bot 实时距离最近的发令者；距离未知按无限远处理。
@@ -412,7 +411,7 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 - 50：跟随、过来、陪同等。
 - 30：其他消息。
 
-这是本地关键词规则，不是模型对所有任务“轻重缓急”的完整理解。它只在同一个发令者内部排序；主人优先级永远高于非主人紧急度。
+这是本地关键词队列优先级，不是工具选择器，也不会把文字转换为游戏动作。它只在同一个发令者内部排序；主人优先级永远高于非主人紧急度。真正的聊天/行动意图与工具组合由模型根据完整语句和上下文决定。
 
 ### 8.3 恢复与终态
 
@@ -427,7 +426,7 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 
 ### 8.4 顺序工具计划，不是持久 DAG
 
-每条玩家消息产生一个持久任务。模型可返回单个 `action`，也可返回最多 12 个按依赖顺序排列的 `actions[]`；本地基础命令还会确定性生成木板、木棍、工作台、工作台放置、木/石工具和必要采集步骤。`AgentController` 每步都重新读取 Fabric 快照，依次执行能力检查、策略检查、危险准备和服务器后置条件验证，任一步失败即停止后续步骤并记录第 N/总步数。
+每条被寻址的玩家消息产生一个持久记录，并始终进入模型（秘密提取与带外停止除外）。模型先返回 `intent=chat|action`：`chat` 不执行工具；`action` 可返回单个 `action` 或最多 12 个按依赖顺序排列的 `actions[]`。玩家指令不再经过关键词动作脚本。`AgentController` 对模型选择的每一步重新读取 Fabric 快照，依次执行能力检查、策略检查、危险准备和服务器后置条件验证，任一步失败即停止后续步骤并记录第 N/总步数。
 
 整个数组仍只属于一个 TaskRecord，未逐步持久化程序计数器；进程在非幂等步骤后断线重试时可能重复动作。因此它不是可跨重启恢复的依赖 DAG，也不会自动把熔炼、附魔、长期采矿、建城或通关目标无限拆解。
 
@@ -435,7 +434,7 @@ Bot 知道 `server.username` 与 `persona.name`，玩家不必每句话叫它名
 
 ### 9.1 供应商
 
-- `deepseek`：`<baseUrl>/chat/completions`，JSON object 输出。`none` 关闭 thinking；`low/medium/high` 当前统一映射成有效 `high`，`xhigh/max` 映射成 `max`。
+- `deepseek`：`<baseUrl>/chat/completions`，JSON object 输出。`none` 关闭 thinking；`low/medium/high` 当前统一映射成有效 `high`，`xhigh/max` 映射成 `max`。若官方已知的 JSON 空 `content` 问题发生，适配器记录不含思维链的响应元数据，并仅以 `thinking=disabled` 和强化非空 JSON 提示重试一次；第二次仍空则失败，不读取 `reasoning_content`。
 - `volcengine`：`<baseUrl>/chat/completions`，原样传递 `reasoning_effort`。
 - `openai`：`<baseUrl>/responses`，使用 Responses API 的 `reasoning.effort`、低 verbosity 和 `max_output_tokens`。
 
@@ -1087,9 +1086,9 @@ git push origin main
 
 这只是保守启发式，不是方块所有权证明。世界修改必须同时通过策略层和 Fabric 逐目标验证；不得仅因扫描“看起来天然”就破坏。
 
-### 23.3 确定性基础命令
+### 23.3 已退役：确定性基础命令
 
-`src/agent/basic-command.ts` 在 LLM 之前识别高置信度中文/英文命令：进食、安全白名单方块放置、2×2/3×3 合成、明确/模糊采集。支持阿拉伯数字和一至十九中文数量，常用资源别名、动态原木树种到木板 ID，以及依据 `blockSurvey` 和背包短缺为“采集材料”选择木材或石材。命中时日志模型名为 `local-deterministic`；未命中才构建记忆/经验上下文并调用 LLM。
+历史版本的 `src/agent/basic-command.ts` 会在 LLM 前根据关键词把玩家文字直接转换为动作。该文件及测试已于 2026-08-06 删除：它会把“我刚才挖到钻石了”一类聊天误判为任务，还会把“不要跟着我”中的“跟着我”错误识别成开始跟随。现在所有普通玩家消息都由模型读取完整上下文后选择 `chat/action` 和工具；本地只保留停止/取消的安全抢占、秘密拒绝、队列排序、能力/策略检查与 Fabric 后置条件。
 
 新部署由 `PromptWorkspace.buildSystemPrompt()` 按 `rules → IDENTITY → SOUL → TOOLS → MEMORY → 当前 USER → behavior patches` 动态组合，并替换 persona 占位符。旧部署仍可由 `buildSystemPrompt` 给 `prompts.json` 追加 `place_block`、`blockSurvey` 和逐目标验证兼容规则，便于滚动升级；运行目录初始化后以 Markdown 工作区为准。
 
@@ -1282,3 +1281,32 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 3. 只把源码、测试、示例和三份文档同步到 Git 工作副本；绝不复制 `.env`、本机 `config/*.json`、`data`、`logs`、`.runtime`、`node_modules`、`dist` 或 Fabric build。
 4. 在 Git 副本再次审计，确认示例服务器仍为 `你的域名.com`，再暂存、提交、推送 `origin/main`。
 5. 推送后对比远端 commit；本地部署目录继续保留真实配置和运行数据，不从干净仓反向覆盖。
+
+## 26. 2026-08-06 对话意图、解除跟随与人类式表达
+
+### 26.1 根因与行为变化
+
+- 玩家消息旧链路为 `inferBasicDecision → 命中则跳过 LLM → 动作`，关键词不理解否定和陈述语气，导致聊天误动作，也让“不要跟着我”重新触发 `follow_player`。
+- 当前链路为 `AddressingEngine → TaskStore → LLM intent/tool plan → decision parser → capability → policy → Fabric`。除秘密提取与停止抢占外，所有被寻址消息都调用模型。
+- 模型输出新增向后兼容字段 `intent=chat|action`。显式 `chat` 会强制改为 `action=none`、丢弃误带的 `actions[]`，不进入 capability、policy 或 Fabric；旧模型未输出 intent 时根据规范化后是否存在动作自动推断。
+- `TOOLS.md` 明确要求结合整句、上下文、玩家画像和结构化世界状态判断。聊天、分享、提问、玩笑、感叹不因含动作词而执行；明确行动请求才由模型选择一个或多个工具。
+
+### 26.2 停止抢占
+
+`isImmediateStop()` 除原有停止/取消外，接受“不要再跟着我”“别跟随我”“不用跟我了”“结束跟随”等独立表达。该路径增加 `cancellationEpoch`、取消当前 running task，并无条件向 Fabric 发送 `stop`；即使先前 `follow_player` 的 TaskRecord 已完成，Java 内仍在持续跟随，也会释放跟随目标、导航与移动键。
+
+### 26.3 人设表达
+
+模板 `SOUL.md` / `IDENTITY.md` 现在要求游戏内把自己当作平等联机玩家，不主动自称 AI、Bot、助手、模型、程序或工具；多用第一人称，减少第三人称自称、舞台动作、固定卖萌和“收到/正在执行/任务完成/当前条件不足”等系统腔。模型正文不再自己添加 `@玩家名`，由 `#bestEffortReply` 统一添加，避免重复。失败、超时、停止和秘密拒绝的本地兜底语也改成短而自然的说法，完整错误仍只进入 WebUI 总聊天。
+
+### 26.4 回归重点
+
+- `intent=chat` 即使错误附带采集/矿道动作也不得调用 executor。
+- “我刚才挖矿挖到了三颗钻石”只回复聊天，并将任务结果记为 `chat_only`。
+- “跟着我”由模型选择 `follow_player`；随后“不要再跟着我了”不再调用模型，必须执行 `stop`。
+- 明确采集、交付、合成等玩家请求必须能证明调用了模型，不能重新引入关键词动作旁路。
+- 停止/秘密/危险安全规则仍是本地硬约束；“模型决定工具”不代表模型能绕过能力、财产保护或 Fabric 验证。
+
+### 26.5 DeepSeek V4 JSON 空响应兼容
+
+运行目录历史日志和 2026-08-06 单次真实 API 检查都复现了 HTTP 成功但 `choices[0].message.content` 为空。DeepSeek 官方 JSON Output 文档将其列为偶发现象；思考模式文档说明隐藏推理位于同级 `reasoning_content`，不能当最终答案。`ChatCompletionsProvider` 现在先按用户配置的推理强度请求；空内容时只记录 `choiceCount/finishReason/contentType/hasReasoningContent`，不记录思维链正文，然后修改系统提示、删除 `reasoning_effort`、设置 `thinking.disabled` 重试一次。返回值的 `requestedEffort` 保留原配置，实际降级时 `effectiveEffort=none`。单测验证两次请求体、最多一次重试及隐藏推理不泄漏。

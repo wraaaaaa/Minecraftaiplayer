@@ -12,7 +12,6 @@ import type { ProgressionStore } from '../progression/progression-store.js'
 import type { TaskRecord, TaskStore } from '../tasks/task-store.js'
 import { assessAction } from './capability-assessor.js'
 import { parseAgentDecision } from './decision.js'
-import { inferBasicDecision } from './basic-command.js'
 import { planSurvivalProgression } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt } from './prompt.js'
 import type { WorldState } from './world-state.js'
@@ -37,7 +36,10 @@ function urgencyFor(message: string): number {
 }
 
 function isImmediateStop(message: string): boolean {
-  return /^(?:请)?(?:停止|停下|别动|取消(?:当前)?任务|stop|cancel)[！!。.\s]*$/iu.test(message.trim())
+  const normalized = message.trim()
+  return /^(?:请)?(?:停止|停下|别动|取消(?:当前)?任务|stop|cancel)[！!。.?？\s]*$/iu.test(normalized)
+    || /^(?:你)?(?:不用|不要|别|别再|停止|结束)(?:再)?(?:跟着|跟随|跟|尾随)(?:我)?(?:了|啦|吧)?[！!。.?？\s]*$/iu.test(normalized)
+    || /^(?:你)?(?:不用|不要|别)(?:再)?跟我(?:了|啦|吧)?[！!。.?？\s]*$/iu.test(normalized)
 }
 
 function isTransientClientDisconnect(detail: string): boolean {
@@ -84,7 +86,8 @@ const AUTONOMOUS_ACTION_TYPES = new Set<AgentAction['type']>([
 ])
 
 const INTERNAL_GAME_CHAT = /(?:```|\{\s*"?(?:action|actions|type)"?\s*:|\bminecraft:[a-z0-9_]+\b|\b(?:follow_player|move_to|wander|explore_frontier|return_to_zone|eat_best_food|equip_best|attack_hostile|attack_player|hunt_entity|collect_own_drops|gather_resource|craft_item|place_block|smelt_item|trade_villager|enchant_item|sleep_in_bed|excavate_tunnel|build_nether_portal|travel_to_dimension|drop_item|use_item|seek_shelter|build_shelter|prepare_for|wait_safe)\b|\b(?:tool|function|action)\s*(?:call|name)?\b|(?:动作名|调用名|调用指令|工具调用|接口参数|内部指令))/iu
-const GENERIC_FAILURE_REPLY = '抱歉，这件事现在做不到。详细原因请在总控页面的“总聊天”查看。'
+const GENERIC_FAILURE_REPLY = '这会儿没弄成，具体卡在哪儿我记到总控台了。'
+const SECRET_REFUSAL_REPLY = '这个不能说，换个话题吧。'
 
 function naturalGameText(value: string | undefined, fallback: string): string {
   const normalized = (value ?? '').replace(/[\r\n\t]+/gu, ' ').replace(/\s{2,}/gu, ' ').trim()
@@ -405,47 +408,43 @@ export class AgentController {
     const message = task.request
     if (this.#secrets.isExtractionRequest(message)) {
       await this.#markFailed(task, '敏感信息提取请求已由本地安全层拒绝')
-      await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+      await this.#bestEffortReply(identity, SECRET_REFUSAL_REPLY)
       return
     }
 
     try {
-      let decision = inferBasicDecision(message, this.#latestWorld, identity.name)
-      let decisionModel = 'local-deterministic'
-      if (!decision) {
-        const workspaceConfig = agentWorkspaceConfig(this.#config)
-        let context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
-        const experiences = await this.#experience.relevant(message)
-        let systemPrompt = await this.#systemPrompt(identity)
-        let playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
-        if (this.#contextCompressor) {
-          try {
-            const compression = await this.#contextCompressor.maybeCompress(identity, systemPrompt.length + playerRequest.length)
-            if (compression.compressed > 0) {
-              await this.#diagnose({
-                type: 'memory', level: 'info', title: '上下文已自动压缩',
-                summary: `已压缩 ${compression.compressed} 条较旧事件，并保留最近 ${workspaceConfig.retainRecentEvents} 条。`,
-                detail: `before_chars=${compression.beforeChars}; after_chars=${compression.afterChars}`,
-                taskId: task.id, playerName: identity.name
-              })
-              context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
-              systemPrompt = await this.#systemPrompt(identity)
-              playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
-            }
-          } catch (error) {
+      const workspaceConfig = agentWorkspaceConfig(this.#config)
+      let context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
+      const experiences = await this.#experience.relevant(message)
+      let systemPrompt = await this.#systemPrompt(identity)
+      let playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
+      if (this.#contextCompressor) {
+        try {
+          const compression = await this.#contextCompressor.maybeCompress(identity, systemPrompt.length + playerRequest.length)
+          if (compression.compressed > 0) {
             await this.#diagnose({
-              type: 'failure', level: 'warning', title: '上下文压缩已安全跳过', summary: '继续使用未压缩的最近上下文。',
-              detail: error instanceof Error ? error.message : String(error), taskId: task.id, playerName: identity.name
+              type: 'memory', level: 'info', title: '上下文已自动压缩',
+              summary: `已压缩 ${compression.compressed} 条较旧事件，并保留最近 ${workspaceConfig.retainRecentEvents} 条。`,
+              detail: `before_chars=${compression.beforeChars}; after_chars=${compression.afterChars}`,
+              taskId: task.id, playerName: identity.name
             })
+            context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
+            systemPrompt = await this.#systemPrompt(identity)
+            playerRequest = buildPlayerRequest({ ...context, message, experiences, world: { ...this.#latestWorld, currentTask: message } })
           }
+        } catch (error) {
+          await this.#diagnose({
+            type: 'failure', level: 'warning', title: '上下文压缩已安全跳过', summary: '继续使用未压缩的最近上下文。',
+            detail: error instanceof Error ? error.message : String(error), taskId: task.id, playerName: identity.name
+          })
         }
-        const response = await this.#provider.complete({
-          system: this.#secrets.sanitizeForModel(systemPrompt),
-          user: this.#secrets.sanitizeForModel(playerRequest)
-        })
-        decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
-        decisionModel = response.model
       }
+      const response = await this.#provider.complete({
+        system: this.#secrets.sanitizeForModel(systemPrompt),
+        user: this.#secrets.sanitizeForModel(playerRequest)
+      })
+      const decision = parseAgentDecision(response.text, { currentPlayerName: identity.name })
+      const decisionModel = response.model
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
       if (decision.validationError) {
         await this.#markFailed(task, decision.validationError)
@@ -453,12 +452,14 @@ export class AgentController {
         return
       }
 
-      const actions = decision.actions?.length ? decision.actions : [decision.action]
+      const actions = decision.intent === 'chat' ? [] : decision.actions?.length ? decision.actions : [decision.action]
       await this.#diagnose({
-        type: 'decision', level: 'info', title: '执行计划已生成',
-        summary: `${decisionModel} 生成 ${actions.length} 个步骤；这里只展示结构化决策摘要，不保存模型隐藏思维链。`,
+        type: 'decision', level: 'info', title: actions.length > 0 ? '执行计划已生成' : '识别为自然对话',
+        summary: actions.length > 0
+          ? `${decisionModel} 生成 ${actions.length} 个步骤；这里只展示结构化决策摘要，不保存模型隐藏思维链。`
+          : `${decisionModel} 判定本条消息无需游戏动作，仅生成对话回复。`,
         detail: JSON.stringify(actions, null, 2), taskId: task.id, playerName: identity.name,
-        metadata: { model: decisionModel, stepCount: actions.length }
+        metadata: { model: decisionModel, intent: decision.intent, stepCount: actions.length }
       })
       const completedDetails: string[] = []
       for (let index = 0; index < actions.length; index++) {
@@ -553,11 +554,12 @@ export class AgentController {
           this.#latestWorld = this.#executor.snapshot?.() ?? this.#latestWorld
         }
       }
-      const actionResult = { ok: true, detail: completedDetails.join(' | ') }
+      const actionResult = { ok: true, detail: actions.length > 0 ? completedDetails.join(' | ') : 'chat_only' }
 
       await this.#tasks.complete(task.id, actionResult.detail)
       await this.#diagnose({
-        type: 'result', level: 'success', title: '任务完成', summary: `${actions.length} 个步骤均已得到游戏后置条件确认。`,
+        type: 'result', level: 'success', title: actions.length > 0 ? '任务完成' : '自然对话已回复',
+        summary: actions.length > 0 ? `${actions.length} 个步骤均已得到游戏后置条件确认。` : '本条消息没有触发游戏工具。',
         detail: actionResult.detail, taskId: task.id, playerName: identity.name
       })
       if (decision.remember) {
@@ -567,7 +569,7 @@ export class AgentController {
           await this.#promptWorkspace?.appendPlayerFact(identity, fact).catch(error => this.#logger.warn('长期事实已写入统一记忆，但 USER.md 更新失败', error))
         }
       }
-      const completedFallback = actions.every(action => action.type === 'none') ? '我在听。' : '好了。'
+      const completedFallback = actions.length === 0 ? '嗯，我在听。' : '嗯，弄好了。'
       const reply = naturalGameText(decision.reply, completedFallback)
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
       this.#logger.info('任务已完成', { taskId: task.id, player: identity.name, model: decisionModel, actions: actions.map(action => action.type) })
@@ -579,7 +581,7 @@ export class AgentController {
         return
       }
       const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
-      const fallback = timedOut ? '抱歉，我这次没能及时想好，麻烦再说一次。' : GENERIC_FAILURE_REPLY
+      const fallback = timedOut ? '我刚才脑子卡了一下，你再说一遍？' : GENERIC_FAILURE_REPLY
       await this.#markFailed(task, detail || fallback)
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${fallback}`)
     }
@@ -600,7 +602,7 @@ export class AgentController {
     if (result.ok) {
       await this.#tasks.complete(stopTask.id, detail || '已停止当前动作')
       await this.#diagnose({ type: 'result', level: 'success', title: '停止请求已完成', summary: detail || '已停止当前动作', taskId: stopTask.id, playerName: identity.name })
-      await this.#bestEffortReply(identity, cancelled ? '已停止当前动作，正在执行的任务已取消。' : '已停止移动；当前没有正在执行的任务。')
+      await this.#bestEffortReply(identity, cancelled ? '好，我停下了，刚才那件事也不继续了。' : '好，我停下了，不再跟着你。')
     } else {
       await this.#markFailed(stopTask, detail || '停止动作失败')
       await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
