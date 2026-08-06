@@ -73,6 +73,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
   const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), secrets: new SecretGuard([]), statusHandler: async () => {} })
   const receivedMessages: Array<{ name: string; message: string }> = []
   bridge.setMessageHandler(async (identity, message) => { receivedMessages.push({ name: identity.name, message }) })
+  bridge.setAddressAliasesResolver(async identity => identity.name === 'Alice' ? ['粉粉'] : [])
 
   try {
     const connecting = bridge.connect()
@@ -97,6 +98,9 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
     socket.write(`${JSON.stringify({ type: 'player_chat', name: 'Alice', uuid: '00000000-0000-0000-0000-000000000001', message: '@CialloAI 跟我来' })}\n`)
     await delay(20)
     assert.equal(receivedMessages.length, 1)
+    socket.write(`${JSON.stringify({ type: 'player_chat', name: 'Alice', uuid: '00000000-0000-0000-0000-000000000001', message: '粉粉，过来一下' })}\n`)
+    await delay(20)
+    assert.deepEqual(receivedMessages[1], { name: 'Alice', message: '过来一下' })
 
     const resultPromise = bridge.execute({ type: 'look_at_player', target: 'Alice' })
     const action = await new Promise<{ id: string }>((resolve, reject) => {

@@ -148,6 +148,22 @@ test('模型可启动持续跟随技能而不是反复追逐静态坐标', async
   assert.match(result.reply, /一直跟着/u)
 })
 
+test('模型第一次选择游戏工具时先触发开工回应，再执行实际动作', async () => {
+  const order: string[] = []
+  const provider = turns(
+    { text: '', toolCalls: [{ id: 'mine', name: 'break_block', arguments: '{"x":1,"y":64,"z":0,"expected_block_id":"minecraft:stone"}' }], model: 'mock', requestedEffort: 'high', effectiveEffort: 'high' },
+    { text: '挖好啦。', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+  )
+  await new ToolAgent({
+    provider,
+    executor: { execute: async () => { order.push('execute'); return { ok: true, detail: 'block_broken' } }, chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }),
+    onToolSelected: async event => { order.push(`ack:${event.tool}`) },
+    maxSteps: 4
+  }).run({ system: 'system', goal: '挖掉脚边石头', initialWorld: initial })
+  assert.deepEqual(order, ['ack:break_block', 'execute'])
+})
+
 test('Chat Completions 仅保留最近工具协议并用紧凑账本承接旧步骤', async () => {
   const requests: Array<{ continuation?: unknown; toolResults?: unknown }> = []
   const provider: LlmProvider = {

@@ -13,6 +13,7 @@ import type { SecretGuard } from '../security/secret-guard.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
+type AddressAliasesResolver = (identity: PlayerIdentity) => Promise<readonly string[]>
 
 const { goals, Movements, pathfinder } = pathfinderPackage
 
@@ -27,6 +28,7 @@ export class MinecraftClient implements ActionExecutor {
   readonly #addressing: AddressingEngine
   #bot: Bot | undefined
   #messageHandler: PlayerMessageHandler | undefined
+  #addressAliasesResolver: AddressAliasesResolver | undefined
   #proactiveHandler: ProactiveHandler | undefined
   #proactiveTimer: NodeJS.Timeout | undefined
   #endResolve: ((reason: string) => void) | undefined
@@ -45,6 +47,7 @@ export class MinecraftClient implements ActionExecutor {
 
   setMessageHandler(handler: PlayerMessageHandler): void { this.#messageHandler = handler }
   setProactiveHandler(handler: ProactiveHandler): void { this.#proactiveHandler = handler }
+  setAddressAliasesResolver(resolver: AddressAliasesResolver): void { this.#addressAliasesResolver = resolver }
 
   async connect(): Promise<void> {
     this.#easyAuth.reset()
@@ -212,16 +215,7 @@ export class MinecraftClient implements ActionExecutor {
       this.#logger.debug('服务器消息', { message })
     })
     bot.on('chat', (username, message) => {
-      if (username === bot.username || !this.#messageHandler) return
-      const identity: PlayerIdentity = { name: username, ...(bot.players[username]?.uuid ? { uuid: bot.players[username]!.uuid } : {}) }
-      const addressed = this.#addressing.decide(identity, message, this.snapshot())
-      if (!addressed.addressed) {
-        void this.#memory.recordPlayerMessage(identity, this.#secrets.sanitizeForPersistence(message)).catch((error) => this.#logger.error('记录旁听聊天失败', error))
-        return
-      }
-      void this.#messageHandler(identity, addressed.cleaned || message, this.snapshot())
-        .then(() => this.#addressing.noteBotReply(identity))
-        .catch((error) => this.#logger.error('玩家消息处理器失败', error))
+      void this.#processPlayerChat(bot, username, message).catch(error => this.#logger.error('玩家消息处理器失败', error))
     })
     bot.on('entityHurt', (entity, source) => {
       if (entity !== bot.entity || source.type !== 'player' || !source.username) return
@@ -238,6 +232,19 @@ export class MinecraftClient implements ActionExecutor {
       this.#endResolve?.(reason)
       this.#endResolve = undefined
     })
+  }
+
+  async #processPlayerChat(bot: Bot, username: string, message: string): Promise<void> {
+    if (username === bot.username || !this.#messageHandler) return
+    const identity: PlayerIdentity = { name: username, ...(bot.players[username]?.uuid ? { uuid: bot.players[username]!.uuid } : {}) }
+    const aliases = await this.#addressAliasesResolver?.(identity) ?? []
+    const addressed = this.#addressing.decide(identity, message, this.snapshot(), Date.now(), aliases)
+    if (!addressed.addressed) {
+      await this.#memory.recordPlayerMessage(identity, this.#secrets.sanitizeForPersistence(message)).catch((error) => this.#logger.error('记录旁听聊天失败', error))
+      return
+    }
+    await this.#messageHandler(identity, addressed.cleaned || message, this.snapshot())
+    this.#addressing.noteBotReply(identity)
   }
 
   #requireBot(): Bot {

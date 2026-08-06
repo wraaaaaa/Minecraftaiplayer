@@ -42,6 +42,11 @@ export interface ToolAgentTurnEvent {
   error?: string
 }
 
+export interface ToolAgentSelectionEvent {
+  tool: string
+  arguments: string
+}
+
 const objectSchema = (properties: Record<string, unknown>, required = Object.keys(properties)): Record<string, unknown> => ({
   type: 'object', properties, required, additionalProperties: false
 })
@@ -57,48 +62,43 @@ const string = (description: string): Record<string, unknown> => ({ type: 'strin
  * player's overall goal, order, parameters, or recovery strategy on the model's behalf.
  */
 export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
-  { name: 'observe_world', description: '立即读取最新游戏状态。动作执行后结果已自动附带新状态；只有需要重新确认时再调用。', parameters: objectSchema({}) },
-  { name: 'follow_player_continuously', description: '持续跟随指定玩家并动态更新目标位置。启动成功后由客户端保持，不能用多次 navigate_to 模拟；直到玩家要求停止、开始冲突的新动作、出现安全抢占、目标离线或连接断开才结束。', parameters: objectSchema({
-    player: string('要持续跟随的玩家名；通常使用当前发起玩家')
+  { name: 'observe_world', description: '刷新状态；工具回执已有新状态时勿重复调用。', parameters: objectSchema({}) },
+  { name: 'follow_player_continuously', description: '启动客户端持续跟随；只调用一次，明确停止前保持。', parameters: objectSchema({ player: string('玩家名') }) },
+  { name: 'navigate_to', description: '碰撞安全地走到坐标。', parameters: objectSchema({
+    x: number('X'), y: number('Y'), z: number('Z'), stop_distance: number('停止距离'), sprint: { type: 'boolean' }
   }) },
-  { name: 'navigate_to', description: '使用碰撞安全寻路走到一个明确坐标。只负责移动，不会自动挖路、采集或执行后续任务。', parameters: objectSchema({
-    x: number('目标 X'), y: number('目标 Y'), z: number('目标 Z'),
-    stop_distance: number('在目标多少格内停下，通常 1 到 2'), sprint: { type: 'boolean', description: '是否冲刺' }
+  { name: 'look_at', description: '看向坐标。', parameters: objectSchema({ x: number('X'), y: number('Y'), z: number('Z') }) },
+  { name: 'select_hotbar', description: '选择 0–8 快捷栏。', parameters: objectSchema({ slot: integer('槽位', 0, 8) }) },
+  { name: 'break_block', description: '破坏观察中的精确天然方块；客户端硬性保护玩家建筑。', parameters: objectSchema({
+    x: integer('X'), y: integer('Y'), z: integer('Z'), expected_block_id: string('完整方块 ID')
   }) },
-  { name: 'look_at', description: '把视角转向一个世界坐标。', parameters: objectSchema({ x: number('X'), y: number('Y'), z: number('Z') }) },
-  { name: 'select_hotbar', description: '选择快捷栏槽位。槽位为 0 到 8。', parameters: objectSchema({ slot: integer('快捷栏槽位', 0, 8) }) },
-  { name: 'break_block', description: '破坏指定坐标的一块方块并等待服务端确认。必须使用观察中出现的精确坐标；Fabric 会硬性拒绝疑似玩家建筑或不安全目标。', parameters: objectSchema({
-    x: integer('方块 X'), y: integer('方块 Y'), z: integer('方块 Z'), expected_block_id: string('观察到的完整方块 ID，例如 minecraft:oak_log')
+  { name: 'place_block', description: '在精确空气格放置背包方块并验证。', parameters: objectSchema({
+    x: integer('X'), y: integer('Y'), z: integer('Z'), item_id: string('完整物品 ID')
   }) },
-  { name: 'place_block', description: '把背包中的一个方块放到指定空气方格并等待服务端确认。Fabric 会验证支撑面、碰撞、附近建筑和归属。', parameters: objectSchema({
-    x: integer('目标空气方格 X'), y: integer('目标空气方格 Y'), z: integer('目标空气方格 Z'), item_id: string('要放置的完整物品 ID')
+  { name: 'attack_entity', description: '近战攻击观察中的非玩家实体一次。', parameters: objectSchema({ entity_id: string('实体 ID') }) },
+  { name: 'interact_entity', description: '与观察中的非玩家实体交互一次。', parameters: objectSchema({ entity_id: string('实体 ID') }) },
+  { name: 'interact_block', description: '与精确方块交互；未知归属容器会拒绝。', parameters: objectSchema({
+    x: integer('X'), y: integer('Y'), z: integer('Z'), hand: { type: 'string', enum: ['main', 'off'] }
   }) },
-  { name: 'attack_entity', description: '对观察中指定 entity_id 的实体执行一次合法近战攻击；不会自动选择或追杀其他目标。', parameters: objectSchema({ entity_id: string('观察中的实体 ID') }) },
-  { name: 'interact_entity', description: '用主手与指定实体交互一次，例如村民、动物或载具。', parameters: objectSchema({ entity_id: string('观察中的实体 ID') }) },
-  { name: 'interact_block', description: '用指定手与一块精确坐标方块交互一次，例如门、床、工作站、熔炉。未知归属容器会被硬策略拒绝。', parameters: objectSchema({
-    x: integer('方块 X'), y: integer('方块 Y'), z: integer('方块 Z'), hand: { type: 'string', enum: ['main', 'off'], description: '使用的手' }
+  { name: 'use_held_item', description: '使用手中物品一次。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
+  { name: 'drop_inventory_item', description: '从自己的背包槽丢出物品。', parameters: objectSchema({ slot: integer('槽位', 0, 35), count: integer('数量', 1, 64) }) },
+  { name: 'craft_recipe', description: '用现有材料执行一个具体配方。', parameters: objectSchema({ item_id: string('成品 ID'), count: integer('数量', 1, 64) }) },
+  { name: 'gather_resource', description: '连续寻找、采集天然资源并收取自有掉落。', parameters: objectSchema({ resource: string('类别或方块 ID'), count: integer('数量', 1, 64) }) },
+  { name: 'craft_item', description: '连续制作一种物品；缺口会真实返回。', parameters: objectSchema({ item_id: string('成品 ID'), count: integer('数量', 1, 64) }) },
+  { name: 'smelt_items', description: '用安全熔炉连续熔炼/烹饪并验证结果。', parameters: objectSchema({
+    input_item_id: string('输入 ID'), output_item_id: string('输出 ID'), count: integer('数量', 1, 64)
   }) },
-  { name: 'use_held_item', description: '使用当前手中物品一次，并等待可观察后置条件。进食、喝药水、拉弓等都从这个接口开始。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
-  { name: 'drop_inventory_item', description: '从自己的背包指定槽位丢出一定数量。不会自动寻找玩家或移动。', parameters: objectSchema({ slot: integer('背包槽位', 0, 35), count: integer('数量', 1, 64) }) },
-  { name: 'craft_recipe', description: '执行一个已解锁且材料充足的具体配方一次或多次。只合成指定成品，不会自动采材料或继续后续流程。', parameters: objectSchema({ item_id: string('完整成品物品 ID'), count: integer('目标成品数量', 1, 64) }) },
-  { name: 'gather_resource', description: '连续采集一种天然资源并收集本次产生的掉落。模型决定资源和数量；客户端在多格范围内逐目标寻路、避障、验明天然性和危险，不会逐方块请求模型。', parameters: objectSchema({
-    resource: string('资源类别或完整方块 ID，例如 logs、coal_ore、iron_ore、diamond_ore'), count: integer('目标数量', 1, 64)
+  { name: 'excavate_safely', description: '连续挖可返程阶梯/隧道；不垂直下挖并避开财产和流体。', parameters: objectSchema({
+    resource: string('目标资源'), target_y: integer('目标 Y', -2048, 2048), length: integer('长度', 2, 64)
   }) },
-  { name: 'craft_item', description: '连续完成一种物品的配方制作，包括客户端可验证的工作台交互。缺材料时会返回真实缺口，由模型决定下一步。', parameters: objectSchema({ item_id: string('完整成品物品 ID'), count: integer('目标成品数量', 1, 64) }) },
-  { name: 'smelt_items', description: '使用安全熔炉连续熔炼或烹饪。客户端负责容器交互、燃料与结果确认；缺工作站、燃料或原料时返回真实原因。', parameters: objectSchema({
-    input_item_id: string('完整输入物品 ID'), output_item_id: string('完整输出物品 ID'), count: integer('数量', 1, 64)
-  }) },
-  { name: 'excavate_safely', description: '连续开凿可步行的安全阶梯/隧道，绝不垂直脚下挖掘。模型决定资源、目标高度和长度；客户端逐格避开玩家建筑、岩浆/危险流体并保留返程路线。下降后应继续搜索目标，完成目标后用 return_to_task_start 返回。', parameters: objectSchema({
-    resource: string('沿途重点寻找的资源类别，例如 diamond_ore；普通通道可填 stone'), target_y: integer('目标 Y 高度', -2048, 2048), length: integer('本次最多推进的阶梯或隧道长度', 2, 64)
-  }) },
-  { name: 'return_to_task_start', description: '沿安全阶梯向本任务开始时的高度返回；必要时使用自身普通方块搭设支撑。只在曾经向下开凿后调用。', parameters: objectSchema({}) },
-  { name: 'collect_own_drops', description: '连续寻路并拾取本任务由 Bot 自己产生和登记的掉落，不会捡取玩家物品。', parameters: objectSchema({ item_id: string('目标物品 ID 或资源名'), count: integer('数量', 1, 64), radius: integer('搜索半径', 2, 32) }) },
-  { name: 'give_item_to_player', description: '把自己背包中的指定物品交给在场玩家。客户端负责接近、朝向和丢出，并验证物品确实离开自身背包。', parameters: objectSchema({ item_id: string('完整物品 ID'), count: integer('数量', 1, 64), player: string('玩家名') }) },
-  { name: 'equip_for', description: '根据用途连续选择并穿戴当前背包中最合适的工具、武器和护甲。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
-  { name: 'hunt_for', description: '连续寻找、追击合法的未驯服生物或敌对目标并收集掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('目标掉落数量', 1, 64) }) },
-  { name: 'send_server_command', description: '尝试发送一个服务器命令。目前硬策略只允许“tp 玩家名”或“teleport 玩家名”，表示把 Bot 自己传送到该玩家；无权限时会返回失败，随后应改用正常寻路或向玩家说明。', parameters: objectSchema({ command: string('不带开头斜杠的命令') }) },
-  { name: 'stop_all_actions', description: '立即释放移动和交互按键并停止当前动作。', parameters: objectSchema({}) },
-  { name: 'wait_ticks', description: '原地等待少量游戏刻后重新观察。20 tick 约一秒。', parameters: objectSchema({ ticks: integer('等待 tick 数', 1, 100) }) }
+  { name: 'return_to_task_start', description: '从地下沿安全路线返回任务起始高度。', parameters: objectSchema({}) },
+  { name: 'collect_own_drops', description: '连续拾取本任务登记的自有掉落。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), radius: integer('半径', 2, 32) }) },
+  { name: 'give_item_to_player', description: '接近玩家并交付自身物品。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), player: string('玩家名') }) },
+  { name: 'equip_for', description: '按用途穿戴当前最佳装备。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
+  { name: 'hunt_for', description: '连续狩猎合法目标并收取掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('数量', 1, 64) }) },
+  { name: 'send_server_command', description: '仅尝试 tp/teleport 到玩家；无权限后改用寻路。', parameters: objectSchema({ command: string('不带 / 的命令') }) },
+  { name: 'stop_all_actions', description: '立即停止动作并释放按键。', parameters: objectSchema({}) },
+  { name: 'wait_ticks', description: '等待 1–100 tick；20 tick≈1秒。', parameters: objectSchema({ ticks: integer('tick', 1, 100) }) }
 ])
 
 const GUIDE_SEARCH_TOOL: LlmToolDefinition = {
@@ -197,7 +197,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
   }
 }
 
-function compactWorldValue(world: WorldState, blockLimit = 32): Record<string, unknown> {
+function compactWorldValue(world: WorldState, blockLimit = 16): Record<string, unknown> {
   const survey = world.blockSurvey
   return {
     sequence: world.sequence,
@@ -218,16 +218,16 @@ function compactWorldValue(world: WorldState, blockLimit = 32): Record<string, u
     selectedHotbarSlot: world.selectedHotbarSlot,
     inventory: world.inventory.slice(0, 40),
     equipment: world.equipment,
-    nearbyPlayers: world.nearbyPlayers.slice(0, 12),
-    nearbyHostiles: world.nearbyHostiles?.slice(0, 12),
-    nearbyCreatures: world.nearbyCreatures?.slice(0, 12),
-    nearbyItems: world.nearbyItems?.slice(0, 12),
+    nearbyPlayers: world.nearbyPlayers.slice(0, 8),
+    nearbyHostiles: world.nearbyHostiles?.slice(0, 8),
+    nearbyCreatures: world.nearbyCreatures?.slice(0, 8),
+    nearbyItems: world.nearbyItems?.slice(0, 8),
     nearbyBlocks: world.nearbyBlocks?.slice(0, blockLimit),
     blockSurvey: survey ? {
       radius: survey.radius, verticalRadius: survey.verticalRadius, center: survey.center,
       classification: survey.classification, protectedLikely: survey.protectedLikely, reasons: survey.reasons.slice(0, 8),
-      resources: survey.resources.slice(0, 16), artificial: survey.artificial.slice(0, 8),
-      owned: survey.owned?.slice(0, 8), other: survey.other.slice(0, 8)
+      resources: survey.resources.slice(0, 10), artificial: survey.artificial.slice(0, 6),
+      owned: survey.owned?.slice(0, 6), other: survey.other.slice(0, 6)
     } : undefined,
     environment: world.environment,
     activePrimitive: world.activePrimitive,
@@ -241,7 +241,7 @@ function stringifyCompact(value: unknown): string {
   return JSON.stringify(value, (_key, item) => typeof item === 'number' && !Number.isInteger(item) ? Number(item.toFixed(3)) : item)
 }
 
-function compactWorld(world: WorldState, blockLimit = 32): string { return stringifyCompact(compactWorldValue(world, blockLimit)) }
+function compactWorld(world: WorldState, blockLimit = 16): string { return stringifyCompact(compactWorldValue(world, blockLimit)) }
 
 function compactObservation(previous: WorldState, current: WorldState): string {
   const beforeInventory = new Map(previous.inventory.map(item => [`${item.slot ?? -1}:${item.itemId ?? item.name}`, item.count]))
@@ -255,7 +255,7 @@ function compactObservation(previous: WorldState, current: WorldState): string {
     position: current.position,
     vitals: { health: current.health, food: current.food, air: current.air, onFire: current.onFire, inWater: current.inWater },
     inventoryChanges,
-    observation: compactWorldValue(current, 12)
+    observation: compactWorldValue(current, 6)
   })
 }
 
@@ -338,6 +338,7 @@ export class ToolAgent {
   readonly #followupReasoningEffort: ReasoningEffort
   readonly #onStep: ((event: ToolAgentStepEvent) => Promise<void> | void) | undefined
   readonly #onTurn: ((event: ToolAgentTurnEvent) => Promise<void> | void) | undefined
+  readonly #onToolSelected: ((event: ToolAgentSelectionEvent) => Promise<void> | void) | undefined
   readonly #estimate: (value: unknown) => number
   readonly #searchGuide: ((query: string) => Promise<string>) | undefined
 
@@ -353,6 +354,7 @@ export class ToolAgent {
     followupReasoningEffort?: ReasoningEffort
     onStep?: (event: ToolAgentStepEvent) => Promise<void> | void
     onTurn?: (event: ToolAgentTurnEvent) => Promise<void> | void
+    onToolSelected?: (event: ToolAgentSelectionEvent) => Promise<void> | void
     estimateTokens?: (value: unknown) => number
     searchGuide?: (query: string) => Promise<string>
   }) {
@@ -367,6 +369,7 @@ export class ToolAgent {
     this.#followupReasoningEffort = options.followupReasoningEffort ?? 'none'
     this.#onStep = options.onStep
     this.#onTurn = options.onTurn
+    this.#onToolSelected = options.onToolSelected
     this.#estimate = options.estimateTokens ?? estimateTokens
     this.#searchGuide = options.searchGuide
   }
@@ -512,6 +515,7 @@ export class ToolAgent {
         let ok = false
         let detail = ''
         try {
+          await this.#onToolSelected?.({ tool: call.name, arguments: call.arguments })
           const operation = toAction(call, input.requesterName)
           if (operation === 'observe') {
             ok = true

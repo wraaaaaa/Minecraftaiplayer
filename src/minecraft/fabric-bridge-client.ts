@@ -14,6 +14,7 @@ import type { SecretGuard } from '../security/secret-guard.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
+type AddressAliasesResolver = (identity: PlayerIdentity) => Promise<readonly string[]>
 type ActionResult = { ok: boolean; detail: string }
 type PendingAction = { resolve: (result: ActionResult) => void; timer: NodeJS.Timeout }
 
@@ -98,6 +99,7 @@ export class FabricBridgeClient implements ActionExecutor {
   #buffer = ''
   #world: WorldState = { connected: false, inventory: [], nearbyPlayers: [] }
   #messageHandler: PlayerMessageHandler | undefined
+  #addressAliasesResolver: AddressAliasesResolver | undefined
   #proactiveHandler: ProactiveHandler | undefined
   #proactiveTimer: NodeJS.Timeout | undefined
   #connectResolve: (() => void) | undefined
@@ -123,6 +125,7 @@ export class FabricBridgeClient implements ActionExecutor {
 
   setMessageHandler(handler: PlayerMessageHandler): void { this.#messageHandler = handler }
   setProactiveHandler(handler: ProactiveHandler): void { this.#proactiveHandler = handler }
+  setAddressAliasesResolver(resolver: AddressAliasesResolver): void { this.#addressAliasesResolver = resolver }
 
   async connect(): Promise<void> {
     const { bridgeHost, bridgePort, connectTimeoutMs } = this.#config.server
@@ -439,6 +442,10 @@ export class FabricBridgeClient implements ActionExecutor {
   }
 
   #handlePlayerChat(message: BridgeMessage): void {
+    void this.#processPlayerChat(message).catch(error => this.#logger.error('玩家消息寻址失败', error))
+  }
+
+  async #processPlayerChat(message: BridgeMessage): Promise<void> {
     if (!message.name || !message.message || !this.#messageHandler) return
     if (message.name.toLowerCase() === this.#config.server.username.toLowerCase()) return
     const now = Date.now()
@@ -450,14 +457,14 @@ export class FabricBridgeClient implements ActionExecutor {
       for (const [key, seenAt] of this.#recentPlayerChats) if (now - seenAt >= 1500) this.#recentPlayerChats.delete(key)
     }
     const identity: PlayerIdentity = { name: message.name, ...(message.uuid ? { uuid: message.uuid } : {}) }
-    const addressed = this.#addressing.decide(identity, message.message, this.#world)
+    const aliases = await this.#addressAliasesResolver?.(identity) ?? []
+    const addressed = this.#addressing.decide(identity, message.message, this.#world, Date.now(), aliases)
     if (!addressed.addressed) {
-      void this.#memory.recordPlayerMessage(identity, this.#secrets.sanitizeForPersistence(message.message)).catch((error) => this.#logger.warn('记录旁听聊天失败', error))
+      await this.#memory.recordPlayerMessage(identity, this.#secrets.sanitizeForPersistence(message.message)).catch((error) => this.#logger.warn('记录旁听聊天失败', error))
       return
     }
-    void this.#messageHandler(identity, addressed.cleaned || message.message, this.snapshot())
+    await this.#messageHandler(identity, addressed.cleaned || message.message, this.snapshot())
       .then(() => this.#addressing.noteBotReply(identity))
-      .catch((error) => this.#logger.error('玩家消息处理失败', error))
   }
 
   #handleAttack(message: BridgeMessage): void {

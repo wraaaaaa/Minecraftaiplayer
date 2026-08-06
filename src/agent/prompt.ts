@@ -67,13 +67,13 @@ export function buildToolAgentGoal(input: {
     playerMessage: input.message,
     currentPlayer: {
       name: input.player.currentName,
-      facts: input.player.facts.slice(-24),
-      conversationSummary: input.player.conversationSummary.slice(0, 4_000)
+      facts: input.player.facts.slice(-12),
+      conversationSummary: input.player.conversationSummary.slice(0, 1_500)
     },
-    recentRelevantEvents: input.recentEvents.slice(-12).map(({ at, type, content }) => ({ at, type, content: content.slice(0, 500) })),
-    globalSummary: input.globalSummary.slice(0, 4_000),
-    relevantExperience: input.experiences.slice(0, 8).map(({ task, outcome, lesson, correction, verified }) => ({
-      task: task.slice(0, 300), outcome, lesson: lesson.slice(0, 500), correction: correction.slice(0, 500), verified
+    recentRelevantEvents: input.recentEvents.slice(-6).map(({ at, type, content }) => ({ at, type, content: content.slice(0, 240) })),
+    globalSummary: input.globalSummary.slice(0, 1_200),
+    relevantExperience: input.experiences.slice(0, 4).map(({ task, outcome, lesson, correction, verified }) => ({
+      task: task.slice(0, 160), outcome, lesson: lesson.slice(0, 240), correction: correction.slice(0, 240), verified
     }))
   })
 }

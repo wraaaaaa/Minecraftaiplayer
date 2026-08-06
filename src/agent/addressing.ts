@@ -18,6 +18,11 @@ export interface AddressingResult {
 
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&') }
 
+function uniqueNames(base: readonly string[], extra: readonly string[]): string[] {
+  return [...new Set([...base, ...extra].map(name => name.trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length)
+}
+
 function commandLike(text: string): boolean {
   const normalized = text.trim()
   return /^(?:你|麻烦|请|帮|陪|跟|过来|来|走|停|别|去|回来|看|打|攻击|保护|采|挖|收集|做|合成|造|建|吃|用|给|等|守|准备|我们|咱们)|[?？]$/u.test(normalized)
@@ -29,12 +34,13 @@ export class AddressingEngine {
 
   constructor(options: AddressingOptions) { this.#options = options }
 
-  decide(identity: PlayerIdentity, message: string, world: WorldState, now = Date.now()): AddressingResult {
+  decide(identity: PlayerIdentity, message: string, world: WorldState, now = Date.now(), aliases: readonly string[] = []): AddressingResult {
     const evidence: string[] = []
     const trimmed = message.trim()
-    const explicitName = this.#options.botNames.find(name => name && new RegExp(`@?${escapeRegExp(name)}`, 'iu').test(trimmed))
+    const names = uniqueNames(this.#options.botNames, aliases)
+    const explicitName = names.find(name => new RegExp(`@?${escapeRegExp(name)}`, 'iu').test(trimmed))
     const forced = trimmed.startsWith('!')
-    const cleaned = this.#stripNames(forced ? trimmed.slice(1) : trimmed)
+    const cleaned = this.#stripNames(forced ? trimmed.slice(1) : trimmed, names)
     if (forced || explicitName) {
       evidence.push(forced ? '显式 ! 指令' : `明确称呼 ${explicitName}`)
       this.#note(identity, now)
@@ -78,9 +84,9 @@ export class AddressingEngine {
     this.#lastConversation.set(identity.uuid ? `uuid:${identity.uuid}` : `name:${identity.name.toLowerCase()}`, at)
   }
 
-  #stripNames(message: string): string {
+  #stripNames(message: string, names: readonly string[]): string {
     let cleaned = message
-    for (const name of this.#options.botNames) if (name) cleaned = cleaned.replace(new RegExp(`@?${escapeRegExp(name)}`, 'giu'), '')
-    return cleaned.trim()
+    for (const name of names) cleaned = cleaned.replace(new RegExp(`@?${escapeRegExp(name)}`, 'giu'), '')
+    return cleaned.trim().replace(/^[,，、:：\s]+/u, '')
   }
 }

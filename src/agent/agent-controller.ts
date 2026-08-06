@@ -15,7 +15,7 @@ import { parseAgentDecision } from './decision.js'
 import { planSurvivalProgression } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt, buildToolAgentGoal } from './prompt.js'
 import type { WorldState } from './world-state.js'
-import type { PromptWorkspace } from '../prompts/prompt-workspace.js'
+import { extractDeclaredBotAlias, type PromptWorkspace } from '../prompts/prompt-workspace.js'
 import type { ContextCompressor } from '../memory/context-compressor.js'
 import type { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
 import { agentWorkspaceConfig } from '../config/types.js'
@@ -90,7 +90,7 @@ const AUTONOMOUS_ACTION_TYPES = new Set<AgentAction['type']>([
 const INTERNAL_GAME_CHAT = /(?:```|\{\s*"?(?:action|actions|type)"?\s*:|\bminecraft:[a-z0-9_]+\b|\b(?:follow_player|follow_player_continuously|move_to|wander|explore_frontier|return_to_zone|eat_best_food|equip_best|attack_hostile|attack_player|hunt_entity|collect_own_drops|gather_resource|craft_item|place_block|smelt_item|trade_villager|enchant_item|sleep_in_bed|excavate_tunnel|build_nether_portal|travel_to_dimension|drop_item|use_item|seek_shelter|build_shelter|prepare_for|wait_safe)\b|\b(?:tool|function|action)\s*(?:call|name)?\b|(?:动作名|调用名|调用指令|工具调用|接口参数|内部指令))/iu
 const GENERIC_FAILURE_REPLY = '唔，我刚才认真试了，可这会儿还是没弄成，有点不甘心。具体卡住的地方我都记在总控台了，等条件合适再陪你试一次喵。'
 const SECRET_REFUSAL_REPLY = '这个我不能说啦，里面有不能外传的私密设置。你换个话题陪我聊嘛，我还想继续和你一起玩喵~'
-const AGENT_V2_SYSTEM_RULES = `
+export const AGENT_V2_SYSTEM_RULES = `
 <minecraft_agent_v2>
 你是持续运行的 Minecraft 玩家 Agent，不是关键词脚本选择器。理解完整目标和当前环境后，自主制定策略并选择工具或连续技能；不要输出旧版动作 JSON 或虚构工具。
 原子工具是手脚，适合精确观察和一次交互；连续技能是由本地客户端逐 Tick 执行的运动技能，适合采集、阶梯挖掘、合成、熔炼、狩猎、拾取与返程。连续技能不是预设任务答案：技能、参数、调用次序、失败后的替代方案都由你根据目标决定。
@@ -173,6 +173,8 @@ export class AgentController {
     const safeMessage = this.#secrets.sanitizeForPersistence(message).slice(0, 1000)
     await this.#memory.recordPlayerMessage(identity, safeMessage)
     await this.#promptWorkspace?.ensurePlayerProfile(identity)
+    const declaredAlias = extractDeclaredBotAlias(safeMessage)
+    if (declaredAlias) await this.#promptWorkspace?.appendBotAlias(identity, declaredAlias)
     if (isImmediateStop(safeMessage)) {
       await this.#handleImmediateStop(identity, safeMessage)
       return
@@ -231,7 +233,7 @@ export class AgentController {
       const epoch = this.#proactiveEpoch
       this.#proactiveActionRunning = true
       try {
-        const system = `${await this.#systemPrompt()}\n\n${AGENT_V2_SYSTEM_RULES}\n你现在处于空闲自主发展模式。长期目标是生存、持续发展并最终进入末地。不要与玩家财产交互；玩家任务会立即抢占本轮。`
+        const system = `${await this.#systemPrompt(undefined, true)}\n\n${AGENT_V2_SYSTEM_RULES}\n你现在处于空闲自主发展模式。长期目标是生存、持续发展并最终进入末地。不要与玩家财产交互；玩家任务会立即抢占本轮。`
         const agent = new ToolAgent({
           provider: this.#provider,
           executor: this.#executor,
@@ -660,7 +662,7 @@ export class AgentController {
       const workspaceConfig = agentWorkspaceConfig(this.#config)
       const context = await this.#memory.contextFor(identity, workspaceConfig.retainRecentEvents)
       const experiences = await this.#experience.relevant(message)
-      const systemPrompt = await this.#systemPrompt(identity)
+      const systemPrompt = await this.#systemPrompt(identity, true)
       const playerRequest = buildToolAgentGoal({ ...context, message, experiences })
       // World observations used to be counted as memory pressure and synchronously sent to
       // the compression model before every command. Only actual memory is considered now,
@@ -672,6 +674,7 @@ export class AgentController {
       const multimodal = this.#config.model.multimodal
       const researchEnabled = this.#provider.capabilities?.webSearch === true
         && (multimodal?.onlineResearchEnabled ?? true)
+      let acknowledged = false
       const agent = new ToolAgent({
         provider: this.#provider,
         executor: this.#executor,
@@ -682,6 +685,11 @@ export class AgentController {
         maxInputTokensPerCall: this.#config.model.agentMaxInputTokensPerCall ?? 48_000,
         maxOutputTokens: this.#config.model.agentMaxOutputTokens ?? 1024,
         followupReasoningEffort: this.#config.model.agentFollowupReasoningEffort ?? 'none',
+        onToolSelected: async () => {
+          if (acknowledged) return
+          acknowledged = true
+          await this.#bestEffortReply(identity, '好呀，我先认真看看周围再动手。你稍等我一下，别跑得太远喵~')
+        },
         ...(researchEnabled && this.#selfImprovement ? { searchGuide: async (query: string) => {
           const found = await this.#selfImprovement!.research(`Minecraft 26.2 Fabric ${query}`)
           return found.length > 0
@@ -858,9 +866,9 @@ export class AgentController {
     })
   }
 
-  async #systemPrompt(identity?: PlayerIdentity): Promise<string> {
+  async #systemPrompt(identity?: PlayerIdentity, toolAgent = false): Promise<string> {
     return this.#promptWorkspace
-      ? await this.#promptWorkspace.buildSystemPrompt(this.#persona, identity)
+      ? await this.#promptWorkspace.buildSystemPrompt(this.#persona, identity, { toolAgent })
       : buildSystemPrompt(this.#persona, this.#prompts)
   }
 

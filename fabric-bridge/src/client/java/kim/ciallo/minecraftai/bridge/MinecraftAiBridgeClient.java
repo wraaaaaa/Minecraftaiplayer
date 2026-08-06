@@ -53,6 +53,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private boolean bridgeWasConnected;
     private MovementTarget movement;
     private final LocalPathNavigator movementNavigator = new LocalPathNavigator();
+    private final TraversalRecovery traversalRecovery = new TraversalRecovery();
     private final LocalPathNavigator airRescueNavigator = new LocalPathNavigator();
     private BlockPos airRescueExit;
     private int airRescueLastScan = -100;
@@ -104,6 +105,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (bridgeWasConnected && !bridgeConnected) {
             movement = null;
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
             clearMovement(client);
             cancelPendingSurvivalAction("bridge_disconnected");
             cancelPendingNavigation(client, "bridge_disconnected");
@@ -126,6 +128,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             dead = false;
             movement = null;
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
             cancelPendingSurvivalAction("world_disconnected");
             cancelPendingNavigation(client, "world_disconnected");
             primitives.cancel(client, "world_disconnected");
@@ -218,7 +221,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 if (airRescueBreaking != null) client.gameMode.stopDestroyBlock();
                 airRescueBreaking = roof.immutable();
                 airRescueBreakStarted = tick;
-                selectFastestHotbarTool(player, state);
+                if (!ToolSelector.ensureBestMiningTool(client, player, state)) return;
                 client.gameMode.startDestroyBlock(airRescueBreaking, Direction.DOWN);
             }
             lookAt(player, roof.getX() + 0.5D, roof.getY() + 0.15D, roof.getZ() + 0.5D);
@@ -292,19 +295,6 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             return null;
         }
         return null;
-    }
-
-    private static void selectFastestHotbarTool(LocalPlayer player, BlockState state) {
-        int bestSlot = player.getInventory().getSelectedSlot();
-        float bestSpeed = player.getInventory().getItem(bestSlot).getDestroySpeed(state);
-        for (int slot = 0; slot < 9; slot++) {
-            float speed = player.getInventory().getItem(slot).getDestroySpeed(state);
-            if (speed > bestSpeed) {
-                bestSpeed = speed;
-                bestSlot = slot;
-            }
-        }
-        player.getInventory().setSelectedSlot(bestSlot);
     }
 
     private void autoConnect(Minecraft client) {
@@ -458,6 +448,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     continue;
                 }
                 movement = null;
+                traversalRecovery.reset(client);
                 clearMovement(client);
                 startSurvivalAction(id, actionType, client, player);
                 continue;
@@ -468,6 +459,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     continue;
                 }
                 movement = null;
+                traversalRecovery.reset(client);
                 clearMovement(client);
                 advanced.start(id, action, client);
                 drainAdvancedResults();
@@ -479,6 +471,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     continue;
                 }
                 movement = null;
+                traversalRecovery.reset(client);
                 clearMovement(client);
                 primitives.start(id, action, client);
                 drainPrimitiveResults();
@@ -490,6 +483,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     continue;
                 }
                 movement = null;
+                traversalRecovery.reset(client);
                 clearMovement(client);
                 shelter.start(id, action, client);
                 drainShelterResults();
@@ -669,6 +663,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "stop" -> {
                 movement = null;
                 movementNavigator.release(client);
+                traversalRecovery.reset(client);
                 cancelPendingNavigation(client, "stopped_by_command");
                 cancelPendingSurvivalAction("stopped_by_command");
                 primitives.cancel(client, "stopped_by_command");
@@ -751,10 +746,13 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     if (fix == null) yield new ActionResult(false, "服务器没有提供最高优先玩家的定位栏方位");
                     goal = fix.segmentGoal(player, 22.0D);
                 }
-                if (!setMovement(new MovementTarget(targetName, goal.x, goal.y, goal.z, "follow_player".equals(string(action, "type")), 2.0), player)) {
+                boolean continuousFollow = "follow_player".equals(string(action, "type"));
+                if (!setMovement(new MovementTarget(targetName, goal.x, goal.y, goal.z, continuousFollow, 2.0), player)) {
                     yield new ActionResult(false, "no collision-safe loaded route to player " + targetName);
                 }
-                yield new ActionResult(true, target == null ? "已按服务器定位栏方位开始寻找最高优先玩家" : "已开始前往 " + targetName);
+                yield new ActionResult(true, continuousFollow
+                    ? "continuous_follow_engaged; dynamic_replan_and_terrain_recovery_enabled; target=" + targetName
+                    : target == null ? "已按服务器定位栏方位开始寻找最高优先玩家" : "已开始前往 " + targetName);
             }
             case "wander" -> {
                 double radius = Math.max(2, Math.min(8, number(action, "radius", 6)));
@@ -785,6 +783,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 SurvivalController.SafetyAssessment safety = SurvivalController.assessSafety(client);
                 if (!safety.safeToIdle()) yield new ActionResult(false, "当前位置不适合安全挂机：" + String.join(",", safety.reasons()));
                 movement = null;
+                traversalRecovery.reset(client);
                 clearMovement(client);
                 yield new ActionResult(true, "已在安全位置停止移动并进入警戒等待");
             }
@@ -802,12 +801,16 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             pendingNavigation = null;
             movement = null;
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
             clearMovement(client);
             sendActionResult(pending.id(), true, "navigation_reached; distance=" + horizontal);
             return;
         }
         if (movement == null) {
             pendingNavigation = null;
+            movementNavigator.release(client);
+            traversalRecovery.reset(client);
+            clearMovement(client);
             sendActionResult(pending.id(), false, "navigation_failed: no collision-safe route; last_distance=" + horizontal);
             return;
         }
@@ -815,6 +818,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             pendingNavigation = null;
             movement = null;
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
             clearMovement(client);
             sendActionResult(pending.id(), false, "navigation_timeout; last_distance=" + horizontal + "; status=" + movementNavigator.status());
         }
@@ -826,6 +830,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         pendingNavigation = null;
         movement = null;
         movementNavigator.release(client);
+        traversalRecovery.reset(client);
+        clearMovement(client);
         sendActionResult(pending.id(), false, detail);
     }
 
@@ -880,10 +886,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             AbstractClientPlayer targetPlayer = findPlayer(client, target.playerName());
             if (targetPlayer == null) {
                 if (!target.playerName().equalsIgnoreCase(ownerName)) {
-                    movement = null;
-                    movementNavigator.release(client);
-                    clearMovement(client);
-                    return;
+                    // A followed player can briefly leave the loaded entity set at a chunk edge.
+                    // Keep the persistent mode and the last confirmed coordinate instead of
+                    // silently dropping follow. Continue toward that coordinate; once reached,
+                    // the normal stop-distance branch waits safely while visibility is retried.
                 }
                 double segmentDistance = Math.sqrt(
                     Math.pow(target.x() - player.getX(), 2.0D) + Math.pow(target.z() - player.getZ(), 2.0D)
@@ -892,15 +898,19 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
                     if (fix == null) {
                         if (segmentDistance <= 2.0D) {
-                            movement = null;
                             movementNavigator.release(client);
+                            traversalRecovery.reset(client);
                             clearMovement(client);
+                            if (!target.follow()) movement = null;
+                            return;
                         }
-                        return;
+                        // A transient locator miss must not strand a long-distance follow.
+                        // Finish the last confirmed segment, then wait and retry above.
+                    } else {
+                        Vec3 goal = fix.segmentGoal(player, 22.0D);
+                        target = new MovementTarget(target.playerName(), goal.x, goal.y, goal.z, target.follow(), target.stopDistance());
+                        movement = target;
                     }
-                    Vec3 goal = fix.segmentGoal(player, 22.0D);
-                    target = new MovementTarget(target.playerName(), goal.x, goal.y, goal.z, target.follow(), target.stopDistance());
-                    movement = target;
                 }
             } else {
                 target = new MovementTarget(target.playerName(), targetPlayer.getX(), targetPlayer.getY(), targetPlayer.getZ(), target.follow(), target.stopDistance());
@@ -913,8 +923,16 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (distance <= target.stopDistance()) {
             clearMovement(client);
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
             if (!target.follow()) movement = null;
             return;
+        }
+        if (traversalRecovery.active()) {
+            movementNavigator.release(client);
+            if (traversalRecovery.tick(client, player, new Vec3(target.x(), target.y(), target.z()), 8, tick)) {
+                clearMovement(client);
+                return;
+            }
         }
         boolean routed = movementNavigator.drive(
             client,
@@ -924,15 +942,24 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             distance > 6.0D,
             tick
         );
+        if (!routed && movementNavigator.consecutivePlanFailures() >= 8
+            && traversalRecovery.tick(client, player, new Vec3(target.x(), target.y(), target.z()), movementNavigator.consecutivePlanFailures(), tick)) {
+            movementNavigator.release(client);
+            clearMovement(client);
+            return;
+        }
         if (!routed && movementNavigator.consecutivePlanFailures() >= 20 && !target.follow()) {
             movement = null;
             movementNavigator.release(client);
+            traversalRecovery.reset(client);
+            clearMovement(client);
         }
     }
 
     private boolean setMovement(MovementTarget target, LocalPlayer player) {
         movement = target;
         movementNavigator.release(Minecraft.getInstance());
+        traversalRecovery.reset(Minecraft.getInstance());
         double dx = target.x() - player.getX();
         double dz = target.z() - player.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
@@ -940,8 +967,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             Minecraft.getInstance(), player, new Vec3(target.x(), target.y(), target.z()),
             target.stopDistance(), distance > 6.0D, tick
         );
-        if (!routed) movement = null;
-        return routed;
+        if (!routed && !target.follow()) movement = null;
+        return routed || target.follow();
     }
 
     private static void clearMovement(Minecraft client) {
@@ -951,6 +978,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         client.options.keyRight.setDown(false);
         client.options.keyJump.setDown(false);
         client.options.keySprint.setDown(false);
+        client.options.keyShift.setDown(false);
     }
 
     private static void lookAt(LocalPlayer player, double x, double y, double z) {
@@ -980,7 +1008,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 ? primitives.navigationStatus()
                 : !advanced.activeType().isEmpty()
                     ? advanced.navigationStatus()
-                : movement == null ? "idle" : movementNavigator.status());
+                : movement == null ? "idle" : traversalRecovery.active() ? traversalRecovery.status() : movementNavigator.status());
         event.addProperty("timeOfDay", client.level.getOverworldClockTime());
 
         ShelterController.HomeSnapshot home = shelter.homeSnapshot();

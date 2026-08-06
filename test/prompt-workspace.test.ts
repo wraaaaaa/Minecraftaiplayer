@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import type { Persona } from '../src/config/types.js'
-import { PromptWorkspace } from '../src/prompts/prompt-workspace.js'
+import { extractDeclaredBotAlias, PromptWorkspace } from '../src/prompts/prompt-workspace.js'
 
 const persona: Persona = {
   name: '小麦',
@@ -55,4 +55,49 @@ test('运行时提示词写入范围不能逃出允许的数据目录', () => {
     }),
     /必须位于项目 data 目录/u
   )
+})
+
+test('USER.md 保存玩家对 AI 的专属称呼并可从自然声明增量学习', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mcai-aliases-'))
+  try {
+    const workspace = new PromptWorkspace({
+      promptDirectory: path.join(root, 'prompts'),
+      playerProfilesDirectory: path.join(root, 'profiles'),
+      exampleDirectory: path.resolve('config/agent-prompts.example'),
+      allowedRoot: root
+    })
+    const identity = { name: 'Alice', uuid: 'uuid-alias' }
+    await workspace.ensurePlayerProfile(identity)
+    await workspace.appendBotAlias(identity, '粉粉')
+    await workspace.appendBotAlias(identity, '胆小鬼')
+    assert.deepEqual(await workspace.botAliases(identity), ['粉粉', '胆小鬼'])
+    assert.equal(extractDeclaredBotAlias('以后我就叫你小粉吧'), '小粉')
+    assert.equal(extractDeclaredBotAlias('帮我挖一块石头'), undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('工具 Agent 使用精简提示词但保留人格、安全规则与自动学习区', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mcai-compact-prompt-'))
+  try {
+    const workspace = new PromptWorkspace({
+      promptDirectory: path.join(root, 'prompts'),
+      playerProfilesDirectory: path.join(root, 'profiles'),
+      exampleDirectory: path.resolve('config/agent-prompts.example'),
+      allowedRoot: root
+    })
+    await workspace.initialize()
+    await workspace.appendLearnedToolGuidance('遇到封闭木门时优先交互开门。')
+    const full = await workspace.buildSystemPrompt(persona, { name: 'Alice' })
+    const compact = await workspace.buildSystemPrompt(persona, { name: 'Alice' }, { toolAgent: true })
+    assert.ok(compact.length < full.length)
+    assert.match(compact, /核心人格/u)
+    assert.match(compact, /真正不可绕过的限制/u)
+    assert.match(compact, /遇到封闭木门时优先交互开门/u)
+    assert.doesNotMatch(compact, /## 原子接口/u)
+    assert.doesNotMatch(compact, /## 连续技能/u)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

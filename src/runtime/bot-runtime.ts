@@ -61,6 +61,7 @@ export class BotRuntime {
         ? new FabricBridgeClient({ config, persona, logger: this.#logger, memory, policy, secrets, statusHandler: (phase, world) => status.report(phase, config.server.adapter, serverLabel, world) })
         : new MinecraftClient({ config, persona, logger: this.#logger, memory, policy, secrets, ...(easyAuthPassword ? { easyAuthPassword } : {}) })
       this.#client = client
+      client.setAddressAliasesResolver(identity => promptWorkspace.botAliases(identity))
       await status.report('waiting_for_client', config.server.adapter, serverLabel, client.snapshot())
       const controller = new AgentController({ config, persona, prompts, provider, memory, experience, policy, executor: client, logger: this.#logger, tasks, secrets, diagnostics, progression, promptWorkspace, contextCompressor, selfImprovement })
       await controller.initialize()

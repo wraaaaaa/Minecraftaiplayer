@@ -33,3 +33,14 @@ test('Bot 回复后的近距离对话可自然续接且 Bot 名会被去掉', ()
   assert.equal(result.addressed, true)
   assert.equal(addressing.decide({ name: 'Alice' }, '@小麦 过来', world, 3000).cleaned, '过来')
 })
+
+test('每位玩家在 USER.md 中约定的昵称和称号都可单独寻址 Bot', () => {
+  const addressing = engine()
+  const alice = addressing.decide({ name: 'Alice' }, '粉粉，陪我去挖矿', world, 1000, ['粉粉', '胆小鬼'])
+  assert.equal(alice.addressed, true)
+  assert.equal(alice.cleaned, '陪我去挖矿')
+  assert.match(alice.evidence.join(' '), /粉粉/u)
+
+  const bob = addressing.decide({ name: 'Bob' }, '粉粉，陪我去挖矿', world, 1000, ['小不点'])
+  assert.equal(bob.addressed, false)
+})

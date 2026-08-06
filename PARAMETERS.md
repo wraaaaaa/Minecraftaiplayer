@@ -97,7 +97,18 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 - `SOUL.md`：核心人设、价值观、语气和判断风格；这是主要人设文件，示例采用更柔软、依恋、会轻微撒娇的猫娘表达，同时明确柔弱不等于无能、不得情绪绑架。
 - `TOOLS.md`：Agent 循环、原子接口、连续技能、多模态感知、后置条件和失败处理；运行时 JSON Schema 才是参数真值。包含仅允许程序写入的 `AI_LEARNED` 托管段。
 - `MEMORY.md`：记忆召回、分玩家隔离、摘要、压缩和过期规则；不存放秘密。
-- `USER.md`：当前玩家的兴趣、表达方式、协作偏好和稳定事实；模型只加载正在对话玩家对应的一份。
+- `USER.md`：当前玩家的兴趣、表达方式、协作偏好、稳定事实，以及该玩家独有的 Bot 称呼；模型和寻址器都只加载正在对话玩家对应的一份。
+
+玩家专属称呼没有第二份 JSON 参数，唯一位置就是对应 `USER.md`：
+
+```markdown
+## 该玩家对 AI 的称呼
+
+- 粉粉
+- 小不点
+```
+
+一行一个项目符号，最多读取 32 个、每个清洗后最长 24 字符；保存 WebUI 玩家画像或直接改文件均会在下一条消息生效，无需重启。玩家用当前有效称呼明确说“以后我就叫你粉粉”时也会原子追加。此列表只影响当前 UUID/名称画像，不会改变 `config/persona.json.name`、Minecraft 游戏名或其他玩家的叫法。
 
 ### 修改人设与名称
 
@@ -144,7 +155,9 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 
 游戏聊天出口固定为“玩家交互通道”：自然陪聊、接受/完成确认和自然拒绝。默认人设要求普通回复 2–4 句，先回应具体内容，再加入感受、关心或轻微撒娇；紧急战斗警告和极简单确认可以更短。程序会拦截 JSON、代码块、动作内部名、`minecraft:` 命名空间 ID、工具/函数调用术语和接口参数；任务失败只概括说明并引导到 WebUI，不把步骤号或底层错误广播给服务器玩家。完整诊断自动写入 `data/diagnostics.json`，WebUI“总聊天”每 4 秒独立刷新，筛选控件不会把设置页标成“未保存”。
 
-空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，空闲发展不会在后续心跳覆盖它；停止、冲突任务、紧急安全动作、目标离线、死亡或断线可以结束。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。玩家任务的第一个工具选择会先触发一次本地自然开工回应，不增加 API 调用；纯聊天不会触发。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，第一次无路或普通玩家短暂离开实体加载范围不会清除它；空闲发展也不会在后续心跳覆盖。停止、冲突任务、紧急安全动作、死亡或断线可以结束；跨维度和真正离线时只能在最后已知位置等待，不能承诺物理意义上的永不丢失。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+
+Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘要 1500 字、事件 6×240 字、全局摘要 1200 字、经验 4 条；首轮/后续世界附近方块 16/6，实体各最多 8。工具模式不重复发送 `TOOLS.md` 的接口目录，但仍发送规则、身份、SOUL、MEMORY、当前 USER、安全/研究内容、AI 学习段和运行时 JSON Schema。若未来需要改这些常量，位置是 `src/agent/prompt.ts`、`src/agent/tool-agent.ts` 与 `src/prompts/prompt-workspace.ts`，改后必须重新测真实供应商 usage。
 
 注意 `server.connectTimeoutMs` 同时限制 Node 等待 Fabric 桥握手；安装 100 个以上模组的首次冷启动可能超过 30 秒。若 WebUI 显示客户端最终已启动但控制器先报等待超时，可在“服务器与客户端”适当提高该值后重启；这只延长启动等待，不改变游戏内动作超时。
 
@@ -205,9 +218,9 @@ AI 不再依赖人工坐标框判断可挖、可采或可放置。Node 只验证
 
 ### 动作能力与住所前置条件
 
-- 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`wander`、`explore_frontier`、聊天与 `stop`；废弃的 `return_to_zone` 会明确拒绝。`LocalPathNavigator` 在已加载区做有界 A*，支持平走、一步升降、水节点、半砖/雪层碰撞面、危险方块拒绝和分段重规划；探索无路时只允许破坏逐块验证的天然障碍。主人可借服务器定位栏跨全图分段寻找。
+- 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`wander`、`explore_frontier`、聊天与 `stop`；废弃的 `return_to_zone` 会明确拒绝。`LocalPathNavigator` 在已加载区做有界 A*，支持平走、一格跳跃、1.5 格潜行通道、水中水平/上下移动、半砖/雪层碰撞面、可徒手门/栅栏门、危险方块拒绝和分段重规划。持续 8 次无路后 `TraversalRecovery` 才可破坏逐块验证的天然障碍，或在动态荒野检查通过的单格缺口铺一块自有普通材料并登记到 `owned-blocks.json`。主人可借服务器定位栏跨全图分段寻找；梯子、藤蔓、铁门、复杂跑酷和未知模组碰撞仍可能失败。
 - 生存/战斗：`eat_best_food`、`equip_best`、`prepare_for`、`attack_hostile`、`hunt_entity` 和短时自卫 `attack_player`。食物使用 26.2 数据组件识别；空气低于 75% 时暂停任务，搜索可呼吸水面，必要时破坏可验证的天然冰/雪顶。狩猎拒绝幼体、驯服、拴绳和自定义名称实体。
-- 物品/生产：`use_item`、`gather_resource`/`break_block`、`collect_own_drops`、`craft_item`、`place_block`、`drop_item`、`smelt_item`、`trade_villager`、`enchant_item`、`sleep_in_bed`、`excavate_tunnel`、`build_nether_portal`、`travel_to_dimension`。合成走真实 2×2/3×3 菜单；熔炼、交易和附魔走对应容器并以背包增量/附魔状态确认。玩家/未知归属容器始终不支持。
+- 物品/生产：`use_item`、`gather_resource`/`break_block`、`collect_own_drops`、`craft_item`、`place_block`、`drop_item`、`smelt_item`、`trade_villager`、`enchant_item`、`sleep_in_bed`、`excavate_tunnel`、`build_nether_portal`、`travel_to_dimension`。合成走真实 2×2/3×3 菜单；熔炼、交易和附魔走对应容器并以背包增量/附魔状态确认。采掘工具由 `ToolSelector` 扫描整个背包，正确掉落类别优先于纯速度，剩余耐久不超过 3 的工具排除；背包换入快捷栏后等待下一 Tick 才开挖。玩家/未知归属容器始终不支持。
 
 `place_block.itemId` 可省略以自动选择安全材料，`count` 范围 1–16；当前 Java 白名单包括泥土类、基础石材、木板、羊毛、原木/木头和基础设施方块。每个候选位置必须通过玩家结构扫描、已加载、可替换、稳定支撑、碰撞、方块实体、危险源、撤退路线及服务端 `mayUseItemAt` 检查。`craft_item.itemId` 是目标物品 ID，`count` 是目标新增数量；3×3 工作台搜索半径为 8 格，且必须在 `owned-blocks.json` 中登记并与服务端现状一致。
 - 安全/住所：`seek_shelter`、`build_shelter`、`wait_safe`。长期规划会准备材料、建固定住所、取得三份同色羊毛、制作并登记床；夜间 `sleep_in_bed` 以 `player.isSleeping()` 确认睡觉和重生点设置。

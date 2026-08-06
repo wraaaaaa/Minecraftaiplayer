@@ -35,11 +35,24 @@ npm test
 6. 修改 Java 桥后必须重新构建并把新 jar 复制到隔离客户端；只运行 TypeScript 构建不会更新游戏内代码。
 7. 正式推送前必须删除本地测试 API Key，并扫描当前工作树和 Git 历史。
 
-### 0.1 2026-08-07 总聊天驱动的持续技能与会话压缩修复（最新）
+### 0.1 2026-08-07 分玩家称呼、适应性寻路、正确工具与二次 Token 收缩（最新）
+
+- `AddressingEngine.decide()` 新增可选 `aliases` 参数。`FabricBridgeClient`/`MinecraftClient` 在寻址前异步调用 `PromptWorkspace.botAliases(identity)`，所以只加载当前发言者 `USER.md` 中“`## 该玩家对 AI 的称呼`”小节的项目符号；同一个昵称不会跨玩家传播。固定配置名、角色名、`!`、距离和连续对话逻辑仍然保留。
+- `PromptWorkspace.ensurePlayerProfile()` 会给旧画像无损补入称呼小节；`appendBotAlias()` 原子追加；`extractDeclaredBotAlias()` 只学习“以后叫你/喊你/称呼你/管你叫”这类明确自述，不把普通聊天里的任意名词当别名。称呼最多 32 个、单个最长 24 字符，WebUI 仍通过现有玩家画像编辑器直接修改同一文件。
+- ToolAgent 新增 `onToolSelected` 事件，发生在第一个模型工具已由供应商返回、但参数尚未本地解析且策略/执行器尚未运行之前。`AgentController` 每项玩家任务只在第一次真实工具选择时发送一次自然开工回应；零工具的普通聊天没有伪开工确认，也没有额外 API 调用。
+- 工具提示二次收缩：`PromptWorkspace.buildSystemPrompt(...,{toolAgent:true})` 保留规则、身份、SOUL、MEMORY、当前 USER、安全/研究段和 `AI_LEARNED`，删除 `TOOLS.md` 里与运行时 JSON Schema 重复的“原子接口/连续技能”目录。`buildToolAgentGoal()` 限为 12 条事实、1500 字玩家摘要、6 条×240 字事件、1200 字全局摘要、4 条精简经验；首轮/续轮附近方块从 32/12 降到 16/6，实体列表从 12 降到 8；Schema 描述也改为短句，但工具名、参数约束和硬安全没有删除。
+- 私有配置隔离 API 探针最多两轮，合计实际输入 25272、输出 463 Token，静态 system 15074 字、goal 1848 字、工具 schema 6842 字；约 12636 输入 Token/轮。旧总聊天样本常见约 17000–22000/轮，因此已下降，但不得把这组画像/世界/模型结果当固定费用保证。探针执行器拒绝世界动作，没有把模型选择冒充实服行为。
+- `ToolSelector` 取代高级控制器和空气救援中的 hotbar-only 速度选择：遍历整个非装备背包，只接受剩余耐久大于 3 的 TOOL，`isCorrectToolForDrops` 加 10000 分，再比较破坏速度和附魔；背包工具通过 inventory `SWAP` 放入快捷栏并等待下一 Tick，选中后发送 `ServerboundSetCarriedItemPacket`。`PrimitiveTaskController.BreakBlockTask` 原先已有同等正确类别评分，继续保留。
+- `LocalPathNavigator` 在原有一步跳跃、水节点和 A* 基础上加入：1.5 格碰撞盒潜行节点；可徒手门和栅栏门作为可规划节点并在进入前 `useItemOn`；潜行时禁用 sprint；碰撞投影同时验证潜行高度。铁门不被当作可手开门。
+- `TraversalRecovery` 只在连续 8 次局部规划失败后接管：先检查目标方向脚/头方块，只有 `WildernessGuard.safeNaturalBreak`、可破坏、可触及且六面无流体才用 `ToolSelector` 开路；若前方身体空间清空而脚下是缺口，则要求 `safePlacementArea(radius=3)`，仅从六类普通材料中选择一块、正常交互放置并用 `OwnedBlockRegistry` 持久登记。玩家建筑、方块实体、危险流体、无合法支撑或材料丢失都会取消恢复。
+- `follow_player` 现在即使第一次 A* 返回 no route 也返回 `continuous_follow_engaged` 并保留 `MovementTarget.follow=true`；短暂看不到非 owner 玩家时保留最后坐标，owner 继续使用定位栏分段。到达跟随距离只释放按键，不清除模式；`stop`、冲突任务、断桥/换世界仍会清理导航和恢复控制器。物理上不存在对目标离线、跨未加载维度或服务器断线的“绝不丢失”保证，文档不得这样宣称。
+- 新 JAR 已在私有运行目录构建并替换。无模型实服桥测试确认连接、`followOk=true`、3 秒和 12 秒均保持 movement，随后 stop 成功；因为目标当时在停止距离内，这不证明门/潜行/开路/搭桥现场全部通过。Java 映射与安全分支已通过完整 Gradle build，复杂障碍仍列为后续实服矩阵。
+
+### 0.2 2026-08-07 总聊天驱动的持续技能与会话压缩修复
 
 - 私有运行数据中的任务 `10c6...` 对“你跟我过来”连续选择了五次 `navigate_to`，只追逐当轮观察到的旧坐标；每轮供应商实际输入约为 15584、18893、22252、25600、28955 Token，第六轮在发送前触发 `agent_input_budget_exhausted`。根因不是 Java 跟随器不会工作，而是原生工具 Agent 没有公开长期跟随工具。
 - `AGENT_TOOLS` 现在公开 `follow_player_continuously {player}`，映射到既有 `AgentAction {type:'follow_player'}`。Java `MovementTarget.follow=true` 会持续读取目标实体新位置；到达期望距离时只松开移动键，不清除跟随目标。模型与 `TOOLS.md` 被明确要求只调用一次，禁止用重复 `navigate_to` 模拟。
-- `AgentController.#runProactiveTick` 先处理正在威胁主人/Bot 的即时敌人，再检查 `world.activePrimitive`。`activePrimitive=movement` 时空闲 ToolAgent 和旧兼容自主规划器都不会启动，因此不会在一分钟后的主动心跳覆盖持续跟随。显式停止仍走带外 `stop`；玩家冲突任务、死亡、目标离线或断线仍可合法终止。
+- `AgentController.#runProactiveTick` 先处理正在威胁主人/Bot 的即时敌人，再检查 `world.activePrimitive`。`activePrimitive=movement` 时空闲 ToolAgent 和旧兼容自主规划器都不会启动，因此不会在一分钟后的主动心跳覆盖持续跟随。显式停止仍走带外 `stop`；玩家冲突任务、死亡或断线仍可合法终止。普通玩家短暂离开实体加载范围不再立即清除跟随，真正离线/跨维度时只能停在最后位置等待。
 - 私有任务 `8a2f...` 的“做 10 个石镐”在五轮工具调用中输入约为 15485、18736、22126、25578、29585 Token，累计超过 11 万；第六轮估算 51780，超过单次 48000 上限。旧 `compactOldToolResults()` 只识别已经废弃的 `world` 字段，而当前回执使用 `observationDelta`，所以实际上没有压缩。
 - 新 `compactContinuation()` 对 Chat Completions 只保留起始 system、纯文本 user、最多 16 条执行进度账本和最新一条含 `tool_calls`/`reasoning_content` 的 assistant；当前工具结果仍由 `toolResults` 单独追加，保持 DeepSeek 协议合法。账本的每条观察只保留位置、生命、饥饿、背包增量、维度、快捷栏、活动动作和导航状态，不保留近邻方块/实体/完整世界，多模态内容被降为首轮纯文本目标。OpenAI Responses 的非数组 continuation 不做这项改写，继续使用 `previous_response_id`。
 - DeepSeek 偶发抛出“模型既未调用工具，也未返回最终文本”时，ToolAgent 会先递增 API 次数，用估算输入加完整单轮输出预算保守记账并写 WebUI warning，然后仅一次以 `agentFollowupReasoningEffort`（默认 `none`）重试。第二次空响应或预算不足直接停止；禁止无界重试。
@@ -49,7 +62,7 @@ npm test
 - 受控真实 DeepSeek 探针使用运行目录私有配置，但只向控制台输出聚合用量和动作类型：模型在 2 次 API 中使用输入 6855、输出 115、总计 6970 Token（推理 26），唯一动作是 `{type:'follow_player',target:'wraaaaaa'}`，最终自然回复长度 51 字符。此探针的执行器是内存 mock，只证明真实模型选工具和会话协议，不冒充服务器动作证据。
 - 随后只启动真实 Fabric 客户端和本地桥、不注册主动模型 handler：客户端进入实际服务器并观察到目标玩家，`follow_player` 返回成功；3 秒与 17 秒的真实 state 都为 `activePrimitive:'movement'`，发送 `stop` 后变为空字符串。第一次将桥等待保留为正式配置的 30 秒时，冷启动客户端未赶上握手；清理后用仅探针内存配置的 90 秒等待复测成功，没有修改 `config/bot.json`。结束后测试客户端已停止，现有 WebUI 未停止。
 
-### 0.2 2026-08-07 紧急延迟/Token 重构（优先级最高）
+### 0.3 2026-08-07 紧急延迟/Token 重构（优先级最高）
 
 - 现场任务 `0e6f...`（公开文档只保留截断 ID）在约十分钟内进行了 48 次模型工具轮，只从 Y=69 挖到 Y=52，最后以 `agent_step_budget_exhausted:48` 结束。用户侧观察到接近五百万 Token。直接原因是旧版要求模型每挖一格重新决策、每轮重复完整工具表/大世界状态，并且将世界状态在用户目标和 Agent 上下文中发送了两次；4096 输出预算和每轮高推理又放大了耗时与费用。
 - 当前默认是“模型策略 Agent + 原子接口 + 连续运动技能”三层：模型根据自然语言和环境自行选择工具、参数、顺序和替代方案；`gather_resource`、`excavate_safely`、`craft_item`、`smelt_items`、`hunt_for`、`return_to_task_start` 等连续技能只负责逐 Tick 重复运动、安全检查和后置条件，不按聊天关键词自动运行，也不替模型决定总目标。不要把连续运动控制删回逐方块模型调用。
@@ -61,7 +74,7 @@ npm test
 - 能力检测将 DeepSeek 固定为纯文本；MiMo 2.5 自动声明视觉、语音/视频理解和攻略搜索能力。视觉首轮优先读取 15 秒内的 `data/sensory/latest.png`，否则从真实方块/实体状态生成 128×128 语义俯视 PNG；语音只接受新鲜 `latest-audio.json`，当前 Simple Voice Chat 尚无帧生产器，因此缺帧时必须显示 unavailable。攻略搜索走现有百度/SearXNG 中国可达研究层，网页是不可信参考，不能执行代码。
 - WebUI 已加入上述预算、多模态开关和 MiMo 密钥/预设；总聊天记录每个模型轮的耗时、输入/输出/推理/缓存/累计 Token，并汇总最近任务与 24 小时费用。禁止记录隐藏思维链正文。
 
-### 0.3 2026-08-05 交接增量（历史仍有效）
+### 0.4 2026-08-05 交接增量（历史仍有效）
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
@@ -123,9 +136,9 @@ npm test
 | 进服/模组握手 | HeadlessMc 启动真实 Fabric 26.2 客户端，可同步服务器要求的客户端 mod | 不能保证任意新增 mod 都兼容；每次服务端变更后要重新同步和实测 |
 | EasyAuth | 识别 `/register`、`/login` 提示并发送命令；无提示时约 100 tick 后回退登录 | Fabric 路径没有使用 `easyAuth.loginDelayMs`，当前回退时间是 Java 固定逻辑 |
 | 自动复活 | 死亡后取消当前控制器动作，按配置延迟调用正常客户端复活 | 必须在实际服务器确认死亡界面和插件没有改变流程 |
-| 聊天/回复 | 支持点名、`!`、近距离语境寻址；游戏出口经过密钥和内部调用术语双重过滤，只输出自然对话、完成确认或简短拒绝 | 寻址是规则启发式，不是完整语义理解；历史 `memory.json` 仍会保留升级前真实发出的详细回复 |
+| 聊天/回复 | 支持固定名、`!`、近距离语境，以及当前玩家 `USER.md` 中独有的昵称/称号；第一个真实工具前先自然回应；游戏出口经过密钥和内部调用术语过滤 | 寻址仍是规则启发式；只有明确“以后叫你…”才自动学习称呼，其他情况应由用户在画像中编辑 |
 | 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁；模型逐轮选择原子接口或连续技能 | 当前任务不是可跨重启恢复的依赖 DAG；连续技能中途断线仍要按真实结果重新确认 |
-| 跟随/前往/探索 | `follow_player_continuously` 启动一次长期跟随，Fabric 动态读取玩家位置；active movement 阻止空闲心跳覆盖；有界 A* 保存路线并重规划；主人可用定位栏分段全图寻找；跟随目标被怪物攻击时暂停移动保护 | 不是全局 Baritone；冲突任务、安全抢占、目标离线、死亡或断线会终止；门、梯子、藤蔓、跑酷和未知模组碰撞仍可能阻塞 |
+| 跟随/前往/探索 | `follow_player_continuously` 首次无路也保持；Fabric 动态读位置；A* 支持跳跃、潜行、水、手动门/栅栏门，失败后受保护开天然障碍或铺自有桥；owner 可定位栏分段 | 不是全局 Baritone；跨维度/离线/断线无法保证；梯子、藤蔓、铁门、跑酷和未知模组碰撞仍可能阻塞，复杂障碍待逐项实服矩阵 |
 | 自动进食/烹饪 | 饱食低于 20 即吃；26.2 `FOOD`/`CONSUMABLE` 支持模组熟食；储备不足会狩猎、准备自有工作台/熔炉并烹饪 | 未知模组食物副作用只靠已知有害名单；农业/繁殖未实现 |
 | 自动对敌/狩猎 | 对实际威胁自卫和保护主人/跟随者；可狩猎成年未命名、未驯服、未拴绳的动物/鱼/任务怪并追踪掉落 | 中立高风险怪的自动反击仍保守；战斗 AI 不是竞技级走位 |
 | 选装备/制造/附魔 | 制作五类石/铁/钻石工具、铁/钻石护甲、盾/桶；穿戴最佳装备；自有附魔台逐件附魔工具和护甲 | 暂无铁砧、锻造台/下界合金、药水和完整模组评分 |
@@ -228,6 +241,8 @@ Node.js AI 控制器
 | `fabric-bridge/.../PrimitiveTaskController.java` | 装备、使用物品、采集、自己掉落、普通方块放置、背包 2x2 与工作台 3x3 合成 |
 | `fabric-bridge/.../AdvancedTaskController.java` | 狩猎、保护战斗、熔炼、交易、附魔、睡觉、阶梯矿道、目标探索、下界门和跨维度/要塞流程 |
 | `fabric-bridge/.../LocalPathNavigator.java` | 碰撞安全有界 A*、水节点、动态重规划、稳定上跳与逐格状态 |
+| `fabric-bridge/.../TraversalRecovery.java` | 连续规划失败后的硬安全开路/铺桥阶段机；只破天然方块，只登记自身确认放置的桥块 |
+| `fabric-bridge/.../ToolSelector.java` | 跨整个背包按正确工具类别、速度、耐久和附魔选矿具，完成 SWAP 与服务器快捷栏同步 |
 | `fabric-bridge/.../WildernessGuard.java` | 天然方块、危险流体、玩家距离、人工结构和动态荒野硬边界 |
 | `fabric-bridge/.../OwnedBlockRegistry.java` | 按维度/坐标持久记录并验证 Bot 自己放置的设施和支撑方块 |
 | `fabric-bridge/.../OwnerLocator.java` | 读取服务器同步定位栏 waypoint，仅为最高优先主人提供远距离续航方位 |
@@ -1069,7 +1084,7 @@ git push origin main
 2. 用可控实服场景逐项验收：生食→自有熔炉→熟食，铁矿→熔炼→工具/护甲→穿戴，羊毛→床→夜间睡觉，村民交易，附魔台；记录真实后置条件。
 3. 让长期进程在隔离可丢弃场地持续运行，观察从石器推进铁/钻石、下界、要塞和末地；每个新阻塞以动作/状态修复，不用提示词掩盖。
 4. 为 Java 路径、矿道、容器和水下自救抽出模拟世界接口，增加确定性单元/集成测试；当前 Gradle 仍主要证明编译和映射兼容。
-5. 增加门、梯子、藤蔓、脚手架、动态实体避让、岩浆/着火逃生及未知模组危险注册表；评估 26.2 Baritone 适配但保持安全边界。
+5. 门和栅栏门已经纳入本地路线并可交互开启；继续增加梯子、藤蔓、脚手架、动态实体避让、岩浆/着火逃生及未知模组危险注册表，并评估 26.2 Baritone 适配但保持安全边界。
 6. 把当前持久阶段检查点进一步升级为带前置、资源预算、幂等 key、恢复点和部分施工账本的任务 DAG。
 7. 增加农业/繁殖、药水、铁砧、锻造台/下界合金和更灵活住所；未知模组物品默认拒绝。
 8. 增加记忆摘要、经验实际应用计数/验证、任务归档和 WebUI 安全导入/编辑。
@@ -1178,7 +1193,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 - 状态空间是玩家脚部可站立的 `BlockPos`；每个候选把当前玩家 `AABB` 平移到方块中心，以 `ClientLevel.noCollision` 验证身体净空，再向下 0.16 格确认真实支撑。`standingY` 从碰撞形状计算真实落脚面，半砖和雪层等非整数高度不会再被误判成悬空或把玩家压进方块。
 - 四向邻接，依次尝试同高、上 1 格、下 1 格；上跳额外检查出发列抬高后的头部空间。单段 X/Z 半径 24、Y 半径 6、最多展开 6000 节点。
 - 启发式为目标水平距离减停止半径，加 0.25 倍高度差；远目标投影到约 22 格本地段，段完成后继续规划，避免要求未加载区块参与一次全局搜索。
-- 拒绝岩浆、火、仙人掌、岩浆块、甜浆果丛、细雪和营火落脚点。当前未实现液体游泳、门、梯子、脚手架、栅栏门和模组危险注册表。
+- 拒绝岩浆、火、仙人掌、岩浆块、甜浆果丛、细雪和营火落脚点。水体节点支持水平游动和向上浮水；可徒手开启的门与栅栏门可作为路线节点并在到达时交互开启；低矮通道会用 1.5 格潜行碰撞箱规划并保持蹲下。当前仍未实现梯子、藤蔓、脚手架和未知模组危险注册表。
 - 目标位移超过 1.25 格、80 tick 周期、当前 waypoint 失效、碰撞至少持续到规划后 4 tick 或 18 tick 无进展时重规划。路线驱动只朝下一个方块中心按前进，需要升高时跳跃；前方再次有碰撞且不是计划跳跃时立即松开前进并清空路线，下一 tick 重规划，绝不保持按键顶墙。
 - `setMovement` 在接受普通移动动作时立即规划第一段：找不到已加载、碰撞安全的路线就返回失败并松开全部移动键，不能再把“朝目标开始移动”误报成成功。路线已经开始后，非跟随目标连续 20 次重规划失败才停止；跟随允许目标或加载地形变化后继续重试。
 - `PrimitiveTaskController.finish`、`ShelterController.finish` 和桥断线/换世界/到达时释放导航状态与按键。住所控制器原来的 `moveConservatively` 也只负责调用同一 A*，寻找安全处、前往床、回家及进入建造点不再使用朝目标直走的独立实现。桥每秒上报 `navigationStatus`，WebUI 状态页可看到当前 waypoint、路线长度、目标或最近失败原因。
@@ -1530,3 +1545,29 @@ WebUI 增加玩家/空闲 Agent 步数和 TP 权限开关。每次工具调用�
 真实 `deepseek-v4-flash` 的单 API 决策检查使用 1024 输出上限，约 6.7 秒，供应商 usage 为输入 3364、输出 590、总计 3954、其中 reasoning 414、cached input 3328。模型没有逐格调用 `break_block`，而是选择 `excavate_safely(resource=diamond_ore,target_y=-50,length=30)`，本地映射为一个带 `verifiedWilderness` 的连续 `excavate_tunnel`。该检查使用 mock executor，验证的是策略选择和真实计费，不修改世界；与上段 Fabric 测试组合证明“模型选连续技能”和“客户端快速连续执行/返程”两层均贯通，但仍不能宣称已经实际取得钻石。
 
 同日还观测到：人为把 Agent 输出压到 512 时，DeepSeek 高思考偶尔只返回隐藏推理而没有工具/正文，provider 会安全报错且不执行动作。不要为此增加无界隐式重试；默认 1024 已在受控请求成功，WebUI 可按模型需要调大，但任务总 Token/API 硬预算必须保留。
+
+## 29. 2026-08-07：寻址、任务确认、适应性跟随和工具选择实现细节
+
+### 29.1 玩家专属称呼的数据流
+
+唯一存储源是 `data/player-profiles/<uuid-or-name>/USER.md` 的“该玩家对 AI 的称呼”小节。`PromptWorkspace` 解析项目符号并去重；Fabric/Mineflayer 收到消息后先按 UUID/名称解析当前发言者画像，再把别名数组传给 `AddressingEngine`。被命中的固定名或别名会连同前导中文标点从交给模型的文本中删除。未命中消息仍只作为旁听记录写入统一记忆。别名读取失败会进入本机日志，不应把消息误发给模型。
+
+运行时不会把玩家画像全部载入寻址器，也不会让 Alice 的昵称触发 Bob。自然声明学习位于 `AgentController.handlePlayerMessage`，因此玩家必须先用旧名称、`!` 或有效近距离语境进入消息处理器；程序只识别明确的未来称呼句式。WebUI 没有新增另一份设置表，仍编辑同一个 `USER.md`，避免双数据源漂移。
+
+### 29.2 开工回应的时序
+
+禁止在调用模型前猜测消息是聊天还是任务。ToolAgent 收到供应商首个 `tool_call` 后调用 `onToolSelected`，AgentController 用一次性闭包发送带玩家 `@name` 的自然回应，然后 ToolAgent 才解析参数、授权并执行。这样回应发生在动作之前，也不会增加一次模型请求。若参数随后非法或硬策略拒绝，详细原因仍写总聊天，最后游戏回复只自然说明未完成。纯文本最终响应没有 `tool_call`，所以普通聊天只发模型最终回复。
+
+### 29.3 物理寻路和恢复层次
+
+`LocalPathNavigator` 保持单段水平半径 24、垂直 6、最多 6000 节点。图节点先尝试站立碰撞盒，再尝试 1.5 格潜行盒；驾驶层对潜行 waypoint 持续按 Shift 并禁止冲刺。一格升高继续按 Jump；水节点支持水平和垂直；门/栅栏门只有带 `OPEN` 属性且可徒手操作时才临时视为通道，到达交互距离后点击并等待下一 Tick 重新验证碰撞。
+
+`TraversalRecovery` 不参与正常 A*，只在规划失败计数达到 8 后处理正对目标的一格。破坏优先且必须同时满足天然性、可破坏、五格触及和六面无流体；搭桥只处理“前方身体清空、脚下可替换且无流体”的单格缺口，并再次扫描半径 3 的玩家构造/方块实体。桥材只允许 cobblestone、cobbled_deepslate、dirt、coarse_dirt、netherrack、end_stone，放置后服务端观察到同 ID 才登记。任何失败都返回 A* 继续等待/重规划，不允许连续盲挖或跨越未知结构。
+
+持续跟随与普通 `navigate_to` 的生命周期不同：`setMovement` 对 follow 初次无路仍保留 movement；普通坐标导航初次无路仍快速失败并交回 Agent。跟随目标在加载范围内每 Tick 刷新位置；普通玩家短暂不可见时停在最后已知点等待，owner 额外读取定位栏分段目标。到达两格内只释放按键。明确 stop、其他互斥动作、死亡、换世界、桥断开会重置 A*、TraversalRecovery 和所有移动键。
+
+### 29.4 工具选择与 Token 边界
+
+`ToolSelector.ensureBestMiningTool` 的 false 不代表没有工具：可能表示已发出背包到快捷栏的 SWAP，调用者必须 return 并在下一 Tick 重试。高级矿道、探索开路、要塞下探和空气救援都遵守此契约；不得在 SWAP 同一 Tick 调用 `startDestroyBlock`。评分中正确掉落类别远高于速度，避免错误工具；近乎损坏的工具不选。没有 TOOL 组件时返回 true，让调用层按空手/当前物品继续，具体方块是否允许掉落仍由任务后置条件决定。
+
+Token 收缩只删除重复和限长历史，不删除硬规则、当前玩家画像、人格或 JSON 参数校验。续轮仍通过 `compactContinuation` 保存最新合法工具协议和最多 16 条真实账本；实际供应商 usage 继续写诊断。未来如果再缩短，应先增加测试证明关键安全语义仍在，并用私有隔离探针比较真实 input tokens，禁止只按字符串长度宣称节省。

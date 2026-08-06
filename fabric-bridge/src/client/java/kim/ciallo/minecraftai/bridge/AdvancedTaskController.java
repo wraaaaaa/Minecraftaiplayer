@@ -827,7 +827,7 @@ public final class AdvancedTaskController {
                 finish(client, this, false, "tunnel block moved outside legal reach");
                 return;
             }
-            selectBestMiningTool(player, state);
+            if (!ToolSelector.ensureBestMiningTool(client, player, state)) return;
             lookAt(player, breaking.getX() + 0.5D, breaking.getY() + 0.5D, breaking.getZ() + 0.5D);
             if (tick == breakStarted) client.gameMode.startDestroyBlock(breaking, Direction.UP);
             else client.gameMode.continueDestroyBlock(breaking, Direction.UP);
@@ -881,7 +881,7 @@ public final class AdvancedTaskController {
                     || dangerousFluidAdjacent(client, obstacle)) {
                     finish(client, this, false, "frontier obstacle became unsafe");
                 } else {
-                    selectBestMiningTool(player, state);
+                    if (!ToolSelector.ensureBestMiningTool(client, player, state)) return;
                     lookAt(player, obstacle.getX() + 0.5D, obstacle.getY() + 0.5D, obstacle.getZ() + 0.5D);
                     client.gameMode.continueDestroyBlock(obstacle, Direction.UP);
                     player.swing(InteractionHand.MAIN_HAND);
@@ -910,7 +910,7 @@ public final class AdvancedTaskController {
                     && player.distanceToSqr(Vec3.atCenterOf(candidate)) <= 25.0D
                     && !dangerousFluidAdjacent(client, candidate)) {
                     BlockState state = client.level.getBlockState(candidate);
-                    selectBestMiningTool(player, state);
+                    if (!ToolSelector.ensureBestMiningTool(client, player, state)) return;
                     lookAt(player, candidate.getX() + 0.5D, candidate.getY() + 0.5D, candidate.getZ() + 0.5D);
                     obstacle = candidate.immutable();
                     obstacleStarted = tick;
@@ -1177,7 +1177,7 @@ public final class AdvancedTaskController {
                     finish(client, this, false, "dangerous fluid found while descending toward stronghold");
                     return;
                 }
-                selectBestMiningTool(player, state);
+                if (!ToolSelector.ensureBestMiningTool(client, player, state)) return;
                 lookAt(player, breaking.getX() + 0.5D, breaking.getY() + 0.5D, breaking.getZ() + 0.5D);
                 client.gameMode.continueDestroyBlock(breaking, Direction.UP);
                 player.swing(InteractionHand.MAIN_HAND);
@@ -1185,6 +1185,8 @@ public final class AdvancedTaskController {
                 return;
             }
             if (!digQueue.isEmpty()) {
+                BlockState nextState = client.level.getBlockState(digQueue.peekFirst());
+                if (!ToolSelector.ensureBestMiningTool(client, player, nextState)) return;
                 breaking = digQueue.removeFirst();
                 breakStarted = tick;
                 client.gameMode.startDestroyBlock(breaking, Direction.UP);
@@ -1695,20 +1697,6 @@ public final class AdvancedTaskController {
             reports.add(direction.getName() + "[" + String.join(",", reasons) + "]");
         }
         return "origin=" + origin.toShortString() + "; targetY=" + targetY + "; " + String.join(";", reports);
-    }
-
-    private static void selectBestMiningTool(LocalPlayer player, BlockState state) {
-        int bestSlot = player.getInventory().getSelectedSlot();
-        float bestSpeed = player.getInventory().getItem(bestSlot).getDestroySpeed(state);
-        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
-            ItemStack stack = player.getInventory().getItem(slot);
-            if (stack.isEmpty() || stack.isDamageableItem() && stack.getMaxDamage() - stack.getDamageValue() <= 3) continue;
-            float speed = stack.getDestroySpeed(state);
-            if (speed > bestSpeed) { bestSlot = slot; bestSpeed = speed; }
-        }
-        if (bestSlot == player.getInventory().getSelectedSlot()) return;
-        player.getInventory().setSelectedSlot(bestSlot);
-        player.connection.send(new ServerboundSetCarriedItemPacket(bestSlot));
     }
 
     private static int inventoryCount(LocalPlayer player, String targetItemId) {

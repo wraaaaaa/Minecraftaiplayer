@@ -6,8 +6,14 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.tags.FluidTags;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.level.block.DoorBlock;
+import net.minecraft.world.level.block.FenceGateBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
@@ -141,12 +147,34 @@ final class LocalPathNavigator {
         boolean waterWaypoint = isWaterNode(client, waypoint);
         lookAt(player, waypointCenter.x, waypointCenter.y, waypointCenter.z, waterWaypoint || player.isInWater());
 
+        BlockPos closedBarrier = closedOpenableBarrier(client, waypoint);
+        if (closedBarrier != null) {
+            if (client.gameMode == null || !player.isWithinBlockInteractionRange(closedBarrier, 0.0D)) {
+                path = List.of();
+                pathIndex = 0;
+                status = "door_out_of_reach_replan";
+                return true;
+            }
+            Vec3 hit = Vec3.atCenterOf(closedBarrier);
+            lookAt(player, hit.x, hit.y, hit.z, true);
+            InteractionResult result = client.gameMode.useItemOn(
+                player,
+                InteractionHand.MAIN_HAND,
+                new BlockHitResult(hit, Direction.UP, closedBarrier, false)
+            );
+            if (result.consumesAction()) player.swing(InteractionHand.MAIN_HAND);
+            status = result.consumesAction() ? "opening_door_or_gate" : "door_interaction_rejected";
+            return true;
+        }
+
         double dx = waypointCenter.x - player.getX();
         double dz = waypointCenter.z - player.getZ();
         double length = Math.max(0.001D, Math.sqrt(dx * dx + dz * dz));
         AABB projected = player.getBoundingBox().move(dx / length * 0.32D, 0.0D, dz / length * 0.32D);
-        boolean clearAhead = client.level.noCollision(player, projected);
         boolean stepUp = waypointCenter.y > player.getY() + 0.2D;
+        boolean crouch = requiresCrouch(client, player, waypoint);
+        boolean clearAhead = client.level.noCollision(player, projected)
+            || crouch && client.level.noCollision(player, crouchingBox(projected));
         if (!clearAhead && !stepUp) {
             // Never keep pressing into a wall. Invalidate immediately; the next tick routes around it.
             path = List.of();
@@ -156,11 +184,12 @@ final class LocalPathNavigator {
         }
 
         client.options.keyUp.setDown(true);
-        client.options.keySprint.setDown(sprint && !stepUp && pathIndex + 1 < path.size());
+        client.options.keyShift.setDown(crouch);
+        client.options.keySprint.setDown(sprint && !stepUp && !crouch && pathIndex + 1 < path.size());
         if ((stepUp && player.onGround()) || (waterWaypoint && waypointCenter.y > player.getY() + 0.05D)) {
             client.options.keyJump.setDown(true);
         }
-        status = "following_path " + (pathIndex + 1) + "/" + path.size();
+        status = (crouch ? "crouching_path " : "following_path ") + (pathIndex + 1) + "/" + path.size();
         return true;
     }
 
@@ -320,8 +349,11 @@ final class LocalPathNavigator {
             standingY - player.getY(),
             position.getZ() + 0.5D - player.getZ()
         );
-        if (!client.level.noCollision(player, atPosition)) return false;
-        if (!water && client.level.noCollision(player, atPosition.move(0.0D, -0.16D, 0.0D))) return false;
+        boolean standingClear = client.level.noCollision(player, atPosition);
+        boolean crouchingClear = client.level.noCollision(player, crouchingBox(atPosition));
+        boolean opensAfterInteraction = openablePassage(client, position);
+        if (!standingClear && !crouchingClear && !opensAfterInteraction) return false;
+        if (!water && !opensAfterInteraction && client.level.noCollision(player, atPosition.move(0.0D, -0.16D, 0.0D))) return false;
         return !isHazard(client.level.getBlockState(position)) && !isHazard(client.level.getBlockState(position.below()));
     }
 
@@ -336,7 +368,56 @@ final class LocalPathNavigator {
             toY - player.getY(),
             from.getZ() + 0.5D - player.getZ()
         );
-        return client.level.noCollision(player, raisedDeparture);
+        return client.level.noCollision(player, raisedDeparture)
+            || client.level.noCollision(player, crouchingBox(raisedDeparture))
+            || openablePassage(client, from)
+            || openablePassage(client, to);
+    }
+
+    private static AABB crouchingBox(AABB standing) {
+        return new AABB(standing.minX, standing.minY, standing.minZ, standing.maxX, standing.minY + 1.5D, standing.maxZ);
+    }
+
+    private static boolean requiresCrouch(Minecraft client, LocalPlayer player, BlockPos position) {
+        if (client.level == null || openablePassage(client, position)) return false;
+        double y = standingY(client, position);
+        if (!Double.isFinite(y)) return false;
+        AABB standing = player.getBoundingBox().move(
+            position.getX() + 0.5D - player.getX(),
+            y - player.getY(),
+            position.getZ() + 0.5D - player.getZ()
+        );
+        return !client.level.noCollision(player, standing) && client.level.noCollision(player, crouchingBox(standing));
+    }
+
+    private static boolean openablePassage(Minecraft client, BlockPos position) {
+        if (client.level == null) return false;
+        boolean found = false;
+        for (BlockPos cursor : List.of(position, position.above())) {
+            BlockState state = client.level.getBlockState(cursor);
+            if (isOpenableBarrier(state)) {
+                found = true;
+                continue;
+            }
+            if (!state.getCollisionShape(client.level, cursor).isEmpty()) return false;
+        }
+        return found;
+    }
+
+    private static BlockPos closedOpenableBarrier(Minecraft client, BlockPos position) {
+        if (client.level == null) return null;
+        for (BlockPos cursor : List.of(position, position.above())) {
+            BlockState state = client.level.getBlockState(cursor);
+            if (isOpenableBarrier(state) && state.hasProperty(BlockStateProperties.OPEN)
+                && !state.getValue(BlockStateProperties.OPEN)) return cursor;
+        }
+        return null;
+    }
+
+    private static boolean isOpenableBarrier(BlockState state) {
+        if (!state.hasProperty(BlockStateProperties.OPEN)) return false;
+        if (state.getBlock() instanceof DoorBlock door) return door.type().canOpenByHand();
+        return state.getBlock() instanceof FenceGateBlock;
     }
 
     /** Returns the actual collision-surface height, including slabs and snow layers. */

@@ -85,7 +85,7 @@ function replaceManaged(content: string, start: string, end: string, body: strin
 }
 
 function appendSectionBullet(content: string, heading: string, value: string): string {
-  if (content.includes(value)) return content
+  if (content.split(/\r?\n/gu).some(line => line.trim() === `- ${value}`)) return content
   const start = content.indexOf(heading)
   if (start < 0) return `${content.trim()}\n\n${heading}\n\n- ${value}\n`
   const bodyStart = start + heading.length
@@ -93,6 +93,55 @@ function appendSectionBullet(content: string, heading: string, value: string): s
   const end = next < 0 ? content.length : next
   const section = content.slice(bodyStart, end).replace(/\n暂无。?\s*/gu, '\n')
   return `${content.slice(0, bodyStart)}${section.trimEnd()}\n\n- ${value}\n${content.slice(end)}`
+}
+
+const BOT_ALIAS_HEADING = '## 该玩家对 AI 的称呼'
+
+function normalizeBotAlias(value: string): string | undefined {
+  const normalized = value
+    .replace(/^[\s`'"“”‘’「」『』]+|[\s`'"“”‘’「」『』，。！？!?：:；;、]+$/gu, '')
+    .replace(/(?:吧|呀|啦|喽|哦)$/u, '')
+    .trim()
+  if (!normalized || normalized.length > 24 || /[\r\n<>]/u.test(normalized)) return undefined
+  return normalized
+}
+
+export function extractBotAliases(content: string): string[] {
+  const start = content.indexOf(BOT_ALIAS_HEADING)
+  if (start < 0) return []
+  const bodyStart = start + BOT_ALIAS_HEADING.length
+  const next = content.indexOf('\n## ', bodyStart)
+  const section = content.slice(bodyStart, next < 0 ? content.length : next)
+  const aliases = section.split(/\r?\n/gu).flatMap(line => {
+    const bullet = line.match(/^\s*[-*]\s+(.+)$/u)?.[1]
+    if (!bullet || /^(?:暂无|没有|未设置)/u.test(bullet)) return []
+    return bullet.split(/[，,、；;\/]/gu).flatMap(item => normalizeBotAlias(item) ?? [])
+  })
+  return [...new Set(aliases)].slice(0, 32)
+}
+
+export function extractDeclaredBotAlias(message: string): string | undefined {
+  const captured = message.match(/(?:以后|今后)?\s*(?:我)?\s*(?:就)?\s*(?:叫你|喊你|称呼你|管你叫)\s*[`'"“‘「『]?([^\s，。！？!?：:；;、`'"”’」』]{1,28})/u)?.[1]
+  return captured ? normalizeBotAlias(captured) : undefined
+}
+
+function ensureBotAliasSection(content: string): string {
+  if (content.includes(BOT_ALIAS_HEADING)) return content
+  const insertAt = content.indexOf('\n## 玩家明确表达的稳定事实')
+  const section = `\n${BOT_ALIAS_HEADING}\n\n暂无。\n`
+  return insertAt < 0 ? `${content.trim()}${section}` : `${content.slice(0, insertAt)}${section}${content.slice(insertAt)}`
+}
+
+function compactToolsDocument(content: string): string {
+  const skipped = new Set(['## 原子接口', '## 连续技能'])
+  const output: string[] = []
+  let omitting = false
+  for (const line of content.split(/\r?\n/gu)) {
+    if (skipped.has(line.trim())) { omitting = true; continue }
+    if (omitting && line.startsWith('## ')) omitting = false
+    if (!omitting) output.push(line)
+  }
+  return output.join('\n').replace(/\n{3,}/gu, '\n\n').trim()
 }
 
 export class PromptWorkspace {
@@ -150,7 +199,24 @@ export class PromptWorkspace {
         .replaceAll('{{createdAt}}', memory?.firstSeenAt ?? new Date().toISOString())
       await atomicText(file, content)
     }
-    return { id, playerName: identity.name, ...(identity.uuid ? { uuid: identity.uuid } : {}), content: await readFile(file, 'utf8'), file }
+    let content = await readFile(file, 'utf8')
+    const migrated = ensureBotAliasSection(content)
+    if (migrated !== content) {
+      await atomicText(file, migrated)
+      content = migrated
+    }
+    return { id, playerName: identity.name, ...(identity.uuid ? { uuid: identity.uuid } : {}), content, file }
+  }
+
+  async botAliases(identity: PlayerIdentity): Promise<string[]> {
+    return extractBotAliases((await this.ensurePlayerProfile(identity)).content)
+  }
+
+  async appendBotAlias(identity: PlayerIdentity, alias: string): Promise<void> {
+    const safe = normalizeBotAlias(alias)
+    if (!safe) return
+    const profile = await this.ensurePlayerProfile(identity)
+    await atomicText(profile.file, appendSectionBullet(profile.content, BOT_ALIAS_HEADING, safe))
   }
 
   async listPlayerProfiles(): Promise<PlayerProfileDocument[]> {
@@ -222,7 +288,7 @@ export class PromptWorkspace {
     await atomicText(path.join(this.#root, 'behavior-patches.json'), `${JSON.stringify(document, null, 2)}\n`)
   }
 
-  async buildSystemPrompt(persona: Persona, identity?: PlayerIdentity): Promise<string> {
+  async buildSystemPrompt(persona: Persona, identity?: PlayerIdentity, options: { toolAgent?: boolean } = {}): Promise<string> {
     const documents = await this.readDocuments()
     const profile = identity ? await this.ensurePlayerProfile(identity) : undefined
     const patches = (await this.readBehaviorPatches()).patches.filter(patch => patch.enabled).slice(-20)
@@ -236,7 +302,7 @@ export class PromptWorkspace {
       substitute(documents['rules.md']),
       substitute(documents['IDENTITY.md']),
       substitute(documents['SOUL.md']),
-      substitute(documents['TOOLS.md']),
+      substitute(options.toolAgent ? compactToolsDocument(documents['TOOLS.md']) : documents['TOOLS.md']),
       substitute(documents['MEMORY.md']),
       profile ? `# 当前玩家专属 USER.md\n\n${profile.content}` : '',
       patches.length > 0 ? `# 已验证的声明式行为补丁\n\n${JSON.stringify(patches, null, 2)}` : ''
