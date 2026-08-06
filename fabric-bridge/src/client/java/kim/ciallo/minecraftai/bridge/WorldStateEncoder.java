@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.Holder;
 import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -139,6 +140,7 @@ public final class WorldStateEncoder {
         environment.addProperty("monsterSpawnBlockLightLimit", client.level.dimensionType().monsterSpawnBlockLightLimit());
         root.add("environment", environment);
         root.add("blockSurvey", blockSurvey(client, player));
+        root.add("nearbyBlocks", nearbyBlocks(client, player));
 
         Integer currentThreatId = survival == null ? null : survival.snapshot().threatEntityId();
         root.add("hostiles", hostiles(client, player, currentThreatId));
@@ -424,6 +426,44 @@ public final class WorldStateEncoder {
         return output;
     }
 
+    private static JsonArray nearbyBlocks(Minecraft client, LocalPlayer player) {
+        BlockPos center = player.blockPosition();
+        List<NearbyBlock> candidates = new ArrayList<>();
+        for (BlockPos cursor : BlockPos.betweenClosed(center.offset(-6, -4, -6), center.offset(6, 4, 6))) {
+            if (!client.level.isLoaded(cursor)) continue;
+            BlockState state = client.level.getBlockState(cursor);
+            if (state.isAir()) continue;
+            double distanceSqr = player.distanceToSqr(Vec3.atCenterOf(cursor));
+            boolean exposed = distanceSqr <= 12.25D;
+            if (!exposed) {
+                for (Direction direction : Direction.values()) {
+                    BlockPos adjacent = cursor.relative(direction);
+                    if (client.level.isLoaded(adjacent)
+                        && (client.level.getBlockState(adjacent).isAir() || !client.level.getFluidState(adjacent).isEmpty())) {
+                        exposed = true;
+                        break;
+                    }
+                }
+            }
+            if (!exposed) continue;
+            String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+            String resource = naturalResourceCategory(state, id);
+            boolean blockEntity = client.level.getBlockEntity(cursor) != null;
+            boolean owned = OwnedBlockRegistry.isOwned(client, cursor, id);
+            String classification = owned ? "bot_owned" : resource != null ? "natural_resource" : blockEntity || looksPlayerBuilt(id) ? "protected_likely" : "unclassified";
+            candidates.add(new NearbyBlock(cursor.immutable(), id, resource, classification, blockEntity,
+                state.canBeReplaced(), !state.getFluidState().isEmpty(), state.getDestroySpeed(client.level, cursor), distanceSqr));
+        }
+        JsonArray output = new JsonArray();
+        candidates.stream()
+            .sorted(Comparator
+                .comparingInt((NearbyBlock block) -> "natural_resource".equals(block.classification()) ? 0 : "protected_likely".equals(block.classification()) ? 2 : 1)
+                .thenComparingDouble(NearbyBlock::distanceSqr))
+            .limit(256)
+            .forEach(block -> output.add(block.toJson()));
+        return output;
+    }
+
     private static String naturalResourceCategory(BlockState state, String id) {
         if (state.is(BlockTags.LOGS)) return "logs";
         if (state.is(BlockTags.LEAVES)) return "leaves";
@@ -511,6 +551,31 @@ public final class WorldStateEncoder {
             output.addProperty("count", count);
             output.addProperty("nearestDistance", Math.sqrt(nearestDistanceSqr));
             if (nearest != null) output.add("nearest", position(nearest));
+            return output;
+        }
+    }
+
+    private record NearbyBlock(
+        BlockPos position,
+        String blockId,
+        String resourceCategory,
+        String classification,
+        boolean blockEntity,
+        boolean replaceable,
+        boolean fluid,
+        float destroySpeed,
+        double distanceSqr
+    ) {
+        private JsonObject toJson() {
+            JsonObject output = WorldStateEncoder.position(position);
+            output.addProperty("blockId", blockId);
+            if (resourceCategory != null) output.addProperty("resourceCategory", resourceCategory);
+            output.addProperty("classification", classification);
+            output.addProperty("blockEntity", blockEntity);
+            output.addProperty("replaceable", replaceable);
+            output.addProperty("fluid", fluid);
+            output.addProperty("destroySpeed", destroySpeed);
+            output.addProperty("distance", Math.sqrt(distanceSqr));
             return output;
         }
     }

@@ -77,6 +77,8 @@ export function validateConfig(config: BotConfig): void {
   if (config.model.maxOutputTokens !== undefined && (!Number.isInteger(config.model.maxOutputTokens) || config.model.maxOutputTokens < 128 || config.model.maxOutputTokens > 131_072)) {
     throw new Error('model.maxOutputTokens 必须是 128-131072 的整数')
   }
+  if (config.model.agentMaxSteps !== undefined && (!Number.isInteger(config.model.agentMaxSteps) || config.model.agentMaxSteps < 1 || config.model.agentMaxSteps > 128)) throw new Error('model.agentMaxSteps 必须是 1-128 的整数')
+  if (config.model.autonomousAgentMaxSteps !== undefined && (!Number.isInteger(config.model.autonomousAgentMaxSteps) || config.model.autonomousAgentMaxSteps < 1 || config.model.autonomousAgentMaxSteps > 64)) throw new Error('model.autonomousAgentMaxSteps 必须是 1-64 的整数')
   requireString(config.storage?.memoryFile, 'storage.memoryFile')
   requireString(config.storage?.experienceFile, 'storage.experienceFile')
   if (config.storage.taskFile !== undefined) requireString(config.storage.taskFile, 'storage.taskFile')
@@ -127,7 +129,7 @@ export function validateConfig(config: BotConfig): void {
     for (const name of ['enabled', 'contextualAddressing', 'safeIdleEnabled', 'autoGather', 'autoCraft', 'autoBuildShelter'] as const) {
       if (typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
-    for (const name of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness'] as const) {
+    for (const name of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand'] as const) {
       if (config.autonomy[name] !== undefined && typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
     if (config.autonomy.longTermGoal !== undefined && config.autonomy.longTermGoal !== 'reach_end') throw new Error('autonomy.longTermGoal 当前只能是 reach_end')

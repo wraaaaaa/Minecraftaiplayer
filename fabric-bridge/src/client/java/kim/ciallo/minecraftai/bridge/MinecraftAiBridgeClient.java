@@ -16,15 +16,22 @@ import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.tags.FluidTags;
 import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.damagesource.DamageSource;
+import net.minecraft.world.inventory.ContainerInput;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -52,6 +59,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private BlockPos airRescueBreaking;
     private long airRescueBreakStarted;
     private PendingSurvivalAction pendingSurvivalAction;
+    private PendingNavigation pendingNavigation;
     private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
     private final SurvivalController survival = new SurvivalController(
@@ -98,6 +106,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             movementNavigator.release(client);
             clearMovement(client);
             cancelPendingSurvivalAction("bridge_disconnected");
+            cancelPendingNavigation(client, "bridge_disconnected");
             primitives.cancel(client, "bridge_disconnected");
             advanced.cancel(client, "bridge_disconnected");
             shelter.cancel(client, "bridge_disconnected");
@@ -118,6 +127,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             movement = null;
             movementNavigator.release(client);
             cancelPendingSurvivalAction("world_disconnected");
+            cancelPendingNavigation(client, "world_disconnected");
             primitives.cancel(client, "world_disconnected");
             advanced.cancel(client, "world_disconnected");
             shelter.cancel(client, "world_disconnected");
@@ -170,6 +180,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         drainPrimitiveResults();
         drainAdvancedResults();
         drainShelterResults();
+        resolvePendingNavigation(client, player);
         if (tick % 20 == 0) bridge.send(buildState(client, player));
     }
 
@@ -359,6 +370,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             advanced.cancel(client, "bot_died");
             shelter.cancel(client, "bot_died");
             cancelPendingSurvivalAction("bot_died");
+            cancelPendingNavigation(client, "bot_died");
             drainPrimitiveResults();
             drainAdvancedResults();
             drainShelterResults();
@@ -417,7 +429,29 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             if (!"action".equals(string(envelope, "type"))) continue;
             String id = string(envelope, "id");
             JsonObject action = envelope.has("action") && envelope.get("action").isJsonObject() ? envelope.getAsJsonObject("action") : new JsonObject();
+            action = normalizeAgentPrimitive(action);
             String actionType = string(action, "type");
+            if ("navigate_to".equals(actionType)) {
+                if (pendingNavigation != null || pendingSurvivalAction != null || !primitives.activeType().isEmpty()
+                    || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: active task is " + activeTaskType());
+                    continue;
+                }
+                double x = number(action, "x", Double.NaN);
+                double y = number(action, "y", Double.NaN);
+                double z = number(action, "z", Double.NaN);
+                double stopDistance = Math.max(0.5D, Math.min(4.0D, number(action, "stopDistance", 1.2D)));
+                if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) {
+                    sendActionResult(id, false, "invalid navigate_to coordinates");
+                    continue;
+                }
+                if (!setMovement(new MovementTarget(null, x, y, z, false, stopDistance), player)) {
+                    sendActionResult(id, false, "no collision-safe loaded route to requested coordinate");
+                    continue;
+                }
+                pendingNavigation = new PendingNavigation(id, x, y, z, stopDistance, tick);
+                continue;
+            }
             if (isSurvivalAction(actionType)) {
                 if (!primitives.activeType().isEmpty() || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
                     sendActionResult(id, false, "busy: another verified task is active");
@@ -476,6 +510,41 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "equip_best", "prepare_for", "use_item", "collect_own_drops", "gather_resource", "craft_item", "place_block", "drop_item" -> true;
             default -> false;
         };
+    }
+
+    private static JsonObject normalizeAgentPrimitive(JsonObject original) {
+        String type = string(original, "type");
+        JsonObject action = original.deepCopy();
+        if ("break_block_at".equals(type)) {
+            action.addProperty("type", "gather_resource");
+            action.addProperty("resource", string(original, "expectedBlockId"));
+            action.addProperty("count", 1);
+            action.addProperty("verifiedWilderness", true);
+            JsonObject target = new JsonObject();
+            target.addProperty("x", number(original, "x", Double.NaN));
+            target.addProperty("y", number(original, "y", Double.NaN));
+            target.addProperty("z", number(original, "z", Double.NaN));
+            action.add("targetBlock", target);
+        } else if ("place_block_at".equals(type)) {
+            action.addProperty("type", "place_block");
+            action.addProperty("count", 1);
+            action.addProperty("verifiedWilderness", true);
+            JsonObject target = new JsonObject();
+            target.addProperty("x", number(original, "x", Double.NaN));
+            target.addProperty("y", number(original, "y", Double.NaN));
+            target.addProperty("z", number(original, "z", Double.NaN));
+            action.add("targetBlock", target);
+        } else if ("craft_recipe".equals(type)) {
+            action.addProperty("type", "craft_item");
+            // Agent-v2 has no model-controlled authorization flag. CreateCraftTask will
+            // still derive a short-lived WildernessGuard work window and require a
+            // ledger-verified crafting table before any 3x3 recipe can run.
+            action.addProperty("verifiedWilderness", true);
+        } else if ("use_held_item".equals(type)) {
+            action.addProperty("type", "use_item");
+            if ("off".equalsIgnoreCase(string(original, "hand"))) action.addProperty("type", "unsupported_offhand_use");
+        }
+        return action;
     }
 
     private static boolean isSurvivalAction(String type) {
@@ -586,6 +655,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     }
 
     private String activeTaskType() {
+        if (pendingNavigation != null) return "navigate_to";
         if (pendingSurvivalAction != null) return pendingSurvivalAction.type();
         if (!primitives.activeType().isEmpty()) return primitives.activeType();
         if (!advanced.activeType().isEmpty()) return advanced.activeType();
@@ -599,6 +669,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "stop" -> {
                 movement = null;
                 movementNavigator.release(client);
+                cancelPendingNavigation(client, "stopped_by_command");
                 cancelPendingSurvivalAction("stopped_by_command");
                 primitives.cancel(client, "stopped_by_command");
                 advanced.cancel(client, "stopped_by_command");
@@ -612,6 +683,54 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 if (message.startsWith("/")) player.connection.sendCommand(message.substring(1));
                 else player.connection.sendChat(message.substring(0, Math.min(message.length(), 240)));
                 yield new ActionResult(true, "已发送聊天");
+            }
+            case "look_at" -> {
+                double x = number(action, "x", Double.NaN);
+                double y = number(action, "y", Double.NaN);
+                double z = number(action, "z", Double.NaN);
+                if (!Double.isFinite(x) || !Double.isFinite(y) || !Double.isFinite(z)) yield new ActionResult(false, "invalid look coordinates");
+                lookAt(player, x, y, z);
+                yield new ActionResult(true, "view_rotation_updated");
+            }
+            case "select_hotbar" -> {
+                int slot = (int) number(action, "slot", -1);
+                if (slot < 0 || slot >= 9) yield new ActionResult(false, "hotbar slot must be 0..8");
+                player.getInventory().setSelectedSlot(slot);
+                player.connection.send(new ServerboundSetCarriedItemPacket(slot));
+                yield new ActionResult(true, "selected_hotbar_slot=" + slot);
+            }
+            case "attack_entity" -> {
+                Entity target = entity(client, string(action, "entityId"));
+                if (!(target instanceof LivingEntity living) || target instanceof Player) yield new ActionResult(false, "target is missing, non-living, or a player");
+                if (!living.isAlive()) yield new ActionResult(false, "target is not alive");
+                if (player.distanceTo(target) > 4.5D || !player.hasLineOfSight(target)) yield new ActionResult(false, "target is outside legal melee distance or line of sight");
+                if (client.gameMode == null) yield new ActionResult(false, "game interaction controller unavailable");
+                float before = living.getHealth();
+                client.gameMode.attack(player, target);
+                player.swing(InteractionHand.MAIN_HAND);
+                yield new ActionResult(true, "attack_sent; entity_id=" + target.getId() + "; observed_health_before=" + before);
+            }
+            case "interact_entity" -> {
+                Entity target = entity(client, string(action, "entityId"));
+                if (target == null || target instanceof Player) yield new ActionResult(false, "target is missing or is a player");
+                if (player.distanceTo(target) > 5.0D || !player.hasLineOfSight(target)) yield new ActionResult(false, "target is outside interaction distance or line of sight");
+                InteractionResult interaction = client.gameMode.interact(player, target, new EntityHitResult(target), InteractionHand.MAIN_HAND);
+                if (!interaction.consumesAction()) yield new ActionResult(false, "entity interaction rejected");
+                player.swing(InteractionHand.MAIN_HAND);
+                yield new ActionResult(true, "entity_interaction_accepted; entity_id=" + target.getId());
+            }
+            case "interact_block" -> interactBlock(client, player, action);
+            case "drop_inventory_item" -> dropInventoryItem(client, player, action);
+            case "send_server_command" -> {
+                String command = string(action, "command").trim().replaceFirst("^/+", "");
+                if (!command.matches("(?i)(?:tp|teleport)\\s+[A-Za-z0-9_]{1,16}")) {
+                    yield new ActionResult(false, "policy_denied: only self-to-player tp/teleport is allowed");
+                }
+                if (!Boolean.parseBoolean(environment("MCAI_TP_COMMAND_ENABLED", "false"))) {
+                    yield new ActionResult(false, "permission_not_configured: tp is disabled until an administrator grants the Bot permission and enables MCAI_TP_COMMAND_ENABLED");
+                }
+                player.connection.sendCommand(command);
+                yield new ActionResult(true, "command_sent; server_confirmation_pending");
             }
             case "follow_player", "come_to_player", "look_at_player" -> {
                 String targetName = string(action, "target");
@@ -671,6 +790,87 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             }
             default -> new ActionResult(false, "Fabric 适配器不支持动作 " + string(action, "type"));
         };
+    }
+
+    private void resolvePendingNavigation(Minecraft client, LocalPlayer player) {
+        PendingNavigation pending = pendingNavigation;
+        if (pending == null) return;
+        double dx = pending.x() - player.getX();
+        double dz = pending.z() - player.getZ();
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        if (horizontal <= pending.stopDistance()) {
+            pendingNavigation = null;
+            movement = null;
+            movementNavigator.release(client);
+            clearMovement(client);
+            sendActionResult(pending.id(), true, "navigation_reached; distance=" + horizontal);
+            return;
+        }
+        if (movement == null) {
+            pendingNavigation = null;
+            sendActionResult(pending.id(), false, "navigation_failed: no collision-safe route; last_distance=" + horizontal);
+            return;
+        }
+        if (tick - pending.startedTick() > 600L) {
+            pendingNavigation = null;
+            movement = null;
+            movementNavigator.release(client);
+            clearMovement(client);
+            sendActionResult(pending.id(), false, "navigation_timeout; last_distance=" + horizontal + "; status=" + movementNavigator.status());
+        }
+    }
+
+    private void cancelPendingNavigation(Minecraft client, String detail) {
+        PendingNavigation pending = pendingNavigation;
+        if (pending == null) return;
+        pendingNavigation = null;
+        movement = null;
+        movementNavigator.release(client);
+        sendActionResult(pending.id(), false, detail);
+    }
+
+    private static Entity entity(Minecraft client, String rawId) {
+        if (client.level == null || rawId == null || !rawId.matches("-?\\d+")) return null;
+        try { return client.level.getEntity(Integer.parseInt(rawId)); }
+        catch (NumberFormatException ignored) { return null; }
+    }
+
+    private static ActionResult interactBlock(Minecraft client, LocalPlayer player, JsonObject action) {
+        if (client.gameMode == null || client.level == null) return new ActionResult(false, "game interaction controller unavailable");
+        BlockPos target = new BlockPos((int) number(action, "x", Integer.MIN_VALUE), (int) number(action, "y", Integer.MIN_VALUE), (int) number(action, "z", Integer.MIN_VALUE));
+        if (!client.level.isLoaded(target) || !player.isWithinBlockInteractionRange(target, 0.0D)) return new ActionResult(false, "block is unloaded or outside interaction range");
+        BlockState state = client.level.getBlockState(target);
+        String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        if (client.level.getBlockEntity(target) != null && !OwnedBlockRegistry.isOwned(client, target, blockId)) {
+            return new ActionResult(false, "policy_denied: block entity is not proven bot-owned");
+        }
+        lookAt(player, target.getX() + 0.5D, target.getY() + 0.5D, target.getZ() + 0.5D);
+        BlockHitResult sight = client.level.clip(new ClipContext(player.getEyePosition(), Vec3.atCenterOf(target), ClipContext.Block.OUTLINE, ClipContext.Fluid.NONE, player));
+        if (sight.getType() != HitResult.Type.BLOCK || !sight.getBlockPos().equals(target)) return new ActionResult(false, "block is not in line of sight");
+        InteractionHand hand = "off".equalsIgnoreCase(string(action, "hand")) ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
+        InteractionResult result = client.gameMode.useItemOn(player, hand, sight);
+        if (!result.consumesAction()) return new ActionResult(false, "block interaction rejected: " + blockId);
+        player.swing(hand);
+        return new ActionResult(true, "block_interaction_accepted; block=" + blockId + "; target=" + target.toShortString());
+    }
+
+    private static ActionResult dropInventoryItem(Minecraft client, LocalPlayer player, JsonObject action) {
+        if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+            return new ActionResult(false, "normal inventory with empty cursor is required");
+        }
+        int slot = (int) number(action, "slot", -1);
+        int requested = (int) number(action, "count", 1);
+        if (slot < 0 || slot >= player.getInventory().getNonEquipmentItems().size()) return new ActionResult(false, "invalid inventory slot");
+        ItemStack stack = player.getInventory().getItem(slot);
+        if (stack.isEmpty()) return new ActionResult(false, "inventory slot is empty");
+        int count = Math.max(1, Math.min(requested, stack.getCount()));
+        int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
+        if (count == stack.getCount()) {
+            client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+        } else {
+            for (int index = 0; index < count; index++) client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 0, ContainerInput.THROW, player);
+        }
+        return new ActionResult(true, "drop_requested; slot=" + slot + "; count=" + count);
     }
 
     private void updateMovement(Minecraft client, LocalPlayer player) {
@@ -890,4 +1090,5 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         int baselineFood,
         float baselineHealth
     ) { }
+    private record PendingNavigation(String id, double x, double y, double z, double stopDistance, int startedTick) { }
 }

@@ -45,6 +45,8 @@ type BridgeMessage = {
   seq?: number
   observedAt?: number
   inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; foodNutrition?: number; foodSaturation?: number; safeFood?: boolean; enchantments?: Array<{ id?: string; level?: number }> }>
+  selectedHotbarSlot?: number
+  nearbyBlocks?: Array<{ blockId?: string; x?: number; y?: number; z?: number; distance?: number; resourceCategory?: string; classification?: string; blockEntity?: boolean; replaceable?: boolean; fluid?: boolean; destroySpeed?: number }>
   blockSurvey?: {
     radius?: number
     verticalRadius?: number
@@ -294,6 +296,17 @@ export class FabricBridgeClient implements ActionExecutor {
       ...(typeof message.dimension === 'string' ? { dimension: message.dimension } : {}),
       ...(typeof message.timeOfDay === 'number' ? { timeOfDay: message.timeOfDay } : {}),
       inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(typeof item.foodNutrition === 'number' ? { foodNutrition: item.foodNutrition } : {}), ...(typeof item.foodSaturation === 'number' ? { foodSaturation: item.foodSaturation } : {}), ...(typeof item.safeFood === 'boolean' ? { safeFood: item.safeFood } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}) }] : []),
+      ...(typeof message.selectedHotbarSlot === 'number' ? { selectedHotbarSlot: message.selectedHotbarSlot } : {}),
+      ...(message.nearbyBlocks ? { nearbyBlocks: message.nearbyBlocks.flatMap(block => {
+        if (typeof block.blockId !== 'string' || typeof block.x !== 'number' || typeof block.y !== 'number' || typeof block.z !== 'number' || typeof block.distance !== 'number') return []
+        const classification = ['natural_resource', 'protected_likely', 'bot_owned', 'unclassified'].includes(block.classification ?? '')
+          ? block.classification as 'natural_resource' | 'protected_likely' | 'bot_owned' | 'unclassified'
+          : 'unclassified'
+        return [{ blockId: block.blockId, x: block.x, y: block.y, z: block.z, distance: block.distance, classification,
+          blockEntity: block.blockEntity === true, replaceable: block.replaceable === true, fluid: block.fluid === true,
+          destroySpeed: typeof block.destroySpeed === 'number' ? block.destroySpeed : -1,
+          ...(typeof block.resourceCategory === 'string' ? { resourceCategory: block.resourceCategory } : {}) }]
+      }) } : {}),
       ...(message.equipment ? { equipment: this.#equipment(message.equipment) } : {}),
       nearbyPlayers: (message.nearbyPlayers ?? []).flatMap((player) => {
         if (typeof player.name !== 'string' || typeof player.distance !== 'number') return []
@@ -466,7 +479,8 @@ export class FabricBridgeClient implements ActionExecutor {
     const socket = this.#socket
     if (!this.#connected || !socket || socket.destroyed) return Promise.resolve({ ok: false, detail: 'Fabric 客户端桥未连接' })
     const id = randomUUID()
-    const longRunning = ['equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
+    const longRunning = ['navigate_to', 'break_block_at', 'place_block_at', 'craft_recipe', 'use_held_item',
+      'equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
       'attack_hostile', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
       'explore_frontier', 'travel_to_dimension', 'build_nether_portal', 'seek_shelter', 'build_shelter'].includes(action.type)
     const shelterAction = action.type === 'seek_shelter' || action.type === 'build_shelter'

@@ -191,6 +191,8 @@ export class MinecraftClient implements ActionExecutor {
       case 'wait_safe':
       case 'prepare_for':
         return { ok: false, detail: `Mineflayer 兼容适配器尚不支持 ${action.type}；请使用 Fabric 26.2 桥接客户端。` }
+      default:
+        return { ok: false, detail: `Mineflayer 兼容适配器尚不支持 Agent v2 动作 ${action.type}；请使用 Fabric 26.2 桥接客户端。` }
     }
   }
 

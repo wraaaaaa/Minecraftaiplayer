@@ -101,3 +101,62 @@ test('缺少密钥时允许 Bot 启动，但首次模型请求明确失败', asy
     await assert.rejects(provider.complete({ system: 's', user: 'u' }), /TEST_KEY/u)
   } finally { await logger.flush() }
 })
+
+test('DeepSeek 工具循环保留 reasoning_content 并把真实工具结果送回下一轮', async () => {
+  const api = await mockSequentialApi([
+    { choices: [{ finish_reason: 'tool_calls', message: {
+      content: null,
+      reasoning_content: '先观察坐标再决定下一步',
+      tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'observe_world', arguments: '{}' } }]
+    } }] },
+    { choices: [{ finish_reason: 'stop', message: { content: '看清楚了，我们继续。', reasoning_content: '工具结果正常' } }] }
+  ])
+  const logger = new Logger({ file: path.join(tmpdir(), `minecraft-ai-llm-tools-${process.pid}.log`), level: 'error', console: false })
+  try {
+    const provider = createLlmProvider(config('deepseek', api.baseUrl), 'test-key', logger)
+    const first = await provider.toolTurn!({
+      system: '你是游戏 Agent。',
+      user: '观察环境',
+      tools: [{ name: 'observe_world', description: '读取最新世界状态', parameters: { type: 'object', properties: {}, additionalProperties: false } }]
+    })
+    assert.equal(first.toolCalls[0]?.name, 'observe_world')
+    const second = await provider.toolTurn!({
+      system: '你是游戏 Agent。',
+      user: '观察环境',
+      tools: [{ name: 'observe_world', description: '读取最新世界状态', parameters: { type: 'object', properties: {}, additionalProperties: false } }],
+      continuation: first.continuation,
+      toolResults: [{ callId: 'call-1', output: '{"connected":true,"position":{"x":1,"y":64,"z":2}}' }]
+    })
+    const received = await api.requests
+    const secondMessages = received[1]?.body.messages as Array<Record<string, unknown>>
+    assert.equal(secondMessages[2]?.role, 'assistant')
+    assert.equal(secondMessages[2]?.reasoning_content, '先观察坐标再决定下一步')
+    assert.equal(secondMessages[3]?.role, 'tool')
+    assert.equal(secondMessages[3]?.tool_call_id, 'call-1')
+    assert.equal(second.text, '看清楚了，我们继续。')
+  } finally { await logger.flush(); await api.close() }
+})
+
+test('OpenAI Responses 工具循环用 previous_response_id 回传 function_call_output', async () => {
+  const api = await mockSequentialApi([
+    { id: 'resp-1', output: [{ type: 'function_call', call_id: 'call-9', name: 'observe_world', arguments: '{}' }] },
+    { id: 'resp-2', output_text: '完成观察。', output: [] }
+  ])
+  const logger = new Logger({ file: path.join(tmpdir(), `minecraft-ai-openai-tools-${process.pid}.log`), level: 'error', console: false })
+  try {
+    const provider = createLlmProvider(config('openai', api.baseUrl), 'test-key', logger)
+    const first = await provider.toolTurn!({
+      system: '你是游戏 Agent。', user: '观察环境',
+      tools: [{ name: 'observe_world', description: '读取状态', parameters: { type: 'object', properties: {}, additionalProperties: false } }]
+    })
+    const second = await provider.toolTurn!({
+      system: '你是游戏 Agent。', user: '观察环境', tools: [],
+      continuation: first.continuation,
+      toolResults: [{ callId: 'call-9', output: '{"connected":true}' }]
+    })
+    const received = await api.requests
+    assert.equal(received[1]?.body.previous_response_id, 'resp-1')
+    assert.deepEqual(received[1]?.body.input, [{ type: 'function_call_output', call_id: 'call-9', output: '{"connected":true}' }])
+    assert.equal(second.text, '完成观察。')
+  } finally { await logger.flush(); await api.close() }
+})

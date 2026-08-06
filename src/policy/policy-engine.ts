@@ -33,6 +33,20 @@ export type AgentAction =
   | { type: 'prepare_for'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
   | { type: 'break_block'; block: string; ownership: 'natural' | 'player' | 'unknown'; evidence?: 'fabric_verified_zone' | 'bot_placement_ledger' }
   | { type: 'open_container'; ownership: 'player' | 'unknown' }
+  // Agent-v2 concrete affordances. Each call performs one bounded game operation and
+  // returns a postcondition; workflows are chosen by the model, not by a planner script.
+  | { type: 'navigate_to'; x: number; y: number; z: number; stopDistance: number; sprint: boolean }
+  | { type: 'look_at'; x: number; y: number; z: number }
+  | { type: 'select_hotbar'; slot: number }
+  | { type: 'break_block_at'; x: number; y: number; z: number; expectedBlockId?: string; authorizedPlayer?: string }
+  | { type: 'place_block_at'; x: number; y: number; z: number; itemId?: string }
+  | { type: 'attack_entity'; entityId: string }
+  | { type: 'interact_entity'; entityId: string }
+  | { type: 'interact_block'; x: number; y: number; z: number; hand: 'main' | 'off' }
+  | { type: 'use_held_item'; hand: 'main' | 'off' }
+  | { type: 'drop_inventory_item'; slot: number; count: number }
+  | { type: 'craft_recipe'; itemId: string; count: number }
+  | { type: 'send_server_command'; command: string }
 
 export interface PolicyDecision {
   allowed: boolean
@@ -86,6 +100,16 @@ export class PolicyEngine {
       case 'collect_own_drops':
         if (this.#rules.denyTakingPlayerItems) return { allowed: true, reason: '只允许收集本任务产生并由 Fabric 跟踪的掉落物' }
         return { allowed: true, reason: '允许收集掉落物' }
+      case 'break_block_at':
+        return { allowed: true, reason: 'Fabric 必须再次验证目标为天然方块、Bot 自有方块或玩家本次明确指向的方块' }
+      case 'place_block_at':
+        return { allowed: true, reason: 'Fabric 必须逐格验证目标、支撑面、附近结构与玩家距离' }
+      case 'interact_block':
+        return { allowed: true, reason: 'Fabric 必须拒绝未知或玩家所有的容器' }
+      case 'send_server_command':
+        return /^(?:tp|teleport)\s+[A-Za-z0-9_]{1,16}$/u.test(action.command)
+          ? { allowed: true, reason: '仅允许尝试把自己传送到一个明确玩家；服务器仍会执行权限检查' }
+          : { allowed: false, reason: 'Agent 只获准使用 self-to-player 的 tp/teleport 命令' }
       default:
         return { allowed: true, reason: '非破坏性动作' }
     }

@@ -26,6 +26,7 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   autoSleep: true,
   protectOwner: true,
   allowVerifiedWilderness: true,
+  allowTeleportCommand: false,
   longTermGoal: 'reach_end'
 })
 
@@ -233,13 +234,13 @@ function populate(snapshot) {
   setNumber('connectTimeout', c.server.connectTimeoutMs); setNumber('reconnectDelay', c.server.reconnectDelayMs); setChecked('autoRespawn', c.server.autoRespawn ?? true); setNumber('respawnDelay', c.server.respawnDelayMs ?? 3000); setNumber('actionTimeout', c.server.actionTimeoutMs)
   set('bridgeHost', c.server.bridgeHost); setNumber('bridgePort', c.server.bridgePort)
   setChecked('easyAuthEnabled', c.easyAuth.enabled); setChecked('registerIfNeeded', c.easyAuth.registerIfNeeded); set('passwordEnv', c.easyAuth.passwordEnv); setNumber('loginDelay', c.easyAuth.loginDelayMs)
-  set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096)
+  set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096); setNumber('agentMaxSteps', c.model.agentMaxSteps ?? 48); setNumber('autonomousAgentMaxSteps', c.model.autonomousAgentMaxSteps ?? 16)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
   setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
-  for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness']) setChecked(id, autonomy[id])
+  for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand']) setChecked(id, autonomy[id])
   const workspace = { ...WORKSPACE_DEFAULTS, ...(c.agentWorkspace || {}), selfImprovement: { ...WORKSPACE_DEFAULTS.selfImprovement, ...(c.agentWorkspace?.selfImprovement || {}) } }
   set('promptDirectory', workspace.promptDirectory); set('playerProfilesDirectory', workspace.playerProfilesDirectory); setNumber('contextBudgetChars', workspace.contextBudgetChars); setNumber('compressionTriggerRatio', workspace.compressionTriggerRatio); setNumber('retainRecentEvents', workspace.retainRecentEvents)
   setChecked('selfImprovementEnabled', workspace.selfImprovement.enabled); setChecked('allowPromptEdits', workspace.selfImprovement.allowPromptEdits); setChecked('allowBehaviorPatches', workspace.selfImprovement.allowBehaviorPatches); setNumber('minimumRepeatedFailures', workspace.selfImprovement.minimumRepeatedFailures); set('researchProvider', workspace.selfImprovement.researchProvider); set('researchEndpoint', workspace.selfImprovement.researchEndpoint); setNumber('researchTimeoutMs', workspace.selfImprovement.researchTimeoutMs)
@@ -262,7 +263,7 @@ function collect() {
   if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Bot 游戏名只能使用 3-16 位英文字母、数字或下划线')
   Object.assign(c.server, { connectionMode: value('connectionMode'), adapter: value('serverAdapter'), host: value('serverHost').trim(), port: number('serverPort'), lanDiscoveryTimeoutMs: number('lanDiscoveryTimeout'), version: value('serverVersion').trim(), username, auth: value('serverAuth'), connectTimeoutMs: number('connectTimeout'), reconnectDelayMs: number('reconnectDelay'), autoRespawn: checked('autoRespawn'), respawnDelayMs: number('respawnDelay'), bridgeHost: value('bridgeHost').trim(), bridgePort: number('bridgePort'), actionTimeoutMs: number('actionTimeout') })
   Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
-  Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens') })
+  Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens'), agentMaxSteps: number('agentMaxSteps'), autonomousAgentMaxSteps: number('autonomousAgentMaxSteps') })
   Object.assign(c.chat, { requireMention: checked('requireMention'), replyPrefix: value('replyPrefix'), cooldownMs: number('cooldownMs'), proactiveEnabled: checked('proactiveEnabled'), proactiveIdleMs: number('proactiveIdleMs'), proactiveMinIntervalMs: number('proactiveMinIntervalMs') })
   const ownerName = value('ownerName').trim()
   if (!/^[A-Za-z0-9_]{3,16}$/.test(ownerName)) throw new Error('最高优先玩家名只能使用 3-16 位英文字母、数字或下划线')
@@ -274,7 +275,7 @@ function collect() {
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
     safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
-    autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'),
+    autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'),
     longTermGoal: 'reach_end'
   }
   c.agentWorkspace = {

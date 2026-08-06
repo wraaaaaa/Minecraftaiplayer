@@ -62,6 +62,10 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 
 - `timeoutMs`：单次 API 请求超时，默认 `120000` 毫秒，允许 `1000-600000`。
 - `maxOutputTokens`：单次模型最大生成预算，默认 `4096`，允许 `128-131072`。DeepSeek/豆包映射为 `max_tokens`，OpenAI Responses 映射为 `max_output_tokens`。游戏决策不应盲目调大，否则会增加延迟和费用。DeepSeek JSON 模式若返回空 `content`，程序会仅用非思考模式重试一次；该兼容无需新增参数，也不会无限重试。
+- `agentMaxSteps`：一个玩家任务最多执行的原子工具次数，默认 `48`，允许 `1-128`。每一步都会把真实结果和新世界状态交回模型再规划；它不是预写动作列表长度。
+- `autonomousAgentMaxSteps`：一次空闲自主发展最多执行的原子工具次数，默认 `16`，允许 `1-64`。玩家新消息会抢占并停止空闲循环。
+
+DeepSeek 和豆包使用 Chat Completions `tools`；OpenAI 使用 Responses API 的 function calling。DeepSeek 开启思考后，适配器会把上一轮助手消息中的 `reasoning_content` 与 `tool_calls` 原样留在会话，再追加工具结果，否则供应商会拒绝下一轮。隐藏推理不写入诊断或游戏聊天。OpenAI 后续轮使用 `previous_response_id` 与 `function_call_output` 保持状态。
 
 ## 5. 人设、OpenClaw 风格提示词与自我改进
 
@@ -76,7 +80,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 - `rules.md`：解释硬规则与权限边界，优先级最高；真正不可绕过的限制仍在策略、SecretGuard 和 Fabric。
 - `IDENTITY.md`：Bot 名称、类型、职责和输出基线；已写可修改示例。
 - `SOUL.md`：核心人设、价值观、语气和判断风格；这是主要人设文件，已写完整示例。
-- `TOOLS.md`：动作契约、参数、后置条件和失败处理；包含仅允许程序写入的 `AUTO_LEARNED` 托管段。
+- `TOOLS.md`：Agent 循环、原子接口、后置条件和失败处理；运行时 JSON Schema 才是参数真值。包含仅允许程序写入的 `AI_LEARNED` 托管段。
 - `MEMORY.md`：记忆召回、分玩家隔离、摘要、压缩和过期规则；不存放秘密。
 - `USER.md`：当前玩家的兴趣、表达方式、协作偏好和稳定事实；模型只加载正在对话玩家对应的一份。
 
@@ -125,7 +129,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 
 游戏聊天出口固定为“玩家交互通道”：自然陪聊、接受/完成确认和一句简短拒绝。程序会拦截 JSON、代码块、动作内部名、`minecraft:` 命名空间 ID、工具/函数调用术语和接口参数；任务失败统一提示到 WebUI 查看，不把步骤号或底层错误广播给服务器玩家。完整诊断自动写入 `data/diagnostics.json`，WebUI“总聊天”每 4 秒独立刷新，筛选控件不会把设置页标成“未保存”。
 
-空闲决策只允许 `none`、`wait_safe`、进食/装备/确认威胁战斗、收取自有掉落、逐目标验证采集、真实 2×2/自有工作台 3×3 合成、安全放置、使用物品、住所和准备类动作；程序硬性拒绝空闲时跟随、接近、注视或攻击玩家。每轮只执行一个主动作，采集前自动 `prepare_for:mining`，成功破坏后串联 `collect_own_drops`。玩家任务会抢占；失败写入 `experience.json` 和诊断，并可能触发受限自我改进。
+空闲发展与玩家任务都使用同一个原生工具调用循环：模型每轮只调用一个原子接口，收到 Fabric 的真实结果和新观察后再决定下一步。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版确定性规划器与高层动作契约只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包和 OpenAI 默认不会进入。
 
 行为准则另存 `config/behavior-rules.json`，它是模型输出之后的程序级硬限制，不应只依赖提示词。
 
@@ -172,6 +176,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 | `autoDimensionTravel` / `autoSleep` | `true` | 允许建门/使用已加载传送门、末影之眼搜索及夜间在自有床睡觉设置重生点。 |
 | `protectOwner` | `true` | 怪物把 `ownerName` 设为攻击目标时保护主人；紧跟其他玩家期间也临时保护当前跟随目标。 |
 | `allowVerifiedWilderness` | `true` | 是否允许 Java 通过自然地形、玩家结构、玩家距离、方块实体、危险源和逐目标后置条件授权采集/放置/开矿/建造；关闭时直接拒绝世界修改。 |
+| `allowTeleportCommand` | `false` | 只有服务器管理员已经给 Bot `/tp`/`/teleport` 权限后才改为 `true`。启动脚本把它映射为 `MCAI_TP_COMMAND_ENABLED`；只允许把 Bot 自己传到一个普通玩家名，坐标、选择器和其他命令全部拒绝。 |
 | `longTermGoal` | `reach_end` | 当前唯一长期目标：从生存物资逐步推进到下界、要塞和末地；不能填其他字符串。 |
 | `developmentZone` | 已废弃 | 仅为读取旧 `bot.json` 保留；`autonomyConfig()` 会删除并忽略它，WebUI 不显示，启动脚本不再传坐标。 |
 

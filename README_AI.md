@@ -82,7 +82,7 @@ npm test
 - 真实目标服已证明：木板/工作台/熔炉、完整五件石制工具、工作台与熔炉放置、模组安全食物识别和实际进食、自动复活。
 - 向下矿道现场证据：从 Y=64 到 Y=48，破坏 76 个天然方块，石材背包增量 49。
 - 向上开路现场证据：从洞穴稳定达到 Y=64，结果 `verified_tunnel_steps=11; verified_broken_blocks=34; inventory_delta=9; final_y=64`。修复过程覆盖脚手基础、跨列头顶碰撞、空中假落地和跌落旧目标。
-- 真实服发现一次冰下追鱼溺亡，客户端聊天为 `wraaaaaa_ai drowned`。已实现 75% 氧气提前接管、水面出口 A* 和天然冰/雪顶破拆并通过 Java 构建；该新自救路径尚待下一次冰下现场复测。
+- 真实服发现一次冰下追鱼溺亡，客户端聊天为 `BotName drowned`（公开文档已替换实际账号名）。已实现 75% 氧气提前接管、水面出口 A* 和天然冰/雪顶破拆并通过 Java 构建；该新自救路径尚待下一次冰下现场复测。
 - 下列动作已经有原生实现和后置条件，但本轮未完成从零连续现场验收：完整铁/钻石链、熔炼生食/矿物、村民交易、逐件附魔、床睡觉、下界门、要塞和末地。文档必须区分“实现/编译/单测”与“实服完成”。
 - WebUI 已用真实浏览器重新回归：运行状态、五份全局提示词、八个现有玩家画像、声明式行为补丁均可读取；人工开发区控件不存在；对 `wraaaaaa` 的 `USER.md` 完成保存往返并恢复原文，未留下测试标记。浏览器控制接口本轮未提供控制台消息读取能力，因此不能声称“控制台 0 error”。
 - 最新重启后的实服状态从饥饿 19 实际恢复到 20；接着依次确认自有工作台放置、熔炉 3×3 合成和自有熔炉放置。后续狩猎在当前加载区没有合法食物目标时返回 `no_safe_loaded_hunt_target`，规划器已改为开掘/探索回退，没有把失败伪装成成功。
@@ -1250,7 +1250,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 3. 找不到路线时继续上浮；四格交互范围内遇到经 `WildernessGuard.safeNaturalBreak` 验证的天然冰/雪/石质顶部，选择快捷栏最快工具并从下方持续破坏。
 4. 氧气恢复后释放独立导航器和破坏状态，原任务继续。普通 `hunt_entity` 不再被标成可压过生存威胁的 advanced combat；实际怪物威胁会暂停动物狩猎。
 
-现场根因证据是 Minecraft 日志中的 `wraaaaaa_ai drowned`。新救援实现已编译、部署并重新进服，但尚未在相同冰下条件复测；后续 Agent 第一项实服安全验收应复现“追鱼进入冰下→氧气低于 75%→离水/破冰→未死亡”，并记录空气值、坐标、`survivalDetail` 和最终呼吸恢复，不能只等待日志无死亡。
+现场根因证据是 Minecraft 日志中的 `BotName drowned`（公开文档已替换实际账号名）。新救援实现已编译、部署并重新进服，但尚未在相同冰下条件复测；后续 Agent 第一项实服安全验收应复现“追鱼进入冰下→氧气低于 75%→离水/破冰→未死亡”，并记录空气值、坐标、`survivalDetail` 和最终呼吸恢复，不能只等待日志无死亡。
 
 ### 25.6 食物、工具、设施和模组兼容
 
@@ -1310,3 +1310,88 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 ### 26.5 DeepSeek V4 JSON 空响应兼容
 
 运行目录历史日志和 2026-08-06 单次真实 API 检查都复现了 HTTP 成功但 `choices[0].message.content` 为空。DeepSeek 官方 JSON Output 文档将其列为偶发现象；思考模式文档说明隐藏推理位于同级 `reasoning_content`，不能当最终答案。`ChatCompletionsProvider` 现在先按用户配置的推理强度请求；空内容时只记录 `choiceCount/finishReason/contentType/hasReasoningContent`，不记录思维链正文，然后修改系统提示、删除 `reasoning_effort`、设置 `thinking.disabled` 重试一次。返回值的 `requestedEffort` 保留原配置，实际降级时 `effectiveEffort=none`。单测验证两次请求体、最多一次重试及隐藏推理不泄漏。
+
+## 27. 2026-08-06：原生工具调用 Agent 重构（当前默认架构）
+
+本节取代第 23–26 节关于“模型一次输出 action/actions JSON”和第 25 节关于“确定性规划器负责默认自主主链”的描述。旧解析器、高层 Java 控制器和 `planSurvivalProgression` 暂时留在源码中，仅用于不实现 `LlmProvider.toolTurn` 的兼容适配器/旧测试；当前 `createLlmProvider()` 创建的 DeepSeek、火山方舟和 OpenAI provider 都实现 `toolTurn`，所以正式运行不会进入旧链。
+
+### 27.1 实际控制流
+
+玩家路径：
+
+```text
+聊天 → 寻址/多人队列/停止抢占 → 加载人设、该玩家 USER.md、记忆与经验
+     → ToolAgent
+       → 模型读取目标 + 当前结构化世界状态
+       → 模型原生 function call（只执行第一个）
+       → 参数解析 → PolicyEngine 硬检查 → Fabric 原子操作
+       → 服务端后置条件 + 最新世界状态回到模型
+       → 模型重新判断下一步，直到自然语言结束/拒绝/达到步数上限
+     → 最终自然语言进入游戏；完整脱敏工具结果进入 WebUI 总聊天
+```
+
+空闲路径同样创建 `ToolAgent`，目标为“根据当前环境自主推进生存发育，最终进入末地”。`model.autonomousAgentMaxSteps` 限制单轮工具数，玩家消息增加 cancellation epoch、发送 `stop` 并抢占空闲循环。Java 的进食、氧气、燃烧、近身威胁和死亡复活仍是硬实时反射：这些反射不依赖云模型延迟，但不负责决定采矿、建房或长期发展。
+
+`src/agent/tool-agent.ts` 是核心循环；`src/agent/agent-controller.ts#processToolTask` 是玩家入口；`#onWorld` 中 `provider.toolTurn` 分支是空闲入口。`AGENT_V2_SYSTEM_RULES` 明确要求一次一个原子工具、必须用新结果重规划、普通聊天直接回答、不得泄露内部调用。若供应商违反 `parallel_tool_calls:false` 同时返回多个调用，程序只执行第一个，并给其余 call id 返回 `skipped: replan after the first concrete tool result`，保证不会并发修改世界且保持协议完整。
+
+### 27.2 模型可见工具（唯一公开动作面）
+
+`AGENT_TOOLS` 只含可组合原子能力，不含 `follow_player`、`gather_resource`、`go_mining`、`build_shelter`、`prepare_for`、`travel_to_dimension` 等整套行为：
+
+| 工具 | 作用与真实边界 |
+| --- | --- |
+| `observe_world` | 刷新结构化观察；不改变世界。每个动作结果本身也附带新观察。 |
+| `navigate_to` | 到明确坐标的碰撞安全 A*；等待到达、无路或超时才返回，不把“开始走”当完成。 |
+| `look_at` / `select_hotbar` | 转视角；选择 0–8 快捷栏。 |
+| `break_block` | 破坏观察中的一个精确坐标和预期方块 ID；Node/Fabric 均检查范围、天然性、玩家结构、方块实体、危险源和后置条件。 |
+| `place_block` | 在精确空气方格放一个指定背包方块；逐目标验证支撑、碰撞、归属与服务端结果。 |
+| `attack_entity` | 对观察中的非玩家实体做一次近战攻击；不自动选目标或追杀。 |
+| `interact_entity` / `interact_block` | 对一个明确实体或方块交互一次；未知归属方块实体/容器被硬拒绝。 |
+| `use_held_item` | 使用当前手中物品一次；进食等以可观察后置条件确认。 |
+| `drop_inventory_item` | 从自己的背包槽位丢出指定数量，不自动移动或寻找收件人。 |
+| `craft_recipe` | 执行一个已解锁且材料充足的具体配方；不自动采材料或继续后续配方。 |
+| `send_server_command` | 只允许 `tp <player>` / `teleport <player>`，把 Bot 自己传向一个普通玩家名；默认禁用且无权限会正常失败。 |
+| `stop_all_actions` / `wait_ticks` | 释放所有动作；或等待 1–100 tick 再观察。 |
+
+这满足“给手脚而不是摆整套脚本按钮”的边界：模型可以根据目标自由组合最小操作，但真实能力仍必须以有限、类型化、可审计接口进入客户端。完全开放键盘、任意数据包、任意命令或模型生成 JS 会绕过财产保护与后置条件，因此不是本项目的 Agent 定义。
+
+当前 `craft_recipe` 在 Java 内复用 `PrimitiveTaskController.CraftItemTask` 完成一个具体配方；精确 `break_block`/`place_block` 也复用旧控制器中已经验证的单块执行器。这里复用的是“一次具体原子操作”的后置条件代码，不是让模型调用采集资源、建房或生存主链脚本。新增玩法必须优先扩展感知字段和原子接口，禁止再用自然语言关键词增加高层旁路。
+
+### 27.3 世界感知与 Fabric 接口
+
+`WorldStateEncoder` 新增 `nearbyBlocks`：半径 6、上下 4 格，最多 256 个已加载且暴露/近身方块。每项包含 `x/y/z/blockId/resourceCategory/classification/blockEntity/replaceable/fluid/destroySpeed/distance`；classification 为 `natural_resource`、`protected_likely`、`bot_owned` 或 `unclassified`。Node 传模型前最多保留 96 个，附近实体/玩家/掉落分别最多 24 个，降低上下文膨胀。`selectedHotbarSlot` 与完整背包槽位一起提供。
+
+`MinecraftAiBridgeClient.PendingNavigation` 让 `navigate_to` 保持 pending，只有到达、持续无安全路线、取消、死亡/换世界或超时才回 action result。`stop`、新玩家任务和桥断开都会取消导航并释放按键。新增 Java 原子 action：`look_at`、`select_hotbar`、`attack_entity`、`interact_entity`、`interact_block`、`drop_inventory_item`、`send_server_command`；精确 break/place/craft/use 规范化到单次可验证 primitive。Fabric action result 是模型下一轮的事实来源，Node 不能把请求已发送当成成功。
+
+### 27.4 三类供应商的会话协议
+
+- DeepSeek/火山方舟：`src/llm/provider-factory.ts#ChatCompletionsProvider.toolTurn` 发送 `tools`、`parallel_tool_calls:false` 和消息会话。工具结果以 `{role:"tool",tool_call_id,content}` 追加。DeepSeek 思考模式必须保留上一条 assistant 的 `reasoning_content`、`content` 和 `tool_calls`；适配器会原样留在 continuation，但不向日志/WebUI暴露推理正文。
+- OpenAI：`OpenAiResponsesProvider.toolTurn` 使用 Responses API；首轮发送 system/user 和 function tools，后续使用 `previous_response_id` 与 `function_call_output`。只从 `function_call` 读取 call id/name/arguments，从 `output_text`/message 读取最终回复。
+- `MissingKeyProvider` 同时拒绝 `complete` 与 `toolTurn`。`LlmProvider.complete` 仅给旧兼容分支、上下文压缩和自我改进摘要使用，不再承担当前游戏行动。
+
+ToolAgent 会在 continuation 较长时只压缩较旧 tool message 中的大型世界快照，保留位置、生命、饥饿、维度、快捷栏和背包摘要；最近六条消息不改。它不会修改 DeepSeek assistant 的 `reasoning_content`，避免破坏供应商续轮要求。
+
+### 27.5 TP 权限与配置
+
+`autonomy.allowTeleportCommand` 默认 `false`。`scripts/start-headless-client.ps1` 映射为 `MCAI_TP_COMMAND_ENABLED`；Java 环境变量未显式为 true 时返回 `permission_not_configured`，不会盲发命令。即使开关打开，Node PolicyEngine 和 Java 都只接受正则意义上的 `tp|teleport <普通玩家名>`，拒绝斜杠嵌套、坐标、选择器和其他命令。管理员必须先在服务器权限系统中给 Bot 账号相应权限，再从 WebUI 打开开关；没有权限时 Agent 收到失败结果后应走路或说明当前到不了。
+
+`model.agentMaxSteps` 默认 48、范围 1–128；`model.autonomousAgentMaxSteps` 默认 16、范围 1–64。达到上限会停止本轮并向玩家给自然说明，不会继续后台执行未确认的假计划。
+
+### 27.6 提示词、WebUI 与诊断
+
+`config/agent-prompts.example/TOOLS.md` 和运行副本 `data/agent-prompts/TOOLS.md` 不再要求输出 action/actions JSON，而是解释观察→一个工具→结果→重规划。`IDENTITY.md`/`SOUL.md` 也只规定最终人类语言风格与工具参数纯净。运行时 function JSON Schema 由 `AGENT_TOOLS` 直接发送，是参数唯一真值；提示词不能凭空增加能力。
+
+WebUI 增加玩家/空闲 Agent 步数和 TP 权限开关。每次工具调用在 `data/diagnostics.json` 写 `source:native-tool-loop`、工具名、参数、脱敏 detail、步数与成功状态；这里只保存可观察调用摘要，不保存隐藏思维链。游戏聊天只得到最终自然语言，`naturalGameText` 继续拦截 JSON、工具名、命名空间 ID 和底层错误。
+
+### 27.7 测试和仍待实服证明的内容
+
+新增 Node 测试覆盖：
+
+- ToolAgent 必须用第一个真实工具结果重新调用模型；最终文本前执行顺序可验证。
+- `send_server_command` 返回无权限时，失败和新世界状态必须交回模型，不能沿旧计划继续。
+- DeepSeek 工具续轮必须携带 assistant `reasoning_content`、`tool_calls` 和对应 tool result。
+- OpenAI Responses 第二轮必须携带 `previous_response_id` 与匹配 call id 的 `function_call_output`。
+
+本次候选在 Java 25 下完成 Fabric Gradle build，`npm run check` 和 93 项 Node 测试全部通过，仓库审计为 0 问题。同步实际运行目录、更新 Fabric jar 并后台重启后，客户端重新达到 `in_world`，上报 `nearbyBlocks=256`。真实 DeepSeek 思考模式先调用 `craft_recipe(minecraft:torch,20)`，Fabric 返回 `verified_crafted_count=20` 且状态背包确认 20 个火把；模型读取该结果后第二轮调用 `select_hotbar(3)`，状态确认选中槽 3。随后 15 个实际工具步中，Agent 移动约 60 格；针对“附近玩家不足荒野 48 格”“无安全路线”“物品栏换位未确认”“缺自有 3×3 工作台”等失败分别重规划；成功制作木棍和工作台、第一次放置失败后选择快捷栏再成功放置，并破坏一块经验证的天然草方块。第 16 步预算耗尽后以 `agent_step_budget_exhausted:16` 安全结束。全部诊断来源都是 `model-tool-loop`，证明没有落入旧 `local-deterministic` 分支。
+
+该轮同时定位到 `normalizeAgentPrimitive(craft_recipe)` 没有写入内部 `verifiedWilderness`，所以 `createCraftTask` 无法创建动态安全工作窗口，即使工作台已经成功登记也会提前拒绝 3×3 配方。现已在 Java 归一化层补入该内部标志：模型 schema 仍没有该字段，Fabric 仍须调用 `WildernessGuard.workZone` 并在 `OwnedBlockRegistry` 找到服务端现状一致的自有工作台。修复后 Java 25 build 成功，更新运行 jar 并重启实服客户端；第二轮 Agent 自行 `craft_recipe(crafting_table)`、`place_block(crafting_table)`，随后 `craft_recipe(furnace)` 得到 `verified_crafted_count=1; itemId=minecraft:furnace; grid=3x3`，再成功 `place_block(furnace)`，因此 3×3 修复已有真实后置条件证据。该证据仍不等于从零自主通关；TP 无权限实服回退、战斗和跨维度长链也需继续验收。当前没有通用容器槽点击工具，铁砧、锻造、酿造与任意模组菜单仍需新增“菜单观察 + 原子槽操作”后才能称为 Agent 可自由操作，不能借旧高级脚本宣称已经满足。

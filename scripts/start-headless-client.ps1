@@ -122,6 +122,7 @@ $env:MCAI_LOW_HEALTH_THRESHOLD = if ($null -eq $config.autonomy.lowHealthThresho
 $env:MCAI_EAT_BELOW_FOOD = if ($null -eq $config.autonomy.eatBelowFood) { '20' } else { [string][int]$config.autonomy.eatBelowFood }
 $env:MCAI_HOSTILE_SCAN_RADIUS = if ($null -eq $config.autonomy.hostileScanRadius) { '12' } else { [string][double]$config.autonomy.hostileScanRadius }
 $env:MCAI_ALLOW_VERIFIED_WILDERNESS = if ($null -eq $config.autonomy.allowVerifiedWilderness) { 'true' } else { ([bool]$config.autonomy.allowVerifiedWilderness).ToString().ToLowerInvariant() }
+$env:MCAI_TP_COMMAND_ENABLED = if ($null -eq $config.autonomy.allowTeleportCommand) { 'false' } else { ([bool]$config.autonomy.allowTeleportCommand).ToString().ToLowerInvariant() }
 $env:MCAI_PROTECT_OWNER = if ($null -eq $config.autonomy.protectOwner) { 'true' } else { ([bool]$config.autonomy.protectOwner).ToString().ToLowerInvariant() }
 $env:MCAI_WILDERNESS_MIN_PLAYER_DISTANCE = if ($null -eq $config.autonomy.wildernessMinPlayerDistance) { '48' } else { [string][double]$config.autonomy.wildernessMinPlayerDistance }
 $autonomyStateRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.autonomyFile)) { 'data\autonomy-state.json' } else { [string]$config.storage.autonomyFile }

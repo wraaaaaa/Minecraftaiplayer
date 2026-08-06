@@ -115,6 +115,8 @@
           <label class="span-two">API Base URL<input id="modelBaseUrl" type="url"></label>
           <label>超时（毫秒）<input id="modelTimeout" type="number" min="1000" max="600000"><small>高推理建议 120000；超时会在游戏内明确提示。</small></label>
           <label>最大输出 Token<input id="maxOutputTokens" type="number" min="128" max="131072"><small>游戏决策建议 4096，防止模型长时间思考而卡住。</small></label>
+          <label>玩家任务最大工具步数<input id="agentMaxSteps" type="number" min="1" max="128"><small>每一步都会重新观察和调用模型；建议 48。</small></label>
+          <label>空闲发育每轮工具步数<input id="autonomousAgentMaxSteps" type="number" min="1" max="64"><small>每次空闲心跳的闭环预算；建议 16。</small></label>
           <label>密钥变量名<input id="apiKeyEnv" type="text"></label>
           <label>DeepSeek API Key<input id="deepseekKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
           <label>火山方舟 API Key<input id="arkKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
@@ -185,6 +187,7 @@
               <label class="switch"><input id="autoSleep" type="checkbox"><span></span>允许睡觉设置重生点</label>
               <label class="switch"><input id="protectOwner" type="checkbox"><span></span>跟随时保护最高优先玩家</label>
               <label class="switch"><input id="allowVerifiedWilderness" type="checkbox"><span></span>允许 Fabric 动态验证荒野</label>
+              <label class="switch"><input id="allowTeleportCommand" type="checkbox"><span></span>已获管理员 TP 权限（默认关闭）</label>
             </div>
             <p class="safety-note">人工坐标开发区已经取消。AI 根据结构化环境自行选择探索、采集和放置意图；Fabric 仍会对每个目标逐格验证天然性、玩家结构、容器、危险流体、碰撞和撤退路线，文字提示词不能绕过硬检查。</p>
           </article>

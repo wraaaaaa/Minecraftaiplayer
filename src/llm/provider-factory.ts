@@ -1,6 +1,13 @@
 import type { BotConfig, ReasoningEffort } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
-import type { LlmProvider, LlmRequest, LlmResponse } from './types.js'
+import type {
+  LlmProvider,
+  LlmRequest,
+  LlmResponse,
+  LlmToolCall,
+  LlmToolTurnRequest,
+  LlmToolTurnResponse
+} from './types.js'
 
 interface ProviderOptions {
   model: string
@@ -17,8 +24,23 @@ function normalizeBaseUrl(value: string): string { return value.replace(/\/+$/u,
 interface ChatPayload {
   choices?: Array<{
     finish_reason?: string | null
-    message?: { content?: string | null; reasoning_content?: string | null }
+    message?: {
+      role?: string
+      content?: string | null
+      reasoning_content?: string | null
+      tool_calls?: Array<{ id?: string; type?: string; function?: { name?: string; arguments?: string } }>
+    }
   }>
+}
+
+type ChatMessage = Record<string, unknown>
+
+function chatToolCalls(payload: unknown): LlmToolCall[] {
+  const root = payload as ChatPayload
+  return (root.choices?.[0]?.message?.tool_calls ?? []).flatMap(call =>
+    typeof call.id === 'string' && typeof call.function?.name === 'string'
+      ? [{ id: call.id, name: call.function.name, arguments: typeof call.function.arguments === 'string' ? call.function.arguments : '{}' }]
+      : [])
 }
 
 function chatText(payload: unknown): string | undefined {
@@ -121,6 +143,63 @@ class ChatCompletionsProvider implements LlmProvider {
     }
     return { text: retriedText, model: this.#options.model, requestedEffort: requested, effectiveEffort: 'none' }
   }
+
+  async toolTurn(request: LlmToolTurnRequest): Promise<LlmToolTurnResponse> {
+    const requested = this.#options.effort
+    let effective = requested
+    const previous = Array.isArray(request.continuation) ? request.continuation as ChatMessage[] : undefined
+    const messages: ChatMessage[] = previous
+      ? structuredClone(previous)
+      : [{ role: 'system', content: request.system }, { role: 'user', content: request.user }]
+    for (const result of request.toolResults ?? []) {
+      messages.push({ role: 'tool', tool_call_id: result.callId, content: result.output })
+    }
+    const body: Record<string, unknown> = {
+      model: this.#options.model,
+      messages,
+      tools: request.tools.map(tool => ({ type: 'function', function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+      } })),
+      parallel_tool_calls: false,
+      stream: false,
+      max_tokens: this.#options.maxOutputTokens
+    }
+    if (this.#provider === 'deepseek') {
+      if (requested === 'none') body.thinking = { type: 'disabled' }
+      else {
+        effective = requested === 'max' || requested === 'xhigh' ? 'max' : 'high'
+        body.thinking = { type: 'enabled' }
+        body.reasoning_effort = effective
+      }
+    } else {
+      body.reasoning_effort = requested
+    }
+    const endpoint = `${normalizeBaseUrl(this.#options.baseUrl)}/chat/completions`
+    const payload = await postJson(endpoint, this.#options.apiKey, body, this.#options.timeoutMs)
+    const root = payload as ChatPayload
+    const assistant = root.choices?.[0]?.message
+    if (!assistant) throw new Error('模型工具调用返回缺少 choices[0].message')
+    const calls = chatToolCalls(payload)
+    const text = typeof assistant.content === 'string' ? assistant.content.trim() : ''
+    if (calls.length === 0 && !text) throw new Error('模型既未调用工具，也未返回最终文本')
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: assistant.content ?? '',
+      ...(typeof assistant.reasoning_content === 'string' ? { reasoning_content: assistant.reasoning_content } : {}),
+      ...(assistant.tool_calls ? { tool_calls: assistant.tool_calls } : {})
+    }
+    messages.push(assistantMessage)
+    return {
+      text,
+      toolCalls: calls,
+      continuation: messages,
+      model: this.#options.model,
+      requestedEffort: requested,
+      effectiveEffort: effective
+    }
+  }
 }
 
 class OpenAiResponsesProvider implements LlmProvider {
@@ -138,12 +217,64 @@ class OpenAiResponsesProvider implements LlmProvider {
     }, this.#options.timeoutMs)
     return { text: parseResponseText(payload), model: this.#options.model, requestedEffort: effort, effectiveEffort: effort }
   }
+
+  async toolTurn(request: LlmToolTurnRequest): Promise<LlmToolTurnResponse> {
+    const effort = this.#options.effort
+    const state = request.continuation && typeof request.continuation === 'object'
+      ? request.continuation as { previousResponseId?: string }
+      : undefined
+    const input = state?.previousResponseId
+      ? (request.toolResults ?? []).map(result => ({ type: 'function_call_output', call_id: result.callId, output: result.output }))
+      : [{ role: 'system', content: request.system }, { role: 'user', content: request.user }]
+    const body: Record<string, unknown> = {
+      model: this.#options.model,
+      input,
+      tools: request.tools.map(tool => ({
+        type: 'function', name: tool.name, description: tool.description,
+        parameters: tool.parameters, strict: true
+      })),
+      parallel_tool_calls: false,
+      reasoning: { effort },
+      text: { verbosity: 'low' },
+      max_output_tokens: this.#options.maxOutputTokens
+    }
+    if (state?.previousResponseId) body.previous_response_id = state.previousResponseId
+    const payload = await postJson(`${normalizeBaseUrl(this.#options.baseUrl)}/responses`, this.#options.apiKey, body, this.#options.timeoutMs)
+    const response = payload as {
+      id?: string
+      output_text?: string
+      output?: Array<{ type?: string; call_id?: string; name?: string; arguments?: string; content?: Array<{ type?: string; text?: string }> }>
+    }
+    if (!response.id) throw new Error('OpenAI Responses 工具调用返回缺少 id')
+    const toolCalls: LlmToolCall[] = (response.output ?? []).flatMap(item =>
+      item.type === 'function_call' && typeof item.call_id === 'string' && typeof item.name === 'string'
+        ? [{ id: item.call_id, name: item.name, arguments: typeof item.arguments === 'string' ? item.arguments : '{}' }]
+        : [])
+    let text = typeof response.output_text === 'string' ? response.output_text.trim() : ''
+    if (!text) {
+      for (const item of response.output ?? []) {
+        if (item.type !== 'message') continue
+        const part = item.content?.find(content => content.type === 'output_text' && typeof content.text === 'string')
+        if (part?.text) { text = part.text.trim(); break }
+      }
+    }
+    if (toolCalls.length === 0 && !text) throw new Error('OpenAI 既未调用工具，也未返回最终文本')
+    return {
+      text,
+      toolCalls,
+      continuation: { previousResponseId: response.id },
+      model: this.#options.model,
+      requestedEffort: effort,
+      effectiveEffort: effort
+    }
+  }
 }
 
 class MissingKeyProvider implements LlmProvider {
   readonly #variable: string
   constructor(variable: string) { this.#variable = variable }
   async complete(): Promise<LlmResponse> { throw new Error(`缺少模型 API Key 环境变量：${this.#variable}`) }
+  async toolTurn(): Promise<LlmToolTurnResponse> { throw new Error(`缺少模型 API Key 环境变量：${this.#variable}`) }
 }
 
 export function createLlmProvider(config: BotConfig['model'], apiKey: string, logger: Logger): LlmProvider {

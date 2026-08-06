@@ -29,7 +29,9 @@
     "baseUrl": "https://api.deepseek.com",
     "reasoningEffort": "high",
     "timeoutMs": 120000,
-    "maxOutputTokens": 4096
+    "maxOutputTokens": 4096,
+    "agentMaxSteps": 48,
+    "autonomousAgentMaxSteps": 16
   },
   "chat": {
     "requireMention": true,
@@ -89,6 +91,7 @@
     "autoSleep": true,
     "protectOwner": true,
     "allowVerifiedWilderness": true,
+    "allowTeleportCommand": false,
     "longTermGoal": "reach_end"
   },
   "policyFile": "config/behavior-rules.json",

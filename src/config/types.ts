@@ -32,6 +32,10 @@ export interface BotConfig {
     reasoningEffort: ReasoningEffort
     timeoutMs: number
     maxOutputTokens?: number
+    /** Maximum observe/tool/result turns for a player-issued Agent task. */
+    agentMaxSteps?: number
+    /** Smaller per-heartbeat budget for idle self-development. */
+    autonomousAgentMaxSteps?: number
   }
   chat: {
     requireMention: boolean
@@ -91,6 +95,7 @@ export interface BotConfig {
     autoSleep?: boolean
     protectOwner?: boolean
     allowVerifiedWilderness?: boolean
+    allowTeleportCommand?: boolean
     longTermGoal?: 'reach_end'
     developmentZone?: {
       enabled: boolean
@@ -138,6 +143,7 @@ export interface AutonomyConfig {
   autoSleep: boolean
   protectOwner: boolean
   allowVerifiedWilderness: boolean
+  allowTeleportCommand: boolean
   longTermGoal: 'reach_end'
   /** @deprecated 仅为读取旧配置保留；运行时不再使用手工坐标范围。 */
   developmentZone?: {
@@ -177,6 +183,7 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   autoSleep: true,
   protectOwner: true,
   allowVerifiedWilderness: true,
+  allowTeleportCommand: false,
   longTermGoal: 'reach_end'
 })
 

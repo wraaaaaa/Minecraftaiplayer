@@ -30,6 +30,20 @@ export interface WorldState {
     safeFood?: boolean
     enchantments?: Array<{ id: string; level: number }>
   }>
+  selectedHotbarSlot?: number
+  nearbyBlocks?: Array<{
+    blockId: string
+    x: number
+    y: number
+    z: number
+    distance: number
+    resourceCategory?: string
+    classification: 'natural_resource' | 'protected_likely' | 'bot_owned' | 'unclassified'
+    blockEntity: boolean
+    replaceable: boolean
+    fluid: boolean
+    destroySpeed: number
+  }>
   equipment?: Record<string, { itemId: string; name: string; count: number; durability?: number; maxDurability?: number; enchanted?: boolean } | null>
   nearbyPlayers: Array<{
     name: string

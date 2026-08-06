@@ -368,6 +368,19 @@ public final class PrimitiveTaskController {
         }
         String requestedItemId = optionalId(action, "itemId");
         int count = integer(action, "count", 1, 16, 1);
+        BlockPos requestedTarget = null;
+        if (action.has("targetBlock") && action.get("targetBlock").isJsonObject()) {
+            JsonObject target = action.getAsJsonObject("targetBlock");
+            if (!target.has("x") || !target.has("y") || !target.has("z") || count != 1) {
+                results.add(new TaskResult(id, false, "exact placement requires x/y/z and count=1"));
+                return null;
+            }
+            requestedTarget = new BlockPos(target.get("x").getAsInt(), target.get("y").getAsInt(), target.get("z").getAsInt());
+            if (!taskZone.contains(requestedTarget) || !client.level.isLoaded(requestedTarget)) {
+                results.add(new TaskResult(id, false, "exact placement target is outside the verified loaded work window"));
+                return null;
+            }
+        }
         PlaceableCandidate material = findPlaceableCandidate(client, client.player, requestedItemId);
         if (material == null) {
             results.add(new TaskResult(id, false, requestedItemId == null
@@ -375,7 +388,7 @@ public final class PrimitiveTaskController {
                 : "requested item is missing or is not an ordinary safe full block: " + requestedItemId));
             return null;
         }
-        return new PlaceBlockTask(id, requestedItemId, count, taskZone, tick);
+        return new PlaceBlockTask(id, requestedItemId, count, taskZone, requestedTarget, tick);
     }
 
     private DropItemTask createDropTask(String id, JsonObject action, Minecraft client) {
@@ -1147,6 +1160,7 @@ public final class PrimitiveTaskController {
         private final String requestedItemId;
         private final int requestedCount;
         private final ApprovedZone taskZone;
+        private final BlockPos requestedTarget;
         private final Set<BlockPos> completedPositions = new HashSet<>();
         private Phase phase = Phase.PREPARE;
         private long phaseStartedTick;
@@ -1161,11 +1175,12 @@ public final class PrimitiveTaskController {
         private int stableTicks;
         private String lastInteraction = "none";
 
-        PlaceBlockTask(String id, String requestedItemId, int requestedCount, ApprovedZone taskZone, long startedTick) {
+        PlaceBlockTask(String id, String requestedItemId, int requestedCount, ApprovedZone taskZone, BlockPos requestedTarget, long startedTick) {
             super(id, "place_block", startedTick, PLACE_TIMEOUT_TICKS);
             this.requestedItemId = requestedItemId;
             this.requestedCount = requestedCount;
             this.taskZone = taskZone;
+            this.requestedTarget = requestedTarget == null ? null : requestedTarget.immutable();
         }
 
         @Override
@@ -1266,7 +1281,7 @@ public final class PrimitiveTaskController {
                     phase = Phase.PREPARE;
                     return;
                 }
-                placement = findSimplePlacement(client, player, selectedItem, taskZone, completedPositions);
+                placement = findSimplePlacement(client, player, selectedItem, taskZone, completedPositions, requestedTarget);
                 if (placement == null) {
                     finish(client, this, false, "no safe reachable replaceable target in verified placement work window; verified_placed_blocks="
                         + completedCount);
@@ -1713,15 +1728,20 @@ public final class PrimitiveTaskController {
         LocalPlayer player,
         BlockItem item,
         ApprovedZone zone,
-        Set<BlockPos> excluded
+        Set<BlockPos> excluded,
+        BlockPos requestedTarget
     ) {
         BlockPos center = player.blockPosition();
         List<BlockPos> candidates = new ArrayList<>();
-        for (int dy = -1; dy <= 1; dy++) {
-            for (int dx = -3; dx <= 3; dx++) {
-                for (int dz = -3; dz <= 3; dz++) {
-                    if (Math.abs(dx) + Math.abs(dz) < 1) continue;
-                    candidates.add(center.offset(dx, dy, dz));
+        if (requestedTarget != null) {
+            candidates.add(requestedTarget);
+        } else {
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -3; dx <= 3; dx++) {
+                    for (int dz = -3; dz <= 3; dz++) {
+                        if (Math.abs(dx) + Math.abs(dz) < 1) continue;
+                        candidates.add(center.offset(dx, dy, dz));
+                    }
                 }
             }
         }
