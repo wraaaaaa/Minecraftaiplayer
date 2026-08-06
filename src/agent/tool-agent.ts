@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import type { ReasoningEffort } from '../config/types.js'
-import type { LlmInputAttachment, LlmProvider, LlmToolCall, LlmToolDefinition, LlmToolResult, LlmUsage } from '../llm/types.js'
+import type { LlmInputAttachment, LlmProvider, LlmToolCall, LlmToolDefinition, LlmToolResult, LlmToolTurnResponse, LlmUsage } from '../llm/types.js'
 import type { AgentAction, PolicyDecision } from '../policy/policy-engine.js'
 import type { WorldState } from './world-state.js'
 
@@ -38,6 +38,8 @@ export interface ToolAgentTurnEvent {
   cumulativeUsage: LlmUsage
   requestedEffort: ReasoningEffort
   effectiveEffort: ReasoningEffort
+  estimated: boolean
+  error?: string
 }
 
 const objectSchema = (properties: Record<string, unknown>, required = Object.keys(properties)): Record<string, unknown> => ({
@@ -56,6 +58,9 @@ const string = (description: string): Record<string, unknown> => ({ type: 'strin
  */
 export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'observe_world', description: '立即读取最新游戏状态。动作执行后结果已自动附带新状态；只有需要重新确认时再调用。', parameters: objectSchema({}) },
+  { name: 'follow_player_continuously', description: '持续跟随指定玩家并动态更新目标位置。启动成功后由客户端保持，不能用多次 navigate_to 模拟；直到玩家要求停止、开始冲突的新动作、出现安全抢占、目标离线或连接断开才结束。', parameters: objectSchema({
+    player: string('要持续跟随的玩家名；通常使用当前发起玩家')
+  }) },
   { name: 'navigate_to', description: '使用碰撞安全寻路走到一个明确坐标。只负责移动，不会自动挖路、采集或执行后续任务。', parameters: objectSchema({
     x: number('目标 X'), y: number('目标 Y'), z: number('目标 Z'),
     stop_distance: number('在目标多少格内停下，通常 1 到 2'), sprint: { type: 'boolean', description: '是否冲刺' }
@@ -121,6 +126,10 @@ function text(args: Record<string, unknown>, key: string): string {
   if (typeof value !== 'string' || !value.trim()) throw new Error(`参数 ${key} 必须是非空字符串`)
   return value.trim()
 }
+function optionalText(args: Record<string, unknown>, key: string): string | undefined {
+  const value = args[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
 
 type ToolOperation = AgentAction | 'observe' | { waitTicks: number } | { returnToStart: true } | { searchQuery: string }
 
@@ -130,6 +139,11 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
   const args = record(parsed)
   switch (call.name) {
     case 'observe_world': return 'observe'
+    case 'follow_player_continuously': {
+      const target = optionalText(args, 'player') ?? requesterName
+      if (!target) throw new Error('持续跟随需要明确的玩家名')
+      return { type: 'follow_player', target }
+    }
     case 'navigate_to': return {
       type: 'navigate_to', x: finite(args, 'x'), y: finite(args, 'y'), z: finite(args, 'z'),
       stopDistance: Math.max(0.5, Math.min(4, finite(args, 'stop_distance'))), sprint: args.sprint === true
@@ -264,31 +278,52 @@ function addUsage(left: LlmUsage, right: LlmUsage): LlmUsage {
   }
 }
 
-function compactOldToolResults(continuation: unknown): unknown {
-  if (!Array.isArray(continuation) || continuation.length <= 10) return continuation
-  const boundary = continuation.length - 6
-  return continuation.map((message, index) => {
-    if (index >= boundary || !message || typeof message !== 'object') return message
-    const entry = message as Record<string, unknown>
-    if (entry.role !== 'tool' || typeof entry.content !== 'string') return message
-    try {
-      const parsed = JSON.parse(entry.content) as { ok?: boolean; detail?: string; world?: WorldState }
-      if (!parsed.world) return message
-      const world = parsed.world
-      return {
-        ...entry,
-        content: JSON.stringify({
-          ok: parsed.ok,
-          detail: parsed.detail,
-          compressedObservation: {
-            sequence: world.sequence, position: world.position, health: world.health, food: world.food,
-            dimension: world.dimension, selectedHotbarSlot: world.selectedHotbarSlot,
-            inventory: world.inventory.map(item => ({ itemId: item.itemId, count: item.count, slot: item.slot }))
-          }
-        })
-      }
-    } catch { return message }
-  })
+type LedgerEntry = { step: number; tool: string; ok: boolean; detail: string; observation: unknown }
+
+function textOnlyContent(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (!Array.isArray(value)) return undefined
+  const texts = value.flatMap(part => part && typeof part === 'object' && (part as Record<string, unknown>).type === 'text'
+    && typeof (part as Record<string, unknown>).text === 'string' ? [(part as { text: string }).text] : [])
+  return texts.length > 0 ? texts.join('\n') : undefined
+}
+
+function compactLedgerObservation(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value
+  const delta = value as Record<string, unknown>
+  const observation = delta.observation && typeof delta.observation === 'object'
+    ? delta.observation as Record<string, unknown>
+    : {}
+  return {
+    sequence: delta.sequence,
+    position: delta.position,
+    vitals: delta.vitals,
+    inventoryChanges: delta.inventoryChanges,
+    dimension: observation.dimension,
+    selectedHotbarSlot: observation.selectedHotbarSlot,
+    activePrimitive: observation.activePrimitive,
+    navigationStatus: observation.navigationStatus
+  }
+}
+
+function compactContinuation(continuation: unknown, ledger: readonly LedgerEntry[]): unknown {
+  if (!Array.isArray(continuation) || ledger.length === 0) return continuation
+  const messages = continuation.filter((message): message is Record<string, unknown> => Boolean(message) && typeof message === 'object')
+  const system = messages.find(message => message.role === 'system')
+  const user = messages.find(message => message.role === 'user')
+  const assistant = [...messages].reverse().find(message => message.role === 'assistant' && Array.isArray(message.tool_calls))
+  if (!system || !user || !assistant) return continuation
+  const userText = textOnlyContent(user.content)
+  const progress = ledger.slice(-16).map(entry => ({
+    step: entry.step, tool: entry.tool, ok: entry.ok, detail: entry.detail.slice(0, 400),
+    observation: compactLedgerObservation(entry.observation)
+  }))
+  return [
+    system,
+    { ...user, ...(userText ? { content: userText } : {}) },
+    { role: 'system', content: `执行进度账本（旧工具协议已压缩；下面均为真实回执，不能重复已完成步骤）：\n${JSON.stringify(progress)}` },
+    assistant
+  ]
 }
 
 export class ToolAgent {
@@ -354,6 +389,8 @@ export class ToolAgent {
     let executedSteps = 0
     let apiCalls = 0
     let cumulativeUsage = zeroUsage()
+    let retriedEmptyToolResponse = false
+    const executionLedger: LedgerEntry[] = []
     const taskStartY = input.initialWorld.position?.y
     let descended = false
     const guideCache = new Map<string, string>()
@@ -361,7 +398,7 @@ export class ToolAgent {
     const user = [
       `目标：${input.goal}`,
       input.requesterName ? `发起玩家：${input.requesterName}` : '来源：空闲自主目标',
-      '下面是起始观察。先决定策略；重复采集、挖掘、合成、熔炼、狩猎和返程应调用连续技能，让本地客户端完成低层动作。只有出现新情况、里程碑或失败才重新规划。每轮最多调用一个工具。',
+      '下面是起始观察。先决定策略；重复采集、挖掘、合成、熔炼、狩猎和返程应调用连续技能，让本地客户端完成低层动作。需要一直跟随时启动持续跟随技能，不能反复追逐玩家旧坐标。只有出现新情况、里程碑或失败才重新规划。每轮最多调用一个工具。',
       compactWorld(world)
     ].join('\n')
     const result = (ok: boolean, reply: string, detail: string): ToolAgentRunResult => ({
@@ -397,7 +434,7 @@ export class ToolAgent {
         const returned = await returnToStart()
         recovery = `; automatic_return=${returned.ok}; ${returned.detail}`
       }
-      return result(false, '我先停一下，避免在这件事上继续空耗。', `${detail}${recovery}`)
+      return result(false, '唔，我先停一下，不想傻乎乎地一直空耗下去。刚才做到哪里我都记住了，等条件合适再陪你接着试一次喵。', `${detail}${recovery}`)
     }
 
     for (let turn = 0; turn <= this.#maxSteps; turn++) {
@@ -407,7 +444,7 @@ export class ToolAgent {
         system: input.system,
         user,
         tools,
-        ...(continuation === undefined ? {} : { continuation: compactOldToolResults(continuation) }),
+        ...(continuation === undefined ? {} : { continuation: compactContinuation(continuation, executionLedger) }),
         ...(toolResults === undefined ? {} : { toolResults }),
         ...(apiCalls === 0 && input.attachments?.length ? { attachments: input.attachments } : {}),
         maxOutputTokens: this.#maxOutputTokens,
@@ -422,8 +459,30 @@ export class ToolAgent {
         return stopForBudget(`agent_token_budget_exhausted:used=${cumulativeUsage.totalTokens};next_input_estimate=${estimatedInputTokens};reserved_output=${this.#maxOutputTokens};limit=${this.#maxTaskTokens}`)
       }
       const callStarted = Date.now()
-      const response = await this.#provider.toolTurn(request)
       apiCalls++
+      let response: LlmToolTurnResponse
+      try {
+        response = await this.#provider.toolTurn(request)
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error)
+        const failedUsage: LlmUsage = {
+          inputTokens: estimatedInputTokens,
+          outputTokens: this.#maxOutputTokens,
+          totalTokens: estimatedInputTokens + this.#maxOutputTokens
+        }
+        cumulativeUsage = addUsage(cumulativeUsage, failedUsage)
+        const effort = request.reasoningEffort ?? 'high'
+        await this.#onTurn?.({
+          apiCall: apiCalls, elapsedMs: Date.now() - callStarted, estimatedInputTokens, usage: failedUsage,
+          cumulativeUsage, requestedEffort: effort, effectiveEffort: effort, estimated: true, error: detail
+        })
+        if (!retriedEmptyToolResponse && /模型既未调用工具，也未返回最终文本/u.test(detail) && apiCalls < this.#maxApiCalls) {
+          retriedEmptyToolResponse = true
+          turn--
+          continue
+        }
+        throw error
+      }
       model = response.model
       const fallbackOutput = this.#estimate({ text: response.text, toolCalls: response.toolCalls })
       const turnUsage = response.usage ?? {
@@ -434,7 +493,8 @@ export class ToolAgent {
       cumulativeUsage = addUsage(cumulativeUsage, turnUsage)
       await this.#onTurn?.({
         apiCall: apiCalls, elapsedMs: Date.now() - callStarted, estimatedInputTokens, usage: turnUsage,
-        cumulativeUsage, requestedEffort: response.requestedEffort, effectiveEffort: response.effectiveEffort
+        cumulativeUsage, requestedEffort: response.requestedEffort, effectiveEffort: response.effectiveEffort,
+        estimated: response.usage === undefined
       })
       continuation = response.continuation
       toolResults = undefined
@@ -487,6 +547,7 @@ export class ToolAgent {
         world = this.#executor.snapshot?.() ?? world
         const observation = JSON.parse(compactObservation(previousWorld, world)) as unknown
         previousWorld = world
+        executionLedger.push({ step: executedSteps, tool: call.name, ok, detail, observation })
         results.push({ callId: call.id, output: JSON.stringify({ ok, detail, observationDelta: observation }) })
         await this.#onStep?.({ step: executedSteps, tool: call.name, arguments: call.arguments, ok, detail, world })
       }

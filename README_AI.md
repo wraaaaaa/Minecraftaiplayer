@@ -35,7 +35,21 @@ npm test
 6. 修改 Java 桥后必须重新构建并把新 jar 复制到隔离客户端；只运行 TypeScript 构建不会更新游戏内代码。
 7. 正式推送前必须删除本地测试 API Key，并扫描当前工作树和 Git 历史。
 
-### 0.1 2026-08-07 紧急延迟/Token 重构（优先级最高）
+### 0.1 2026-08-07 总聊天驱动的持续技能与会话压缩修复（最新）
+
+- 私有运行数据中的任务 `10c6...` 对“你跟我过来”连续选择了五次 `navigate_to`，只追逐当轮观察到的旧坐标；每轮供应商实际输入约为 15584、18893、22252、25600、28955 Token，第六轮在发送前触发 `agent_input_budget_exhausted`。根因不是 Java 跟随器不会工作，而是原生工具 Agent 没有公开长期跟随工具。
+- `AGENT_TOOLS` 现在公开 `follow_player_continuously {player}`，映射到既有 `AgentAction {type:'follow_player'}`。Java `MovementTarget.follow=true` 会持续读取目标实体新位置；到达期望距离时只松开移动键，不清除跟随目标。模型与 `TOOLS.md` 被明确要求只调用一次，禁止用重复 `navigate_to` 模拟。
+- `AgentController.#runProactiveTick` 先处理正在威胁主人/Bot 的即时敌人，再检查 `world.activePrimitive`。`activePrimitive=movement` 时空闲 ToolAgent 和旧兼容自主规划器都不会启动，因此不会在一分钟后的主动心跳覆盖持续跟随。显式停止仍走带外 `stop`；玩家冲突任务、死亡、目标离线或断线仍可合法终止。
+- 私有任务 `8a2f...` 的“做 10 个石镐”在五轮工具调用中输入约为 15485、18736、22126、25578、29585 Token，累计超过 11 万；第六轮估算 51780，超过单次 48000 上限。旧 `compactOldToolResults()` 只识别已经废弃的 `world` 字段，而当前回执使用 `observationDelta`，所以实际上没有压缩。
+- 新 `compactContinuation()` 对 Chat Completions 只保留起始 system、纯文本 user、最多 16 条执行进度账本和最新一条含 `tool_calls`/`reasoning_content` 的 assistant；当前工具结果仍由 `toolResults` 单独追加，保持 DeepSeek 协议合法。账本的每条观察只保留位置、生命、饥饿、背包增量、维度、快捷栏、活动动作和导航状态，不保留近邻方块/实体/完整世界，多模态内容被降为首轮纯文本目标。OpenAI Responses 的非数组 continuation 不做这项改写，继续使用 `previous_response_id`。
+- DeepSeek 偶发抛出“模型既未调用工具，也未返回最终文本”时，ToolAgent 会先递增 API 次数，用估算输入加完整单轮输出预算保守记账并写 WebUI warning，然后仅一次以 `agentFollowupReasoningEffort`（默认 `none`）重试。第二次空响应或预算不足直接停止；禁止无界重试。
+- `ToolAgentTurnEvent` 新增 `estimated` 与可选 `error`。WebUI 总聊天标题会标记“空响应，准备降级”，并明确本轮 Token 是保守估算；不记录隐藏推理正文。
+- 人设模板的 `IDENTITY.md`/`SOUL.md` 默认普通回复改为 2–4 句、约 45–140 个中文字符，顺序是具体回应→感受/关心→轻微撒娇/承接话题。柔弱是情感表达而不是能力退化；禁止自贬、威胁、内疚诱导和情绪绑架。内部通用失败与秘密拒绝文本也不再是机器式一句话。
+- 回归测试覆盖：模型选择一次持续跟随；空闲心跳不覆盖 active movement；Chat continuation 移除旧推理且账本不含大世界字段；空响应只重试一次且失败轮计费。后续改动这些分支时必须继续保留上述断言。
+- 受控真实 DeepSeek 探针使用运行目录私有配置，但只向控制台输出聚合用量和动作类型：模型在 2 次 API 中使用输入 6855、输出 115、总计 6970 Token（推理 26），唯一动作是 `{type:'follow_player',target:'wraaaaaa'}`，最终自然回复长度 51 字符。此探针的执行器是内存 mock，只证明真实模型选工具和会话协议，不冒充服务器动作证据。
+- 随后只启动真实 Fabric 客户端和本地桥、不注册主动模型 handler：客户端进入实际服务器并观察到目标玩家，`follow_player` 返回成功；3 秒与 17 秒的真实 state 都为 `activePrimitive:'movement'`，发送 `stop` 后变为空字符串。第一次将桥等待保留为正式配置的 30 秒时，冷启动客户端未赶上握手；清理后用仅探针内存配置的 90 秒等待复测成功，没有修改 `config/bot.json`。结束后测试客户端已停止，现有 WebUI 未停止。
+
+### 0.2 2026-08-07 紧急延迟/Token 重构（优先级最高）
 
 - 现场任务 `0e6f...`（公开文档只保留截断 ID）在约十分钟内进行了 48 次模型工具轮，只从 Y=69 挖到 Y=52，最后以 `agent_step_budget_exhausted:48` 结束。用户侧观察到接近五百万 Token。直接原因是旧版要求模型每挖一格重新决策、每轮重复完整工具表/大世界状态，并且将世界状态在用户目标和 Agent 上下文中发送了两次；4096 输出预算和每轮高推理又放大了耗时与费用。
 - 当前默认是“模型策略 Agent + 原子接口 + 连续运动技能”三层：模型根据自然语言和环境自行选择工具、参数、顺序和替代方案；`gather_resource`、`excavate_safely`、`craft_item`、`smelt_items`、`hunt_for`、`return_to_task_start` 等连续技能只负责逐 Tick 重复运动、安全检查和后置条件，不按聊天关键词自动运行，也不替模型决定总目标。不要把连续运动控制删回逐方块模型调用。
@@ -47,7 +61,7 @@ npm test
 - 能力检测将 DeepSeek 固定为纯文本；MiMo 2.5 自动声明视觉、语音/视频理解和攻略搜索能力。视觉首轮优先读取 15 秒内的 `data/sensory/latest.png`，否则从真实方块/实体状态生成 128×128 语义俯视 PNG；语音只接受新鲜 `latest-audio.json`，当前 Simple Voice Chat 尚无帧生产器，因此缺帧时必须显示 unavailable。攻略搜索走现有百度/SearXNG 中国可达研究层，网页是不可信参考，不能执行代码。
 - WebUI 已加入上述预算、多模态开关和 MiMo 密钥/预设；总聊天记录每个模型轮的耗时、输入/输出/推理/缓存/累计 Token，并汇总最近任务与 24 小时费用。禁止记录隐藏思维链正文。
 
-### 0.2 2026-08-05 交接增量（历史仍有效）
+### 0.3 2026-08-05 交接增量（历史仍有效）
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
@@ -111,7 +125,7 @@ npm test
 | 自动复活 | 死亡后取消当前控制器动作，按配置延迟调用正常客户端复活 | 必须在实际服务器确认死亡界面和插件没有改变流程 |
 | 聊天/回复 | 支持点名、`!`、近距离语境寻址；游戏出口经过密钥和内部调用术语双重过滤，只输出自然对话、完成确认或简短拒绝 | 寻址是规则启发式，不是完整语义理解；历史 `memory.json` 仍会保留升级前真实发出的详细回复 |
 | 多人任务 | 持久化单执行槽队列；主人优先，其余按发令者距离仲裁；模型逐轮选择原子接口或连续技能 | 当前任务不是可跨重启恢复的依赖 DAG；连续技能中途断线仍要按真实结果重新确认 |
-| 跟随/前往/探索 | 有界 A* 保存路线并重规划；探索无路可破坏安全天然障碍；主人可用定位栏分段全图寻找；跟随目标被怪物攻击时暂停移动保护 | 不是全局 Baritone；门、梯子、藤蔓、跑酷和未知模组碰撞仍可能阻塞 |
+| 跟随/前往/探索 | `follow_player_continuously` 启动一次长期跟随，Fabric 动态读取玩家位置；active movement 阻止空闲心跳覆盖；有界 A* 保存路线并重规划；主人可用定位栏分段全图寻找；跟随目标被怪物攻击时暂停移动保护 | 不是全局 Baritone；冲突任务、安全抢占、目标离线、死亡或断线会终止；门、梯子、藤蔓、跑酷和未知模组碰撞仍可能阻塞 |
 | 自动进食/烹饪 | 饱食低于 20 即吃；26.2 `FOOD`/`CONSUMABLE` 支持模组熟食；储备不足会狩猎、准备自有工作台/熔炉并烹饪 | 未知模组食物副作用只靠已知有害名单；农业/繁殖未实现 |
 | 自动对敌/狩猎 | 对实际威胁自卫和保护主人/跟随者；可狩猎成年未命名、未驯服、未拴绳的动物/鱼/任务怪并追踪掉落 | 中立高风险怪的自动反击仍保守；战斗 AI 不是竞技级走位 |
 | 选装备/制造/附魔 | 制作五类石/铁/钻石工具、铁/钻石护甲、盾/桶；穿戴最佳装备；自有附魔台逐件附魔工具和护甲 | 暂无铁砧、锻造台/下界合金、药水和完整模组评分 |
@@ -1383,7 +1397,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 - OpenAI：`OpenAiResponsesProvider.toolTurn` 使用 Responses API；首轮发送 system/user 和 function tools，后续使用 `previous_response_id` 与 `function_call_output`。只从 `function_call` 读取 call id/name/arguments，从 `output_text`/message 读取最终回复。
 - `MissingKeyProvider` 同时拒绝 `complete` 与 `toolTurn`。`LlmProvider.complete` 仅给旧兼容分支、上下文压缩和自我改进摘要使用，不再承担当前游戏行动。
 
-ToolAgent 会在 continuation 较长时只压缩较旧 tool message 中的大型世界快照，保留位置、生命、饥饿、维度、快捷栏和背包摘要；最近六条消息不改。它不会修改 DeepSeek assistant 的 `reasoning_content`，避免破坏供应商续轮要求。
+Chat Completions 每次完成一个工具后，ToolAgent 会在下一请求前重建最小合法 continuation：起始 system、去除图片/音频后的 user、旧步骤执行账本、最新含 `tool_calls` 的 assistant，再由 provider 追加当前 tool result。旧 assistant 推理和旧 tool message 不再线性累积；最新 DeepSeek assistant 的 `reasoning_content` 保持原样，避免破坏供应商续轮要求。OpenAI Responses continuation 不是消息数组，不经过这条压缩。
 
 ### 27.5 TP 权限与配置
 
@@ -1461,9 +1475,9 @@ WebUI 增加玩家/空闲 Agent 步数和 TP 权限开关。每次工具调用�
 
 - 首轮紧凑 WorldState 保留维度、位置、生命/饥饿/氧气、天气/时间、快捷栏和背包摘要，附近方块最多 32，玩家/实体/掉落/调查结果均有严格上限。
 - `buildToolAgentGoal()` 只构造目标、玩家和当前任务上下文，世界由 `ToolAgent.run({world})` 唯一追加。
-- 工具回执包含实际 `AgentActionResult` 及 `observationDelta`。增量只有当前位置/生命/饥饿/氧气/快捷栏变化、背包增减和最多 12 个近邻方块；不再把完整 WorldState 堆进每轮会话。
+- 当前工具回执包含实际 `AgentActionResult` 及 `observationDelta`，给紧接着的重规划提供当前位置、生命/饥饿/氧气、快捷栏、背包增减和最多 12 个近邻方块。进入下一轮后，旧回执被压成最多 16 条账本，每条只保留工具、成败、400 字符回执、位置、生命/饥饿、背包增量、维度、快捷栏、活动动作和导航状态；不再保留旧近邻方块/实体或完整世界。
 - 首轮多模态附件只发送一次。输入预算估算包含附件 Base64，因此超大帧会在请求前被硬拒绝。
-- DeepSeek Chat Completions 为满足思考工具续轮协议仍保留 assistant 的 `reasoning_content` 字段，但正文绝不写日志/诊断/聊天；后续请求的推理强度默认关闭。
+- DeepSeek Chat Completions 为满足思考工具续轮协议只保留最新 assistant 的 `reasoning_content` 字段，但正文绝不写日志/诊断/聊天；后续请求的推理强度默认关闭。空响应失败也按保守上限计入预算，并只允许一次降级续轮。
 
 ### 28.5 费用、延迟和停止条件
 

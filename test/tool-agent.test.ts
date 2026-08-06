@@ -128,3 +128,81 @@ test('任务 Token 硬预算会在下一次请求前停止，避免失控循环'
   assert.match(result.detail, /agent_token_budget_exhausted/u)
   assert.equal(result.usage.totalTokens, 1000)
 })
+
+test('模型可启动持续跟随技能而不是反复追逐静态坐标', async () => {
+  const actions: AgentAction[] = []
+  const provider = turns(
+    {
+      text: '', toolCalls: [{ id: 'follow-1', name: 'follow_player_continuously', arguments: '{"player":"Alice"}' }],
+      continuation: [{ role: 'assistant', tool_calls: [{ id: 'follow-1' }] }], model: 'mock', requestedEffort: 'high', effectiveEffort: 'high'
+    },
+    { text: '好呀，我会一直跟着你，想停的时候和我说一声就好喵~', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+  )
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: 'continuous_follow_started' } }, chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 4
+  }).run({ system: 'system', goal: '一直跟着 Alice', initialWorld: initial, requesterName: 'Alice' })
+  assert.deepEqual(actions, [{ type: 'follow_player', target: 'Alice' }])
+  assert.equal(result.ok, true)
+  assert.match(result.reply, /一直跟着/u)
+})
+
+test('Chat Completions 仅保留最近工具协议并用紧凑账本承接旧步骤', async () => {
+  const requests: Array<{ continuation?: unknown; toolResults?: unknown }> = []
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('unexpected') },
+    toolTurn: async request => {
+      requests.push(request)
+      if (requests.length === 1) return {
+        text: '', toolCalls: [{ id: 'craft-2', name: 'craft_recipe', arguments: '{"item_id":"minecraft:stick","count":8}' }],
+        continuation: [
+          { role: 'system', content: 'system' }, { role: 'user', content: 'goal' },
+          { role: 'assistant', reasoning_content: 'old reasoning', tool_calls: [{ id: 'old-1' }] },
+          { role: 'tool', tool_call_id: 'old-1', content: '{"ok":true,"detail":"old large result"}' },
+          { role: 'assistant', reasoning_content: 'current reasoning', tool_calls: [{ id: 'craft-2' }] }
+        ],
+        model: 'mock', requestedEffort: 'high', effectiveEffort: 'high'
+      }
+      return { text: '木棍做好了，接下来继续做石镐喵~', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+    }
+  }
+  await new ToolAgent({
+    provider,
+    executor: { execute: async () => ({ ok: true, detail: 'verified_crafted_count=8' }), chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 4
+  }).run({ system: 'system', goal: '做十个石镐', initialWorld: initial })
+  const compacted = requests[1]?.continuation as Array<{ role?: string; content?: string; reasoning_content?: string }>
+  assert.ok(Array.isArray(compacted))
+  assert.equal(compacted.some(message => message.reasoning_content === 'old reasoning'), false)
+  assert.equal(compacted.some(message => message.reasoning_content === 'current reasoning'), true)
+  const ledger = compacted.find(message => message.role === 'system' && message.content?.includes('执行进度账本'))?.content ?? ''
+  assert.match(ledger, /craft_recipe.*verified_crafted_count=8/u)
+  assert.doesNotMatch(ledger, /nearbyBlocks|nearbyHostiles|blockSurvey/u)
+  assert.ok(compacted.length <= 4)
+})
+
+test('DeepSeek 空工具响应只降级重试一次且计入 API 与 Token 预算', async () => {
+  let providerCalls = 0
+  const requests: Array<{ reasoningEffort?: string }> = []
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('unexpected') },
+    toolTurn: async request => {
+      providerCalls++
+      requests.push(request)
+      if (providerCalls === 1) throw new Error('模型既未调用工具，也未返回最终文本')
+      return { text: '唔，刚才走神了一下。现在看清楚啦，我们继续吧喵~', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none', usage: { inputTokens: 200, outputTokens: 30, totalTokens: 230 } }
+    }
+  }
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async () => ({ ok: true, detail: 'ok' }), chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 4, maxApiCalls: 3, maxTaskTokens: 20_000,
+    maxOutputTokens: 256, estimateTokens: () => 500
+  }).run({ system: 'system', goal: '离开这里', initialWorld: initial })
+  assert.equal(providerCalls, 2)
+  assert.equal(requests[1]?.reasoningEffort, 'none')
+  assert.equal(result.apiCalls, 2)
+  assert.equal(result.usage.totalTokens, 500 + 256 + 230)
+  assert.equal(result.ok, true)
+})

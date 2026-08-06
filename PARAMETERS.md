@@ -72,7 +72,7 @@ LAN 使用流程：人类玩家进入单人世界并选择“对局域网开放�
 - `agentMaxOutputTokens`：Agent 单轮工具决策输出，默认 `1024`，允许 `128-16384`。
 - `agentFollowupReasoningEffort`：第一次规划仍使用 `reasoningEffort`；工具成功后的续轮默认 `none`，可改成所有受支持强度。失败、新威胁等仍可由模型结合真实结果重规划，但不再为每个重复动作开启长思考。
 
-DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Responses API function calling。DeepSeek 开启思考后，适配器会把上一轮助手消息中的 `reasoning_content` 与 `tool_calls` 原样留在会话，再追加工具结果，否则供应商会拒绝下一轮。隐藏推理不写入诊断或游戏聊天。OpenAI 后续轮使用 `previous_response_id` 与 `function_call_output` 保持状态。
+DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Responses API function calling。DeepSeek 开启思考后，适配器会保留最新一轮助手消息中的 `reasoning_content` 与 `tool_calls`，再追加当前工具结果，否则供应商会拒绝续轮。更早工具轮不会无限叠加，而会变成最多 16 条紧凑执行账本，只保留工具名、成败、限长回执、位置、生命/饥饿、背包增量、维度和活动状态；视觉/音频只在首轮发送。供应商出现空工具响应时只允许一次 `none` 推理强度重试，失败轮按保守输入估算加完整 `agentMaxOutputTokens` 计入 `agentMaxApiCalls` 与 `agentMaxTaskTokens`。隐藏推理不写入诊断或游戏聊天。OpenAI 后续轮使用 `previous_response_id` 与 `function_call_output` 保持状态。
 
 ### 多模态参数
 
@@ -93,8 +93,8 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 五份文件在每次模型决策前读取，因此可用 WebUI 保存，也可直接编辑本地 Markdown，无需为纯提示词修改重启：
 
 - `rules.md`：解释硬规则与权限边界，优先级最高；真正不可绕过的限制仍在策略、SecretGuard 和 Fabric。
-- `IDENTITY.md`：Bot 名称、类型、职责和输出基线；已写可修改示例。
-- `SOUL.md`：核心人设、价值观、语气和判断风格；这是主要人设文件，已写完整示例。
+- `IDENTITY.md`：Bot 名称、类型、职责和输出基线；默认普通回复 2–4 句、约 45–140 个中文字符，已写可修改示例。
+- `SOUL.md`：核心人设、价值观、语气和判断风格；这是主要人设文件，示例采用更柔软、依恋、会轻微撒娇的猫娘表达，同时明确柔弱不等于无能、不得情绪绑架。
 - `TOOLS.md`：Agent 循环、原子接口、连续技能、多模态感知、后置条件和失败处理；运行时 JSON Schema 才是参数真值。包含仅允许程序写入的 `AI_LEARNED` 托管段。
 - `MEMORY.md`：记忆召回、分玩家隔离、摘要、压缩和过期规则；不存放秘密。
 - `USER.md`：当前玩家的兴趣、表达方式、协作偏好和稳定事实；模型只加载正在对话玩家对应的一份。
@@ -142,9 +142,11 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 | `proactiveIdleMs` | `180000` | 最后一次玩家消息后至少等待多久才调用一次空闲决策。 |
 | `proactiveMinIntervalMs` | `300000` | 两次空闲决策的最小间隔；同时控制主动聊天频率和模型 API 消耗。 |
 
-游戏聊天出口固定为“玩家交互通道”：自然陪聊、接受/完成确认和一句简短拒绝。程序会拦截 JSON、代码块、动作内部名、`minecraft:` 命名空间 ID、工具/函数调用术语和接口参数；任务失败统一提示到 WebUI 查看，不把步骤号或底层错误广播给服务器玩家。完整诊断自动写入 `data/diagnostics.json`，WebUI“总聊天”每 4 秒独立刷新，筛选控件不会把设置页标成“未保存”。
+游戏聊天出口固定为“玩家交互通道”：自然陪聊、接受/完成确认和自然拒绝。默认人设要求普通回复 2–4 句，先回应具体内容，再加入感受、关心或轻微撒娇；紧急战斗警告和极简单确认可以更短。程序会拦截 JSON、代码块、动作内部名、`minecraft:` 命名空间 ID、工具/函数调用术语和接口参数；任务失败只概括说明并引导到 WebUI，不把步骤号或底层错误广播给服务器玩家。完整诊断自动写入 `data/diagnostics.json`，WebUI“总聊天”每 4 秒独立刷新，筛选控件不会把设置页标成“未保存”。
 
-空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，空闲发展不会在后续心跳覆盖它；停止、冲突任务、紧急安全动作、目标离线、死亡或断线可以结束。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+
+注意 `server.connectTimeoutMs` 同时限制 Node 等待 Fabric 桥握手；安装 100 个以上模组的首次冷启动可能超过 30 秒。若 WebUI 显示客户端最终已启动但控制器先报等待超时，可在“服务器与客户端”适当提高该值后重启；这只延长启动等待，不改变游戏内动作超时。
 
 行为准则另存 `config/behavior-rules.json`，它是模型输出之后的程序级硬限制，不应只依赖提示词。
 
