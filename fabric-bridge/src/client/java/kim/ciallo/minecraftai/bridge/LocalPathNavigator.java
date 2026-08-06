@@ -48,6 +48,8 @@ final class LocalPathNavigator {
     private long lastProgressTick;
     private int consecutivePlanFailures;
     private String status = "idle";
+    private BlockPos closeAfterPassing;
+    private long barrierInteractionTick = Long.MIN_VALUE;
 
     /** Drives one client tick. Returns false only when no safe route could be planned. */
     boolean drive(Minecraft client, LocalPlayer player, Vec3 goal, double stopDistance, boolean sprint, long tick) {
@@ -56,6 +58,7 @@ final class LocalPathNavigator {
             status = "not_in_world";
             return false;
         }
+        closeBarrierAfterPassing(client, player, tick);
 
         // Horizontal distance alone is not an arrival condition.  Treating a goal one block
         // below the player as reached made staircase mining report success while standing at
@@ -147,22 +150,31 @@ final class LocalPathNavigator {
         boolean waterWaypoint = isWaterNode(client, waypoint);
         lookAt(player, waypointCenter.x, waypointCenter.y, waypointCenter.z, waterWaypoint || player.isInWater());
 
-        BlockPos closedBarrier = closedOpenableBarrier(client, waypoint);
+        BarrierInteraction closedBarrier = closedOpenableBarrier(client, waypoint);
         if (closedBarrier != null) {
-            if (client.gameMode == null || !player.isWithinBlockInteractionRange(closedBarrier, 0.0D)) {
+            BlockPos interactionTarget = closedBarrier.interactionTarget();
+            if (client.gameMode == null || !player.isWithinBlockInteractionRange(interactionTarget, 0.0D)) {
                 path = List.of();
                 pathIndex = 0;
                 status = "door_out_of_reach_replan";
                 return true;
             }
-            Vec3 hit = Vec3.atCenterOf(closedBarrier);
+            if (tick - barrierInteractionTick < 8L) {
+                status = "waiting_for_door_state";
+                return true;
+            }
+            Vec3 hit = Vec3.atCenterOf(interactionTarget);
             lookAt(player, hit.x, hit.y, hit.z, true);
             InteractionResult result = client.gameMode.useItemOn(
                 player,
                 InteractionHand.MAIN_HAND,
-                new BlockHitResult(hit, Direction.UP, closedBarrier, false)
+                new BlockHitResult(hit, Direction.UP, interactionTarget, false)
             );
-            if (result.consumesAction()) player.swing(InteractionHand.MAIN_HAND);
+            if (result.consumesAction()) {
+                player.swing(InteractionHand.MAIN_HAND);
+                barrierInteractionTick = tick;
+                if (closedBarrier.closeAfterPassing()) closeAfterPassing = interactionTarget.immutable();
+            }
             status = result.consumesAction() ? "opening_door_or_gate" : "door_interaction_rejected";
             return true;
         }
@@ -186,7 +198,7 @@ final class LocalPathNavigator {
         client.options.keyUp.setDown(true);
         client.options.keyShift.setDown(crouch);
         client.options.keySprint.setDown(sprint && !stepUp && !crouch && pathIndex + 1 < path.size());
-        if ((stepUp && player.onGround()) || (waterWaypoint && waypointCenter.y > player.getY() + 0.05D)) {
+        if ((stepUp && (player.onGround() || player.isInWater())) || (waterWaypoint && waypointCenter.y > player.getY() + 0.05D)) {
             client.options.keyJump.setDown(true);
         }
         status = (crouch ? "crouching_path " : "following_path ") + (pathIndex + 1) + "/" + path.size();
@@ -201,6 +213,7 @@ final class LocalPathNavigator {
         progressPosition = null;
         consecutivePlanFailures = 0;
         status = "idle";
+        closeAfterPassing = null;
     }
 
     String status() {
@@ -395,7 +408,7 @@ final class LocalPathNavigator {
         boolean found = false;
         for (BlockPos cursor : List.of(position, position.above())) {
             BlockState state = client.level.getBlockState(cursor);
-            if (isOpenableBarrier(state)) {
+            if (isOpenableBarrier(client, cursor, state)) {
                 found = true;
                 continue;
             }
@@ -404,21 +417,71 @@ final class LocalPathNavigator {
         return found;
     }
 
-    private static BlockPos closedOpenableBarrier(Minecraft client, BlockPos position) {
+    private static BarrierInteraction closedOpenableBarrier(Minecraft client, BlockPos position) {
         if (client.level == null) return null;
         for (BlockPos cursor : List.of(position, position.above())) {
             BlockState state = client.level.getBlockState(cursor);
-            if (isOpenableBarrier(state) && state.hasProperty(BlockStateProperties.OPEN)
-                && !state.getValue(BlockStateProperties.OPEN)) return cursor;
+            if (!state.hasProperty(BlockStateProperties.OPEN) || state.getValue(BlockStateProperties.OPEN)) continue;
+            if (state.getBlock() instanceof FenceGateBlock) return new BarrierInteraction(cursor, cursor, true);
+            if (state.getBlock() instanceof DoorBlock door) {
+                if (door.type().canOpenByHand()) return new BarrierInteraction(cursor, cursor, true);
+                BlockPos actuator = nearbyActuator(client, cursor);
+                if (actuator != null) return new BarrierInteraction(cursor, actuator, isLever(client.level.getBlockState(actuator)));
+            }
         }
         return null;
     }
 
-    private static boolean isOpenableBarrier(BlockState state) {
+    private static boolean isOpenableBarrier(Minecraft client, BlockPos position, BlockState state) {
         if (!state.hasProperty(BlockStateProperties.OPEN)) return false;
-        if (state.getBlock() instanceof DoorBlock door) return door.type().canOpenByHand();
+        if (state.getBlock() instanceof DoorBlock door) return door.type().canOpenByHand() || nearbyActuator(client, position) != null;
         return state.getBlock() instanceof FenceGateBlock;
     }
+
+    private void closeBarrierAfterPassing(Minecraft client, LocalPlayer player, long tick) {
+        BlockPos target = closeAfterPassing;
+        if (target == null || client.gameMode == null || client.level == null) return;
+        if (tick - barrierInteractionTick < 16L) return;
+        double distance = player.distanceToSqr(Vec3.atCenterOf(target));
+        if (distance < 2.25D) return;
+        if (distance > 25.0D || !player.isWithinBlockInteractionRange(target, 0.0D)) {
+            closeAfterPassing = null;
+            return;
+        }
+        BlockState state = client.level.getBlockState(target);
+        boolean shouldToggle = isLever(state) && state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED)
+            || state.hasProperty(BlockStateProperties.OPEN) && state.getValue(BlockStateProperties.OPEN);
+        if (!shouldToggle) { closeAfterPassing = null; return; }
+        Vec3 hit = Vec3.atCenterOf(target);
+        lookAt(player, hit.x, hit.y, hit.z, true);
+        InteractionResult result = client.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, new BlockHitResult(hit, Direction.UP, target, false));
+        if (result.consumesAction()) player.swing(InteractionHand.MAIN_HAND);
+        closeAfterPassing = null;
+        barrierInteractionTick = tick;
+        status = result.consumesAction() ? "closing_passed_door_or_gate" : "close_barrier_rejected";
+    }
+
+    private static BlockPos nearbyActuator(Minecraft client, BlockPos barrier) {
+        if (client == null || client.level == null) return null;
+        for (BlockPos cursor : BlockPos.betweenClosed(barrier.offset(-3, -2, -3), barrier.offset(3, 3, 3))) {
+            if (!client.level.isLoaded(cursor)) continue;
+            BlockState state = client.level.getBlockState(cursor);
+            if (!isButton(state) && !isLever(state)) continue;
+            if (state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED)) continue;
+            return cursor.immutable();
+        }
+        return null;
+    }
+
+    private static boolean isButton(BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().endsWith("_button");
+    }
+
+    private static boolean isLever(BlockState state) {
+        return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("minecraft:lever");
+    }
+
+    private record BarrierInteraction(BlockPos barrier, BlockPos interactionTarget, boolean closeAfterPassing) { }
 
     /** Returns the actual collision-surface height, including slabs and snow layers. */
     private static double standingY(Minecraft client, BlockPos position) {

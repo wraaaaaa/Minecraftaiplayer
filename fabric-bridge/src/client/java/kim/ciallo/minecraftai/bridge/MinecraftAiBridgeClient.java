@@ -29,6 +29,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
@@ -54,6 +55,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private MovementTarget movement;
     private final LocalPathNavigator movementNavigator = new LocalPathNavigator();
     private final TraversalRecovery traversalRecovery = new TraversalRecovery();
+    private BlockPos followPortal;
+    private int followTargetMissingSince = -1;
+    private String lastWorldDimension = "";
     private final LocalPathNavigator airRescueNavigator = new LocalPathNavigator();
     private BlockPos airRescueExit;
     private int airRescueLastScan = -100;
@@ -63,6 +67,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private PendingNavigation pendingNavigation;
     private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
+    private final boolean firstHomeEnabled = Boolean.parseBoolean(environment("MCAI_FIRST_HOME_ENABLED", "true"));
+    private final String firstHomeDimension = environment("MCAI_FIRST_HOME_DIMENSION", "minecraft:overworld");
+    private final double firstHomeX = environmentNumber("MCAI_FIRST_HOME_X", 1226.0D);
+    private final double firstHomeY = environmentNumber("MCAI_FIRST_HOME_Y", 65.0D);
+    private final double firstHomeZ = environmentNumber("MCAI_FIRST_HOME_Z", 199.0D);
+    private final double firstHomeRadius = Math.max(1.0D, Math.min(64.0D, environmentNumber("MCAI_FIRST_HOME_RADIUS", 10.0D)));
     private final SurvivalController survival = new SurvivalController(
         (float) environmentNumber("MCAI_LOW_HEALTH_THRESHOLD", 10.0D),
         (int) environmentNumber("MCAI_EAT_BELOW_FOOD", 20.0D),
@@ -122,11 +132,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         bridgeWasConnected = bridgeConnected;
         LocalPlayer player = client.player;
         if (player == null || client.level == null) {
+            boolean preservePersistentFollow = movement != null && movement.follow() && client.getConnection() != null && bridgeConnected;
             activeSession = null;
             easyAuthSent = false;
             easyAuthPromptSeen = false;
             dead = false;
-            movement = null;
+            if (!preservePersistentFollow) movement = null;
             movementNavigator.release(client);
             traversalRecovery.reset(client);
             cancelPendingSurvivalAction("world_disconnected");
@@ -143,6 +154,14 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             easyAuthSent = false;
             easyAuthPromptSeen = false;
             joinedTick = tick;
+            String dimension = client.level.dimension().identifier().toString();
+            if (!lastWorldDimension.isEmpty() && !lastWorldDimension.equals(dimension)) {
+                movementNavigator.release(client);
+                traversalRecovery.reset(client);
+                followPortal = null;
+                followTargetMissingSince = -1;
+            }
+            lastWorldDimension = dimension;
             JsonObject event = baseMessage("joined_world");
             event.addProperty("name", player.getGameProfile().name());
             event.addProperty("uuid", player.getUUID().toString());
@@ -547,7 +566,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private static boolean isAdvancedAction(String type) {
         return switch (type) {
-            case "attack_hostile", "hunt_entity", "smelt_item", "trade_villager", "enchant_item",
+            case "attack_hostile", "hunt_entity", "accept_items", "smelt_item", "trade_villager", "enchant_item",
                 "sleep_in_bed", "excavate_tunnel", "explore_frontier", "build_nether_portal", "travel_to_dimension" -> true;
             default -> false;
         };
@@ -770,6 +789,37 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "return_to_zone" -> {
                 yield new ActionResult(false, "manual development zones were removed; use explore_frontier, seek_shelter, or come_to_player");
             }
+            case "return_home" -> {
+                String currentDimension = client.level.dimension().identifier().toString();
+                ShelterController.HomeSnapshot registered = shelter.homeSnapshot();
+                double x;
+                double y;
+                double z;
+                double radius;
+                String source;
+                if (registered != null && registered.dimension().equals(currentDimension)) {
+                    x = registered.position().getX() + 0.5D;
+                    y = registered.position().getY();
+                    z = registered.position().getZ() + 0.5D;
+                    radius = 2.0D;
+                    source = "registered_shelter";
+                } else if (firstHomeEnabled && firstHomeDimension.equals(currentDimension)) {
+                    x = firstHomeX;
+                    y = firstHomeY;
+                    z = firstHomeZ;
+                    radius = firstHomeRadius;
+                    source = "first_home";
+                } else {
+                    yield new ActionResult(false, "home_is_in_another_dimension; current=" + currentDimension
+                        + "; registered=" + (registered == null ? "none" : registered.dimension())
+                        + "; first_home=" + firstHomeDimension);
+                }
+                if (!setMovement(new MovementTarget(null, x, y, z, true, radius), player)) {
+                    yield new ActionResult(false, "cannot_start_collision_safe_home_route");
+                }
+                yield new ActionResult(true, "return_home_engaged; source=" + source + "; destination="
+                    + x + "," + y + "," + z + "; stop_radius=" + radius);
+            }
             case "attack_player" -> {
                 String targetName = string(action, "target");
                 AbstractClientPlayer target = findPlayer(client, targetName);
@@ -885,6 +935,18 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (target.playerName() != null) {
             AbstractClientPlayer targetPlayer = findPlayer(client, target.playerName());
             if (targetPlayer == null) {
+                if (followTargetMissingSince < 0) followTargetMissingSince = tick;
+                if (target.follow() && tick - followTargetMissingSince <= 240) {
+                    if (followPortal == null || !client.level.isLoaded(followPortal)
+                        || !isPortal(client.level.getBlockState(followPortal))) {
+                        followPortal = nearestFollowPortal(client, player, new Vec3(target.x(), target.y(), target.z()));
+                    }
+                    if (followPortal != null) {
+                        Vec3 portalGoal = Vec3.atCenterOf(followPortal);
+                        target = new MovementTarget(target.playerName(), portalGoal.x, followPortal.getY(), portalGoal.z, true, 0.22D);
+                        movement = target;
+                    }
+                }
                 if (!target.playerName().equalsIgnoreCase(ownerName)) {
                     // A followed player can briefly leave the loaded entity set at a chunk edge.
                     // Keep the persistent mode and the last confirmed coordinate instead of
@@ -894,7 +956,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 double segmentDistance = Math.sqrt(
                     Math.pow(target.x() - player.getX(), 2.0D) + Math.pow(target.z() - player.getZ(), 2.0D)
                 );
-                if (segmentDistance <= 2.0D || tick % 40 == 0) {
+                if (followPortal == null && (segmentDistance <= 2.0D || tick % 40 == 0)) {
                     OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
                     if (fix == null) {
                         if (segmentDistance <= 2.0D) {
@@ -913,6 +975,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     }
                 }
             } else {
+                followPortal = null;
+                followTargetMissingSince = -1;
                 target = new MovementTarget(target.playerName(), targetPlayer.getX(), targetPlayer.getY(), targetPlayer.getZ(), target.follow(), target.stopDistance());
                 movement = target;
             }
@@ -998,6 +1062,24 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         return null;
     }
 
+    private static BlockPos nearestFollowPortal(Minecraft client, LocalPlayer player, Vec3 lastTarget) {
+        if (client.level == null) return null;
+        BlockPos origin = player.blockPosition();
+        BlockPos best = null;
+        double bestDistance = Double.POSITIVE_INFINITY;
+        for (BlockPos cursor : BlockPos.betweenClosed(origin.offset(-12, -8, -12), origin.offset(12, 8, 12))) {
+            if (!client.level.isLoaded(cursor) || !isPortal(client.level.getBlockState(cursor))) continue;
+            if (Vec3.atCenterOf(cursor).distanceToSqr(lastTarget) > 64.0D) continue;
+            double distance = player.distanceToSqr(Vec3.atCenterOf(cursor));
+            if (distance < bestDistance) { best = cursor.immutable(); bestDistance = distance; }
+        }
+        return best;
+    }
+
+    private static boolean isPortal(BlockState state) {
+        return state.is(Blocks.NETHER_PORTAL) || state.is(Blocks.END_PORTAL);
+    }
+
     private JsonObject buildState(Minecraft client, LocalPlayer player) {
         JsonObject event = worldStateEncoder.encode(client, autonomyEnabled || pendingSurvivalAction != null ? survival : null);
         event.addProperty("type", "state");
@@ -1022,6 +1104,17 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             homeState.addProperty("doorY", home.door().getY());
             homeState.addProperty("doorZ", home.door().getZ());
             homeState.addProperty("persisted", home.persisted());
+            homeState.addProperty("source", "registered_shelter");
+            event.add("home", homeState);
+        } else if (firstHomeEnabled) {
+            JsonObject homeState = new JsonObject();
+            homeState.addProperty("dimension", firstHomeDimension);
+            homeState.addProperty("x", firstHomeX);
+            homeState.addProperty("y", firstHomeY);
+            homeState.addProperty("z", firstHomeZ);
+            homeState.addProperty("radius", firstHomeRadius);
+            homeState.addProperty("source", "first_home");
+            homeState.addProperty("persisted", true);
             event.add("home", homeState);
         }
 

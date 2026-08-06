@@ -64,6 +64,7 @@ const string = (description: string): Record<string, unknown> => ({ type: 'strin
 export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'observe_world', description: '刷新状态；工具回执已有新状态时勿重复调用。', parameters: objectSchema({}) },
   { name: 'follow_player_continuously', description: '启动客户端持续跟随；只调用一次，明确停止前保持。', parameters: objectSchema({ player: string('玩家名') }) },
+  { name: 'return_home', description: '返回已登记住所；没有登记住所时返回配置中的第一个家。', parameters: objectSchema({}) },
   { name: 'navigate_to', description: '碰撞安全地走到坐标。', parameters: objectSchema({
     x: number('X'), y: number('Y'), z: number('Z'), stop_distance: number('停止距离'), sprint: { type: 'boolean' }
   }) },
@@ -94,6 +95,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'return_to_task_start', description: '从地下沿安全路线返回任务起始高度。', parameters: objectSchema({}) },
   { name: 'collect_own_drops', description: '连续拾取本任务登记的自有掉落。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), radius: integer('半径', 2, 32) }) },
   { name: 'give_item_to_player', description: '接近玩家并交付自身物品。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), player: string('玩家名') }) },
+  { name: 'accept_items_from_player', description: '接近明确玩家并拾取其身边刚丢出的物品；以背包真实增量确认。', parameters: objectSchema({ player: string('玩家名'), item_id: string('物品 ID，可填 any'), count: integer('数量', 1, 64), radius: integer('玩家周围搜索半径', 1, 6) }) },
   { name: 'equip_for', description: '按用途穿戴当前最佳装备。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
   { name: 'hunt_for', description: '连续狩猎合法目标并收取掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('数量', 1, 64) }) },
   { name: 'send_server_command', description: '仅尝试 tp/teleport 到玩家；无权限后改用寻路。', parameters: objectSchema({ command: string('不带 / 的命令') }) },
@@ -144,6 +146,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
       if (!target) throw new Error('持续跟随需要明确的玩家名')
       return { type: 'follow_player', target }
     }
+    case 'return_home': return { type: 'return_home' }
     case 'navigate_to': return {
       type: 'navigate_to', x: finite(args, 'x'), y: finite(args, 'y'), z: finite(args, 'z'),
       stopDistance: Math.max(0.5, Math.min(4, finite(args, 'stop_distance'))), sprint: args.sprint === true
@@ -179,6 +182,10 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     case 'return_to_task_start': return { returnToStart: true }
     case 'collect_own_drops': return { type: 'collect_own_drops', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), radius: whole(args, 'radius', 2, 32) }
     case 'give_item_to_player': return { type: 'drop_item', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), target: text(args, 'player') }
+    case 'accept_items_from_player': {
+      const itemId = text(args, 'item_id')
+      return { type: 'accept_items', ...(itemId === 'any' ? {} : { itemId }), count: whole(args, 'count', 1, 64), target: text(args, 'player'), radius: whole(args, 'radius', 1, 6) }
+    }
     case 'equip_for': {
       const purpose = text(args, 'purpose')
       if (!['general', 'mining', 'combat', 'end_combat'].includes(purpose)) throw new Error('purpose 无效')
@@ -306,6 +313,28 @@ function compactLedgerObservation(value: unknown): unknown {
   }
 }
 
+const FOLLOWUP_SYSTEM = `继续上一轮 Minecraft Agent 任务。你已经读过完整人设、记忆和环境；现在只依据真实工具回执继续决策。
+硬规则：每轮最多调用一个可用工具；成功只代表回执明确验证的后置条件，禁止编造成果；失败时按最新观察换方法，危险时停止；不得破坏玩家建筑、容器或未知财产，不主动攻击玩家；不得输出或索取密钥、令牌、服务器地址、本地路径和内部参数。
+若目标已经满足，直接用自然、温柔、像真人队友的中文回复玩家，不复述工具名、参数、执行回执、思考或调用过程。若仍需动作则只调用下一项工具。`
+
+function compactContinuationUser(userText: string | undefined): string {
+  if (!userText) return '继续完成上一轮玩家目标。'
+  const lines = userText.split('\n')
+  const goalLine = lines.find(line => line.startsWith('目标：'))
+  const requesterLine = lines.find(line => line.startsWith('发起玩家：') || line.startsWith('来源：'))
+  let goal = goalLine?.slice('目标：'.length) ?? userText
+  try {
+    const parsed = JSON.parse(goal) as { playerMessage?: unknown; currentPlayer?: { name?: unknown } }
+    goal = JSON.stringify({
+      playerMessage: typeof parsed.playerMessage === 'string' ? parsed.playerMessage.slice(0, 1_000) : '',
+      currentPlayer: { name: typeof parsed.currentPlayer?.name === 'string' ? parsed.currentPlayer.name.slice(0, 32) : '' }
+    })
+  } catch {
+    goal = goal.slice(0, 1_200)
+  }
+  return [`仍需完成的原始目标：${goal}`, requesterLine ?? '', '完整上下文已在第一轮读取；结合进度账本和本轮工具回执继续。'].filter(Boolean).join('\n')
+}
+
 function compactContinuation(continuation: unknown, ledger: readonly LedgerEntry[]): unknown {
   if (!Array.isArray(continuation) || ledger.length === 0) return continuation
   const messages = continuation.filter((message): message is Record<string, unknown> => Boolean(message) && typeof message === 'object')
@@ -319,8 +348,8 @@ function compactContinuation(continuation: unknown, ledger: readonly LedgerEntry
     observation: compactLedgerObservation(entry.observation)
   }))
   return [
-    system,
-    { ...user, ...(userText ? { content: userText } : {}) },
+    { ...system, content: FOLLOWUP_SYSTEM },
+    { ...user, content: compactContinuationUser(userText) },
     { role: 'system', content: `执行进度账本（旧工具协议已压缩；下面均为真实回执，不能重复已完成步骤）：\n${JSON.stringify(progress)}` },
     assistant
   ]

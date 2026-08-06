@@ -9,6 +9,7 @@ export type AgentAction =
   | { type: 'wander'; radius: number }
   | { type: 'explore_frontier'; purpose: 'food' | 'wood' | 'village' | 'portal' | 'resource'; radius: number }
   | { type: 'return_to_zone' }
+  | { type: 'return_home' }
   | { type: 'attack_player'; target: string }
   | { type: 'eat_best_food' }
   | { type: 'equip_best'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
@@ -26,6 +27,7 @@ export type AgentAction =
   | { type: 'travel_to_dimension'; dimension: 'minecraft:overworld' | 'minecraft:the_nether' | 'minecraft:the_end' }
   | { type: 'build_nether_portal'; verifiedWilderness?: boolean }
   | { type: 'drop_item'; itemId?: string; count: number; target: string }
+  | { type: 'accept_items'; itemId?: string; count: number; target: string; radius: number }
   | { type: 'use_item'; itemId?: string }
   | { type: 'seek_shelter' }
   | { type: 'build_shelter'; verifiedWilderness?: boolean }
@@ -97,6 +99,8 @@ export class PolicyEngine {
         return { allowed: true, reason: '允许可验证的生存交互' }
       case 'drop_item':
         return { allowed: true, reason: '只允许把自身背包物品丢给明确指定且在场的玩家' }
+      case 'accept_items':
+        return { allowed: true, reason: '只允许拾取明确玩家身边本次可见的掉落物，并验证背包增量' }
       case 'collect_own_drops':
         if (this.#rules.denyTakingPlayerItems) return { allowed: true, reason: '只允许收集本任务产生并由 Fabric 跟踪的掉落物' }
         return { allowed: true, reason: '允许收集掉落物' }

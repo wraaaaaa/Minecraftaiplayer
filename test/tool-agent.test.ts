@@ -50,6 +50,25 @@ test('每个工具结果都带着最新观察回到模型，再由模型决定�
   assert.equal(result.steps, 2)
 })
 
+test('模型可自主选择回家与接收玩家物品接口', async () => {
+  const provider = turns(
+    { text: '', toolCalls: [{ id: 'home', name: 'return_home', arguments: '{}' }], continuation: { turn: 1 }, model: 'mock', requestedEffort: 'high', effectiveEffort: 'high' },
+    { text: '', toolCalls: [{ id: 'receive', name: 'accept_items_from_player', arguments: '{"player":"Alice","item_id":"minecraft:iron_chestplate","count":1,"radius":3}' }], continuation: { turn: 2 }, model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' },
+    { text: '我收好啦。', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+  )
+  const actions: AgentAction[] = []
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 4
+  }).run({ system: 'system', goal: '回家后收下 Alice 的胸甲', initialWorld: initial, requesterName: 'Alice' })
+  assert.equal(result.ok, true)
+  assert.deepEqual(actions, [
+    { type: 'return_home' },
+    { type: 'accept_items', itemId: 'minecraft:iron_chestplate', count: 1, target: 'Alice', radius: 3 }
+  ])
+})
+
 test('一个工具失败后不会继续旧计划，而是把失败交还模型重新规划', async () => {
   const requests: unknown[] = []
   const provider: LlmProvider = {
@@ -173,7 +192,8 @@ test('Chat Completions 仅保留最近工具协议并用紧凑账本承接旧步
       if (requests.length === 1) return {
         text: '', toolCalls: [{ id: 'craft-2', name: 'craft_recipe', arguments: '{"item_id":"minecraft:stick","count":8}' }],
         continuation: [
-          { role: 'system', content: 'system' }, { role: 'user', content: 'goal' },
+          { role: 'system', content: 'very long system '.repeat(2_000) },
+          { role: 'user', content: `目标：${JSON.stringify({ playerMessage: '做十个石镐', currentPlayer: { name: 'Alice', conversationSummary: 'old '.repeat(2_000) } })}\n发起玩家：Alice\n下面是起始观察。\n${'world '.repeat(2_000)}` },
           { role: 'assistant', reasoning_content: 'old reasoning', tool_calls: [{ id: 'old-1' }] },
           { role: 'tool', tool_call_id: 'old-1', content: '{"ok":true,"detail":"old large result"}' },
           { role: 'assistant', reasoning_content: 'current reasoning', tool_calls: [{ id: 'craft-2' }] }
@@ -196,6 +216,12 @@ test('Chat Completions 仅保留最近工具协议并用紧凑账本承接旧步
   assert.match(ledger, /craft_recipe.*verified_crafted_count=8/u)
   assert.doesNotMatch(ledger, /nearbyBlocks|nearbyHostiles|blockSurvey/u)
   assert.ok(compacted.length <= 4)
+  const compactSystem = compacted.find(message => message.role === 'system' && !message.content?.includes('执行进度账本'))?.content ?? ''
+  const compactUser = compacted.find(message => message.role === 'user')?.content ?? ''
+  assert.ok(compactSystem.length < 1_500)
+  assert.ok(compactUser.length < 1_500)
+  assert.match(compactUser, /做十个石镐/u)
+  assert.doesNotMatch(compactUser, /conversationSummary|world world/u)
 })
 
 test('DeepSeek 空工具响应只降级重试一次且计入 API 与 Token 预算', async () => {

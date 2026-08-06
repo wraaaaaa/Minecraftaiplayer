@@ -448,16 +448,17 @@ public final class WorldStateEncoder {
             if (!exposed) continue;
             String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
             String resource = naturalResourceCategory(state, id);
+            String interactable = interactableKind(id);
             boolean blockEntity = client.level.getBlockEntity(cursor) != null;
             boolean owned = OwnedBlockRegistry.isOwned(client, cursor, id);
             String classification = owned ? "bot_owned" : resource != null ? "natural_resource" : blockEntity || looksPlayerBuilt(id) ? "protected_likely" : "unclassified";
-            candidates.add(new NearbyBlock(cursor.immutable(), id, resource, classification, blockEntity,
+            candidates.add(new NearbyBlock(cursor.immutable(), id, resource, interactable, classification, blockEntity,
                 state.canBeReplaced(), !state.getFluidState().isEmpty(), state.getDestroySpeed(client.level, cursor), distanceSqr));
         }
         JsonArray output = new JsonArray();
         candidates.stream()
             .sorted(Comparator
-                .comparingInt((NearbyBlock block) -> "natural_resource".equals(block.classification()) ? 0 : "protected_likely".equals(block.classification()) ? 2 : 1)
+                .comparingInt((NearbyBlock block) -> block.interactable() != null ? 0 : "natural_resource".equals(block.classification()) ? 1 : "protected_likely".equals(block.classification()) ? 3 : 2)
                 .thenComparingDouble(NearbyBlock::distanceSqr))
             .limit(256)
             .forEach(block -> output.add(block.toJson()));
@@ -482,6 +483,16 @@ public final class WorldStateEncoder {
         String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
         if (Set.of("dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud").contains(path)) return "soil";
         if (Set.of("sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice").contains(path)) return "surface";
+        return null;
+    }
+
+    private static String interactableKind(String id) {
+        String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
+        if (path.endsWith("_button")) return "button";
+        if (path.equals("lever")) return "lever";
+        if (path.endsWith("_door")) return "door";
+        if (path.endsWith("_fence_gate")) return "gate";
+        if (path.endsWith("_portal") || path.equals("end_portal")) return "portal";
         return null;
     }
 
@@ -559,6 +570,7 @@ public final class WorldStateEncoder {
         BlockPos position,
         String blockId,
         String resourceCategory,
+        String interactable,
         String classification,
         boolean blockEntity,
         boolean replaceable,
@@ -570,6 +582,7 @@ public final class WorldStateEncoder {
             JsonObject output = WorldStateEncoder.position(position);
             output.addProperty("blockId", blockId);
             if (resourceCategory != null) output.addProperty("resourceCategory", resourceCategory);
+            if (interactable != null) output.addProperty("interactable", interactable);
             output.addProperty("classification", classification);
             output.addProperty("blockEntity", blockEntity);
             output.addProperty("replaceable", replaceable);

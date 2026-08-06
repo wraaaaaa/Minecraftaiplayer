@@ -17,6 +17,7 @@ import type { TaskDocument } from '../tasks/task-store.js'
 import type { DiagnosticDocument } from '../diagnostics/diagnostic-store.js'
 import type { ProgressionDocument } from '../progression/progression-store.js'
 import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prompts/prompt-workspace.js'
+import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -25,6 +26,7 @@ const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY'] as const
+const adminInbox = new AdminCommandInbox(path.join(projectRoot, 'data', 'admin-inbox'))
 
 type WebUiBotConfig = BotConfig
 
@@ -61,6 +63,15 @@ async function readJson<T>(primary: string, fallback?: string): Promise<T> {
   const selected = await exists(primary) ? primary : fallback
   if (!selected) throw new Error(`文件不存在：${primary}`)
   return parseJsonDocument<T>(await readFile(selected, 'utf8'))
+}
+
+async function readRuntimeJson<T>(primary: string): Promise<T> {
+  try { return await readJson<T>(primary) }
+  catch (primaryError) {
+    const backup = `${primary}.bak`
+    if (await exists(backup)) return readJson<T>(backup)
+    throw primaryError
+  }
 }
 
 async function writeJson(file: string, value: unknown): Promise<void> {
@@ -251,12 +262,12 @@ async function snapshot(): Promise<unknown> {
     readJson<BehaviorRules>(files.rules),
     readJson<ModsConfig>(files.mods, files.modsExample),
     readJson<{ sourceDirectory?: string; syncedAt?: string; files?: Array<{ name: string; size: number; sha256: string }> }>(files.modManifest).catch(() => ({ files: [] })),
-    readJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
-    readJson<MemoryDocument>(memoryFile).catch(() => null),
-    readJson<ExperienceDocument>(experienceFile).catch(() => null),
-    readJson<TaskDocument>(taskFile).catch(() => null),
-    readJson<ProgressionDocument>(progressionFile).catch(() => null),
-    readJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
+    readRuntimeJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
+    readRuntimeJson<MemoryDocument>(memoryFile).catch(() => null),
+    readRuntimeJson<ExperienceDocument>(experienceFile).catch(() => null),
+    readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
+    readRuntimeJson<ProgressionDocument>(progressionFile).catch(() => null),
+    readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
   return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
@@ -267,9 +278,9 @@ async function centralChatSnapshot(): Promise<unknown> {
   const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
   const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
   const [memory, tasks, diagnostics] = await Promise.all([
-    readJson<MemoryDocument>(memoryFile).catch(() => null),
-    readJson<TaskDocument>(taskFile).catch(() => null),
-    readJson<DiagnosticDocument>(files.diagnostics).catch(() => null)
+    readRuntimeJson<MemoryDocument>(memoryFile).catch(() => null),
+    readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
+    readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null)
   ])
   return { ok: true, memory, tasks, diagnostics }
 }
@@ -356,6 +367,12 @@ async function sendStorageDownload(response: ServerResponse, kind: 'memory' | 'e
 async function api(request: IncomingMessage, response: ServerResponse, pathname: string): Promise<void> {
   if (request.method === 'GET' && pathname === '/api/snapshot') return json(response, 200, await snapshot())
   if (request.method === 'GET' && pathname === '/api/diagnostics') return json(response, 200, await centralChatSnapshot())
+  if (request.method === 'POST' && pathname === '/api/admin/command') {
+    const payload = object(await body(request), 'adminCommand')
+    if (typeof payload.message !== 'string') throw new Error('message 必须是字符串')
+    const command = await adminInbox.submit(payload.message)
+    return json(response, 202, { ok: true, command: { id: command.id, status: command.status, createdAt: command.createdAt } })
+  }
   if (request.method === 'GET' && pathname === '/api/skin/image') return await sendSkinImage(response)
   if (request.method === 'GET' && pathname === '/api/memory/download') return await sendStorageDownload(response, 'memory')
   if (request.method === 'GET' && pathname === '/api/experience/download') return await sendStorageDownload(response, 'experience')

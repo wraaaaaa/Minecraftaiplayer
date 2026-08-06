@@ -144,6 +144,14 @@ export function validateConfig(config: BotConfig): void {
       if (config.autonomy[name] !== undefined && typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
     if (config.autonomy.longTermGoal !== undefined && config.autonomy.longTermGoal !== 'reach_end') throw new Error('autonomy.longTermGoal 当前只能是 reach_end')
+    if (config.autonomy.firstHome !== undefined) {
+      const home = config.autonomy.firstHome
+      if (typeof home.enabled !== 'boolean') throw new Error('autonomy.firstHome.enabled 必须是布尔值')
+      requireString(home.dimension, 'autonomy.firstHome.dimension')
+      if (!['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end'].includes(home.dimension)) throw new Error('autonomy.firstHome.dimension 无效')
+      for (const key of ['x', 'y', 'z'] as const) if (!Number.isFinite(home[key])) throw new Error(`autonomy.firstHome.${key} 必须是有限数字`)
+      if (!Number.isFinite(home.radius) || home.radius < 1 || home.radius > 64) throw new Error('autonomy.firstHome.radius 必须在 1-64 之间')
+    }
     // developmentZone is deliberately not validated. It is a removed legacy field,
     // ignored by autonomyConfig(), and must never block startup or grant permission.
   }

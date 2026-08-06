@@ -70,6 +70,15 @@ test('wraaaaaa 始终优先，owner 内按 urgency 后 FIFO', async () => {
   })
 })
 
+test('WebUI 管理指令高于 owner 和所有玩家任务', async () => {
+  await withStore(async store => {
+    await store.enqueue({ issuer: { name: 'wraaaaaa' }, request: 'owner 指令', urgency: 100 })
+    const admin = await store.enqueue({ issuer: { name: 'wraaaaaa', uuid: 'local-webui-admin' }, request: '管理指令', urgency: 100, source: 'webui_admin' })
+    await store.enqueue({ issuer: { name: 'Alice' }, request: '附近指令', urgency: 100 })
+    assert.equal((await store.takeNext(() => 0))?.id, admin.id)
+  })
+})
+
 test('普通玩家先选实时最近发令者，再在该玩家内部按 urgency 和 FIFO', async () => {
   await withStore(async (store) => {
     const aliceLow = await store.enqueue({ issuer: { name: 'Alice' }, request: 'Alice 低优先', urgency: 1 })

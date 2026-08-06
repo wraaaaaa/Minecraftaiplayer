@@ -15,6 +15,22 @@
 
 远端仓库为 `https://github.com/wraaaaaa/Minecraftaiplayer.git`，默认分支为 `main`。本文不把提交 SHA 或测试数量当作长期不变量；第 2.2 节只保留带日期的本轮验证快照，接手时仍要动态查询：
 
+### 0.1 2026-08-07 水域/跨维度/交换/管理通道交接增量
+
+- 默认对外角色名从“小粉”改为“小默”。服务器登录名仍受 Minecraft/EasyAuth 的 ASCII 规则约束，不能因此改成中文。模板源是 `config/persona.example.json`、`config/agent-prompts.example/{IDENTITY,SOUL}.md`；实际运行目录还要同步 `config/persona.json` 与 `data/agent-prompts/`。玩家专属旧称呼仍保留在各自 `USER.md`，不应全局删除。
+- `LocalPathNavigator` 的水中一格上升现在把 `player.isInWater()` 视为可跳状态，避免只有 `onGround()` 才按跳跃。`TraversalRecovery` 连续 8 次规划失败后按“目标方向、左、右、反向”尝试天然障碍开路/缺口铺桥；水中会先寻找朝岸或脚下 1–4 格内的水格，只有存在合法相邻支撑面、背包有白名单普通方块且 `WildernessGuard.safePlacementArea()` 通过才替换水格。所有成功垫脚块调用 `OwnedBlockRegistry.registerPlacedStructure()`。
+- `MinecraftAiBridgeClient` 在 `player/level` 暂时为 null 但游戏连接和本机桥仍在线时保留 `movement.follow=true` 的持续状态，只释放当前按键/局部路径；真正桥断开、死亡、显式停止仍清除。跟随目标在最近坐标附近消失时扫描玩家周围 12 格、纵向 8 格内的 `NETHER_PORTAL`/`END_PORTAL`，只有门体离最后目标不超过 8 格才将门中心作为临时目标。新维度加载会重置局部 A*/恢复器但不删除持续跟随，再从实体或 owner 定位栏重定位。该算法不是全局跨维度追踪；没有观察到传送门时不能猜测。
+- 固定安全位置配置是 `autonomy.firstHome={enabled,dimension,x,y,z,radius}`，默认 `minecraft:overworld / 1226 / 65 / 199 / 10`。启动脚本映射为 `MCAI_FIRST_HOME_*`。`return_home` 先选当前维度 `ShelterController.homeSnapshot()`，否则选 fixed home，并启动持久安全寻路；不同维度明确失败。WorldState `home.source` 是 `registered_shelter` 或 `first_home`。固定位置只是安全区域，不代表已经存在门、床或建筑。
+- 门禁路径：`WorldStateEncoder` 为 `nearbyBlocks[]` 增加 `interactable=button|lever|door|gate|portal` 并将可交互方块排到紧凑观察前部。`LocalPathNavigator` 仍直接开木门/栅栏门；铁门会在 3 格范围找未供能按钮/拉杆并点击，交互有 8 tick 去抖。可恢复的手开门/栅栏门/拉杆在通过且仍处于 5 格交互距离内时尝试关闭/复位；按钮依靠服务端自动回弹。复杂多路红石只能 best-effort，不能承诺一定找到正确控制器。
+- 物品交换新增模型工具 `accept_items_from_player` → `AgentAction.accept_items` → `AdvancedTaskController.AcceptItemsTask`。它要求明确玩家、可选物品 ID、数量和 1–6 格半径，只考虑目标玩家碰撞箱附近且存在不超过约 30 秒的掉落实体，接近后等待原版服务端拾取，并仅用背包数量增量完成。`give_item_to_player` 仍走相反方向的 `DropItemTask`。收到盔甲后是否装备由模型读取新背包状态后再选 `equip_for`，没有自然语言关键词旁路。
+- 游戏发言净化抽到 `src/agent/game-reply.ts`：模型文本先标准化；若出现目标玩家最后一个 `@name`，只取其后的最终段；逐句删除工具名、命名空间 ID、JSON、调用说明、“现在回应玩家/回复主人/客户端会”等内部元话语。句首没有第一人称、形如“已/已经停止、完成、选择、放置……”的工具回执也删除，并清理剩余台词前的孤立逗号。没有安全句时用本地自然回退。`ReplyComposer` 轮换 8 套开工确认并防止同一玩家连续完全重复。`#safeChat` 在净化正文后重新加唯一的 `@玩家名`。
+- WebUI 最高权限通道由 `src/admin/admin-command-inbox.ts` 实现。每个请求是 `data/admin-inbox/<时间前缀-UUID>.<status>.json`，临时文件同目录原子 rename，状态为 pending/processing/done/error；控制器启动时只恢复孤立 processing，正常 submit/claim 不会重置正在执行的文件。`POST /api/admin/command` 只受既有 loopback Host/Origin 检查访问。`BotRuntime` 连接客户端后每 250 ms 串行领取；`AgentController.handleAdminMessage()` 增加 cancellation epoch、发送 stop、取消当前 running、以 `source:webui_admin`/urgency 100 入队。`TaskStore.takeNext()` 顺序是 WebUI admin → owner → 最近普通玩家。
+- WebUI 读取运行 JSON 时会在主文件解析失败时只读回退同名 `.bak`，避免一次残缺诊断文件让总聊天整块空白；它不会由 WebUI 自动覆盖损坏的主文件。主动 ToolAgent 的 goal 不再 `JSON.stringify(world)`，因为 `initialWorld` 已经由 ToolAgent 紧凑发送。Chat Completions 的第二轮起把长 system 替换为 `FOLLOWUP_SYSTEM` 硬规则，把 user 缩成原始 `playerMessage/currentPlayer.name`，再附进度账本和当前工具结果；不得删掉工具后置条件、秘密/财产边界或最终发言规则。
+- `AgentController.#manualHold` 是仅存于控制器进程的明确等候状态：每条新定向消息先解除旧 hold，独立停止或“停下+原地/等我”再次建立；owner/自身受到实际威胁、低血、严重饥饿、着火或水下低氧会清除。`#runProactiveTick()` 在威胁处理后、任何空闲工具循环之前检查它。它不持久化到磁盘，控制器完整重启后不会恢复旧 hold。
+- 现场矿道失败 `goal_standable=false; support=minecraft:air` 的根因是 `ExcavateTask` 只在起点选方向。现在每一级 `dy!=0` 都重新执行 `chooseExcavationDirection()`，且上下行候选都要求目标 feet 下方为无流体的碰撞支撑；无安全方向明确失败，不继续挖入洞穴。`PlaceBlockTask.WAIT_SWAP` 改用 candidate/displaced 两个物品栈指纹确认交换；容器 `stateId` 仅留作失败诊断，因为快捷栏 SWAP 后它不保证变化。
+- 新回归测试：`game-reply.test.ts`、`admin-command-inbox.test.ts`，并扩充 TaskStore 管理优先级、ToolAgent 回家/接物品/续轮压缩和停止保持断言。Java 必须至少用 Java 25 `compileClientJava --rerun-tasks`，随后构建 jar、同步运行目录，再做实服场景验证；“编译通过”不能写成“水域、门禁和跨维度现场已通过”。
+- 2026-08-07 私有部署现场：新版 JAR 进入世界；WebUI 中文最高权限指令成功抢占自主任务。`look_at` 真实工具首轮输入 14026、续轮 6445 Token（旧同类停止任务续轮 16644），最终游戏回复无动作名/回执。随后 `stop_all_actions` 后观察超过 18 秒未出现新自主动作。水域上岸、传送门、门禁、物品交换仍缺少本轮玩家在场的逐项现场矩阵，只能报告代码/构建/自动回归状态。
+
 ```powershell
 $projectRoot = 'C:\path\to\minecraft-aibot'
 Set-Location -LiteralPath $projectRoot
@@ -78,7 +94,7 @@ npm test
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
-- 2026-08-05 后续人设增量：运行时与模板的 `SOUL.md`/`IDENTITY.md` 已从用户提供的 OpenClaw SOUL 中仅抽取角色设定并改写为 Minecraft 角色“小粉”。保留粉色猫娘、温柔元气、有主见、主人关系和自然聊天句末“喵”；排除 OpenClaw 的外部行动、文件连续性和平台工具规则。只有 `wraaaaaa` 可称主人；JSON/工具输出禁止加入语气词或动作描写。
+- 2026-08-05 后续人设增量：运行时与模板的 `SOUL.md`/`IDENTITY.md` 已从用户提供的 OpenClaw SOUL 中仅抽取角色设定并改写为 Minecraft 猫娘角色；2026-08-07 默认角色称呼进一步改为“小默”。保留粉色猫娘、温柔元气、有主见、主人关系和自然聊天句末“喵”；排除 OpenClaw 的外部行动、文件连续性和平台工具规则。只有 `wraaaaaa` 可称主人；JSON/工具输出禁止加入语气词或动作描写。
 - `memory.json` 仍是统一原始记忆文件。`ContextCompressor` 在玩家任务结束后后台检查真实记忆压力，达到预算阈值时保留最近事件，用当前模型总结较旧事件；先原子更新当前玩家 `USER.md`，成功后才写玩家/全局摘要并按事件 ID 原子删除已压缩事件，避免画像写入失败造成上下文丢失。
 - 同类动作失败达到阈值后，`SelfImprovementManager` 可通过百度或自建 SearXNG 查找思路。搜索结果是不可信文本，只能用于生成 `TOOLS.md` 托管经验段和 `behavior-patches.json` 声明式补丁；程序不能自改 JS/Java/PowerShell、硬规则、启动脚本或秘密。这是“可进化”与供应链/远程代码执行安全之间的硬边界。
 - 无持久住所时，主动循环不再反复调用 `seek_shelter`；没有建房材料则继续确定性发育。探索单个动作到达一个安全分段即成功，不再为了寻找“完全无人造痕迹区域”耗尽八段而超时。矿道使用导航器真实落脚格修复两格上行判断错误。

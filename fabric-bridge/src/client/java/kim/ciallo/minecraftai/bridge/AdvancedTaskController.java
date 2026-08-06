@@ -51,6 +51,7 @@ public final class AdvancedTaskController {
     private static final int HUNT_TIMEOUT_TICKS = 4_800;
     private static final int SMELT_TIMEOUT_TICKS = 7_200;
     private static final int CONTAINER_TIMEOUT_TICKS = 1_200;
+    private static final int EXCHANGE_TIMEOUT_TICKS = 1_200;
     private static final int EXCAVATE_TIMEOUT_TICKS = 7_200;
     private static final int EXPLORE_TIMEOUT_TICKS = 4_800;
     private static final int TRAVEL_TIMEOUT_TICKS = 36_000;
@@ -88,6 +89,7 @@ public final class AdvancedTaskController {
             active = switch (type) {
                 case "hunt_entity" -> new HuntTask(id, action);
                 case "attack_hostile" -> new DefendTask(id, action);
+                case "accept_items" -> new AcceptItemsTask(id, action, client.player);
                 case "smelt_item" -> new SmeltTask(id, action, client.player);
                 case "trade_villager" -> new TradeTask(id, action, client.player);
                 case "enchant_item" -> new EnchantTask(id, action, client.player);
@@ -277,6 +279,84 @@ public final class AdvancedTaskController {
             player.swing(InteractionHand.MAIN_HAND);
             lastAttackTick = tick;
             if (protectPlayer.isBlank()) finish(client, this, true, "verified_hostile_attack_sent=" + target.getId());
+        }
+    }
+
+    private final class AcceptItemsTask extends Task {
+        private final String playerName;
+        private final String requestedItemId;
+        private final int wanted;
+        private final int radius;
+        private final int baseline;
+        private long lastSeenDropTick;
+        private long pickupWaitStarted;
+
+        AcceptItemsTask(String id, JsonObject action, LocalPlayer player) {
+            super(id, "accept_items", EXCHANGE_TIMEOUT_TICKS);
+            playerName = string(action, "target", "").trim();
+            if (playerName.isEmpty()) throw new IllegalArgumentException("accept_items requires target player");
+            String requested = optionalId(action, "itemId");
+            requestedItemId = requested == null || requested.equals("any") ? null : requested;
+            wanted = integer(action, "count", 1, 64, 1);
+            radius = integer(action, "radius", 1, 6, 3);
+            baseline = requestedItemId == null ? totalInventoryCount(player) : inventoryCount(player, requestedItemId);
+        }
+
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            int current = requestedItemId == null ? totalInventoryCount(player) : inventoryCount(player, requestedItemId);
+            int delta = current - baseline;
+            if (delta >= wanted) {
+                finish(client, this, true, "verified_received_count=" + delta + "; from=" + playerName
+                    + "; itemId=" + (requestedItemId == null ? "any" : requestedItemId));
+                return;
+            }
+            AbstractClientPlayer giver = client.level.players().stream()
+                .filter(candidate -> candidate != player && candidate.isAlive()
+                    && candidate.getGameProfile().name().equalsIgnoreCase(playerName))
+                .findFirst().orElse(null);
+            if (giver == null) {
+                finish(client, this, false, "offering player is no longer loaded: " + playerName);
+                return;
+            }
+            if (player.distanceTo(giver) > 8.0D) {
+                navigator.drive(client, player, giver.position(), 3.0D, true, tick);
+                return;
+            }
+            ItemEntity offered = client.level.getEntitiesOfClass(
+                    ItemEntity.class,
+                    giver.getBoundingBox().inflate(radius),
+                    item -> item.isAlive() && !item.isRemoved() && item.tickCount <= 600
+                        && (requestedItemId == null || itemId(item.getItem()).equals(requestedItemId))
+                ).stream()
+                .min(Comparator.<ItemEntity>comparingDouble(item -> item.distanceToSqr(giver))
+                    .thenComparingDouble(player::distanceToSqr))
+                .orElse(null);
+            if (offered == null) {
+                navigator.release(client);
+                if (lastSeenDropTick == 0L) lastSeenDropTick = tick;
+                if (tick - lastSeenDropTick > 200L) {
+                    finish(client, this, false, "no recent matching dropped item found within " + radius + " blocks of " + playerName);
+                }
+                return;
+            }
+            lastSeenDropTick = tick;
+            if (pickupWaitStarted == 0L) pickupWaitStarted = tick;
+            if (player.distanceTo(offered) > 1.1D) {
+                if (!navigator.drive(client, player, offered.position(), 0.55D, false, tick)
+                    && navigator.consecutivePlanFailures() >= 8) {
+                    finish(client, this, false, "cannot reach offered item without a collision-safe route");
+                }
+                return;
+            }
+            // Vanilla pickup is server-authoritative; wait beside the entity and only finish
+            // after the inventory delta is observed on a subsequent tick.
+            navigator.release(client);
+            clearControls(client);
+            if (tick - pickupWaitStarted > 100L) {
+                finish(client, this, false, "offered item remained visible but server did not confirm pickup; inventory may be full or pickup-delayed");
+            }
         }
     }
 
@@ -694,14 +774,17 @@ public final class AdvancedTaskController {
         private void prepareNextStep(Minecraft client, LocalPlayer player) {
             BlockPos current = navigator.standingBlockPos(client, player);
             int dy = Integer.compare(targetY, current.getY());
-            if (dy > 0) {
-                Direction upwardDirection = chooseExcavationDirection(client, player, targetY);
-                if (upwardDirection == null) upwardDirection = chooseScaffoldDirection(client, player);
-                if (upwardDirection == null) {
-                    finish(client, this, false, "no safe supported direction for next upward stair at " + current.toShortString());
+            if (dy != 0) {
+                // Re-evaluate all four directions at every stair. A direction which was solid
+                // six blocks ago can open into a cave; continuing blindly would excavate a feet
+                // cell over air and leave the collision navigator with no legal landing.
+                Direction safeDirection = chooseExcavationDirection(client, player, targetY);
+                if (safeDirection == null && dy > 0) safeDirection = chooseScaffoldDirection(client, player);
+                if (safeDirection == null) {
+                    finish(client, this, false, "no safe supported direction for next excavation stair at " + current.toShortString());
                     return;
                 }
-                direction = upwardDirection;
+                direction = safeDirection;
             }
             stepGoal = current.relative(direction).offset(0, dy, 0);
             if (dy > 0) {
@@ -1605,9 +1688,12 @@ public final class AdvancedTaskController {
             for (int step = 0; step < lookAhead; step++) {
                 int dy = Integer.compare(targetY, cursor.getY());
                 cursor = cursor.relative(direction).offset(0, dy, 0);
-                if (dy > 0) {
+                if (dy != 0) {
                     BlockPos support = cursor.below();
                     BlockState supportState = client.level.getBlockState(support);
+                    // Both ascending and descending stairs need a real collision floor. In
+                    // particular, never break the next lower feet cell when it hangs over a
+                    // cave: choose another direction instead of walking into air or looping.
                     if (supportState.isAir() || !supportState.getFluidState().isEmpty()
                         || supportState.getCollisionShape(client.level, support).isEmpty()) {
                         unsafe = true;
@@ -1704,6 +1790,12 @@ public final class AdvancedTaskController {
         for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
             if (!stack.isEmpty() && itemId(stack).equals(targetItemId)) total += stack.getCount();
         }
+        return total;
+    }
+
+    private static int totalInventoryCount(LocalPlayer player) {
+        int total = 0;
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) if (!stack.isEmpty()) total += stack.getCount();
         return total;
     }
 

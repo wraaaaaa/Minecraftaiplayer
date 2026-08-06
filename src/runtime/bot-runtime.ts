@@ -18,6 +18,7 @@ import { agentWorkspaceConfig } from '../config/types.js'
 import { PromptWorkspace } from '../prompts/prompt-workspace.js'
 import { ContextCompressor } from '../memory/context-compressor.js'
 import { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
+import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -44,10 +45,11 @@ export class BotRuntime {
       playerProfilesDirectory: workspaceConfig.playerProfilesDirectory
     })
     const status = new RuntimeStatusStore()
+    const adminInbox = new AdminCommandInbox('data/admin-inbox')
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
     const contextCompressor = new ContextCompressor({ config: workspaceConfig, provider, memory, workspace: promptWorkspace, secrets })
     const selfImprovement = new SelfImprovementManager({ config: workspaceConfig.selfImprovement, provider, workspace: promptWorkspace, secrets })
-    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize()])
+    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize(), adminInbox.initialize()])
     const existingMemory = await memory.load()
     await Promise.all(Object.values(existingMemory.players).map(player => promptWorkspace.ensurePlayerProfile(
       { name: player.currentName, ...(player.uuid ? { uuid: player.uuid } : {}) },
@@ -70,7 +72,29 @@ export class BotRuntime {
       try {
         await client.connect()
         this.#logger.info('运行时已就绪，后台等待玩家消息')
-        await client.waitForEnd()
+        let adminPolling = false
+        const pollAdmin = async (): Promise<void> => {
+          if (adminPolling || this.#stopping) return
+          adminPolling = true
+          try {
+            while (true) {
+              const command = await adminInbox.claimNext()
+              if (!command) break
+              try {
+                await controller.handleAdminMessage(command.message, client.snapshot())
+                await adminInbox.finish(command, true, 'accepted_and_processed')
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error)
+                await adminInbox.finish(command, false, detail)
+                this.#logger.error('WebUI 管理指令执行失败', { commandId: command.id, error: detail })
+              }
+            }
+          } finally { adminPolling = false }
+        }
+        const adminTimer = setInterval(() => { void pollAdmin() }, 250)
+        adminTimer.unref()
+        void pollAdmin()
+        try { await client.waitForEnd() } finally { clearInterval(adminTimer) }
       } catch (error) {
         this.#logger.error('连接尝试失败', error)
       }

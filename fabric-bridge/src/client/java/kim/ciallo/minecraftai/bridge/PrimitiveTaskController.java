@@ -1198,7 +1198,6 @@ public final class PrimitiveTaskController {
 
             if (phase == Phase.WAIT_SWAP) {
                 if (tick - phaseStartedTick >= 2L
-                    && player.inventoryMenu.getStateId() != swapStateId
                     && candidateFingerprint.matches(player.getInventory().getItem(hotbarSlot))
                     && displacedFingerprint.matches(player.getInventory().getItem(sourceSlot))) {
                     selectHotbar(player, hotbarSlot);
@@ -1207,7 +1206,9 @@ public final class PrimitiveTaskController {
                     return;
                 }
                 if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
-                    finish(client, this, false, "server did not confirm placement material swap");
+                    finish(client, this, false, "server did not confirm placement material swap; state_id="
+                        + swapStateId + "->" + player.inventoryMenu.getStateId()
+                        + "; source=" + sourceSlot + "; hotbar=" + hotbarSlot);
                 }
                 return;
             }

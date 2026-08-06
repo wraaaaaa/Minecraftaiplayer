@@ -12,6 +12,7 @@ import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.tags.FluidTags;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.Vec3;
 
@@ -34,6 +35,7 @@ final class TraversalRecovery {
     private String placingBlockId;
     private long placingStarted;
     private long lastPlaceAttempt;
+    private boolean placingInWater;
     private String status = "idle";
 
     boolean active() { return breaking != null || placing != null; }
@@ -44,6 +46,7 @@ final class TraversalRecovery {
         breaking = null;
         placing = null;
         placingBlockId = null;
+        placingInWater = false;
         breakStarted = false;
         status = "idle";
     }
@@ -59,42 +62,46 @@ final class TraversalRecovery {
         if (planFailures < 8) return false;
 
         Direction direction = horizontalDirection(player.position(), goal);
-        BlockPos ahead = player.blockPosition().relative(direction);
-        for (BlockPos candidate : List.of(ahead, ahead.above())) {
-            BlockState state = client.level.getBlockState(candidate);
-            if (state.isAir() || state.canBeReplaced()) continue;
-            if (state.getDestroySpeed(client.level, candidate) < 0.0F
-                || !WildernessGuard.safeNaturalBreak(client, candidate)
-                || dangerousFluidAdjacent(client, candidate)
-                || player.distanceToSqr(Vec3.atCenterOf(candidate)) > 25.0D) continue;
-            breaking = candidate.immutable();
-            breakingStarted = tick;
-            breakStarted = false;
-            status = "preparing_natural_obstacle_break";
-            return continueBreaking(client, player, tick);
+        List<Direction> directions = orderedDirections(direction);
+
+        if (player.isInWater()) {
+            BlockPos waterStep = waterEgressStep(client, player, directions);
+            if (waterStep != null && beginPlacement(player, waterStep, tick, true)) {
+                status = "preparing_water_egress_step";
+                return continuePlacing(client, player, tick);
+            }
         }
 
-        BlockPos support = ahead.below();
-        BlockState supportState = client.level.getBlockState(support);
-        BlockState feetState = client.level.getBlockState(ahead);
-        BlockState headState = client.level.getBlockState(ahead.above());
-        boolean gap = supportState.canBeReplaced() && supportState.getFluidState().isEmpty();
-        boolean bodyClear = feetState.getCollisionShape(client.level, ahead).isEmpty()
-            && headState.getCollisionShape(client.level, ahead.above()).isEmpty()
-            && feetState.getFluidState().isEmpty() && headState.getFluidState().isEmpty();
-        if (gap && bodyClear && player.distanceToSqr(Vec3.atCenterOf(support)) <= 25.0D
-            && WildernessGuard.safePlacementArea(client, support, 3)) {
-            BridgeChoice choice = bestBridgeChoice(player);
-            if (choice == null) {
-                status = "bridge_material_unavailable";
-                return false;
+        for (Direction candidateDirection : directions) {
+            BlockPos ahead = player.blockPosition().relative(candidateDirection);
+            for (BlockPos candidate : List.of(ahead, ahead.above())) {
+                BlockState state = client.level.getBlockState(candidate);
+                if (state.isAir() || state.canBeReplaced()) continue;
+                if (state.getDestroySpeed(client.level, candidate) < 0.0F
+                    || !WildernessGuard.safeNaturalBreak(client, candidate)
+                    || dangerousFluidAdjacent(client, candidate)
+                    || player.distanceToSqr(Vec3.atCenterOf(candidate)) > 25.0D) continue;
+                breaking = candidate.immutable();
+                breakingStarted = tick;
+                breakStarted = false;
+                status = "preparing_natural_obstacle_break_" + candidateDirection.getName();
+                return continueBreaking(client, player, tick);
             }
-            placing = support.immutable();
-            placingBlockId = choice.blockId();
-            placingStarted = tick;
-            lastPlaceAttempt = Long.MIN_VALUE;
-            status = "preparing_owned_bridge";
-            return continuePlacing(client, player, tick);
+
+            BlockPos support = ahead.below();
+            BlockState supportState = client.level.getBlockState(support);
+            BlockState feetState = client.level.getBlockState(ahead);
+            BlockState headState = client.level.getBlockState(ahead.above());
+            boolean gap = supportState.canBeReplaced() && supportState.getFluidState().isEmpty();
+            boolean bodyClear = feetState.getCollisionShape(client.level, ahead).isEmpty()
+                && headState.getCollisionShape(client.level, ahead.above()).isEmpty()
+                && feetState.getFluidState().isEmpty() && headState.getFluidState().isEmpty();
+            if (gap && bodyClear && player.distanceToSqr(Vec3.atCenterOf(support)) <= 25.0D
+                && WildernessGuard.safePlacementArea(client, support, 3)
+                && beginPlacement(player, support, tick, false)) {
+                status = "preparing_owned_bridge_" + candidateDirection.getName();
+                return continuePlacing(client, player, tick);
+            }
         }
         status = "no_safe_terrain_recovery";
         return false;
@@ -136,10 +143,12 @@ final class TraversalRecovery {
             OwnedBlockRegistry.registerPlacedStructure(client, placing, observedId);
             placing = null;
             placingBlockId = null;
+            placingInWater = false;
             status = "owned_bridge_confirmed";
             return true;
         }
-        if (!observed.canBeReplaced() || !observed.getFluidState().isEmpty()
+        boolean allowedFluid = placingInWater && observed.getFluidState().is(FluidTags.WATER);
+        if (!observed.canBeReplaced() || (!observed.getFluidState().isEmpty() && !allowedFluid)
             || !WildernessGuard.safePlacementArea(client, placing, 3) || tick - placingStarted > 100L) {
             reset(client);
             status = "bridge_recovery_cancelled_by_safety";
@@ -163,8 +172,52 @@ final class TraversalRecovery {
             }
             lastPlaceAttempt = tick;
         }
-        status = "placing_owned_bridge";
+        status = placingInWater ? "placing_owned_water_egress_step" : "placing_owned_bridge";
         return true;
+    }
+
+    private boolean beginPlacement(LocalPlayer player, BlockPos target, long tick, boolean water) {
+        BridgeChoice choice = bestBridgeChoice(player);
+        if (choice == null) { status = "bridge_material_unavailable"; return false; }
+        placing = target.immutable();
+        placingBlockId = choice.blockId();
+        placingStarted = tick;
+        lastPlaceAttempt = Long.MIN_VALUE;
+        placingInWater = water;
+        return true;
+    }
+
+    private static BlockPos waterEgressStep(Minecraft client, LocalPlayer player, List<Direction> directions) {
+        BlockPos feet = player.blockPosition();
+        for (Direction direction : directions) {
+            BlockPos bankSupport = feet.relative(direction).below();
+            if (replaceableWater(client, bankSupport) && hasLegalSupportFace(client, bankSupport)
+                && player.distanceToSqr(Vec3.atCenterOf(bankSupport)) <= 25.0D
+                && WildernessGuard.safePlacementArea(client, bankSupport, 3)) return bankSupport.immutable();
+        }
+        for (int depth = 1; depth <= 4; depth++) {
+            BlockPos below = feet.below(depth);
+            if (replaceableWater(client, below) && hasLegalSupportFace(client, below)
+                && player.distanceToSqr(Vec3.atCenterOf(below)) <= 25.0D
+                && WildernessGuard.safePlacementArea(client, below, 3)) return below.immutable();
+        }
+        return null;
+    }
+
+    private static boolean replaceableWater(Minecraft client, BlockPos position) {
+        if (!client.level.isLoaded(position)) return false;
+        BlockState state = client.level.getBlockState(position);
+        return state.canBeReplaced() && state.getFluidState().is(FluidTags.WATER);
+    }
+
+    private static boolean hasLegalSupportFace(Minecraft client, BlockPos target) {
+        for (Direction face : Direction.values()) {
+            BlockPos support = target.relative(face);
+            if (!client.level.isLoaded(support)) continue;
+            BlockState state = client.level.getBlockState(support);
+            if (!state.canBeReplaced() && !state.getCollisionShape(client.level, support).isEmpty()) return true;
+        }
+        return false;
     }
 
     private static BridgeChoice bestBridgeChoice(LocalPlayer player) {
@@ -223,6 +276,10 @@ final class TraversalRecovery {
         double dz = to.z - from.z;
         if (Math.abs(dx) >= Math.abs(dz)) return dx >= 0.0D ? Direction.EAST : Direction.WEST;
         return dz >= 0.0D ? Direction.SOUTH : Direction.NORTH;
+    }
+
+    private static List<Direction> orderedDirections(Direction primary) {
+        return List.of(primary, primary.getClockWise(), primary.getCounterClockWise(), primary.getOpposite());
     }
 
     private static void lookAt(LocalPlayer player, Vec3 target) {

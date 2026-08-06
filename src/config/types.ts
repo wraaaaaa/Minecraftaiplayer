@@ -114,6 +114,14 @@ export interface BotConfig {
     allowVerifiedWilderness?: boolean
     allowTeleportCommand?: boolean
     longTermGoal?: 'reach_end'
+    firstHome?: {
+      enabled: boolean
+      dimension: string
+      x: number
+      y: number
+      z: number
+      radius: number
+    }
     developmentZone?: {
       enabled: boolean
       dimension: string
@@ -162,6 +170,14 @@ export interface AutonomyConfig {
   allowVerifiedWilderness: boolean
   allowTeleportCommand: boolean
   longTermGoal: 'reach_end'
+  firstHome: {
+    enabled: boolean
+    dimension: string
+    x: number
+    y: number
+    z: number
+    radius: number
+  }
   /** @deprecated 仅为读取旧配置保留；运行时不再使用手工坐标范围。 */
   developmentZone?: {
     enabled: boolean
@@ -201,14 +217,15 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
-  longTermGoal: 'reach_end'
+  longTermGoal: 'reach_end',
+  firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 
 export function autonomyConfig(config: BotConfig): AutonomyConfig {
   // 手工坐标框已废弃。旧 bot.json 即使仍保存 developmentZone，也不会再限制或授权行为。
   const configured = { ...config.autonomy }
   delete configured.developmentZone
-  return { ...DEFAULT_AUTONOMY_CONFIG, ...configured }
+  return { ...DEFAULT_AUTONOMY_CONFIG, ...configured, firstHome: { ...DEFAULT_AUTONOMY_CONFIG.firstHome, ...configured.firstHome } }
 }
 
 export interface AgentWorkspaceConfig {

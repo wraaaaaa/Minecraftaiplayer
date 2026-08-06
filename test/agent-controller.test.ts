@@ -352,6 +352,10 @@ test('明确停止指令绕过模型并立即取消正在思考的任务', async
   releaseProvider()
   await original
 
+  // A confirmed stop is persistent: the next idle heartbeat must not silently restart
+  // local development. A later addressed player command releases this hold.
+  await controller.proactiveTick({ ...world, nearbyPlayers: [], environment: { isNight: false, safeToIdle: true } })
+
   assert.equal(providerCalls, 1)
   assert.deepEqual(actions, [{ type: 'stop' }])
   const saved = await tasks.load()

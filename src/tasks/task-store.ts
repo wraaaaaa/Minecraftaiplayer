@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { AtomicJsonFile } from '../core/atomic-json-file.js'
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed'
+export type TaskSource = 'player' | 'webui_admin'
 
 export interface TaskIssuer {
   name: string
@@ -12,6 +13,7 @@ export interface TaskRecord {
   id: string
   issuer: TaskIssuer
   request: string
+  source?: TaskSource
   urgency: number
   status: TaskStatus
   sequence: number
@@ -38,6 +40,7 @@ export interface NewTask {
   issuer: TaskIssuer
   request: string
   urgency?: number
+  source?: TaskSource
 }
 
 export type PlayerDistanceResolver = (issuer: Readonly<TaskIssuer>) => number | undefined
@@ -114,6 +117,7 @@ export class TaskStore {
         id: randomUUID(),
         issuer: { name, ...(uuid ? { uuid } : {}) },
         request,
+        source: input.source ?? 'player',
         urgency,
         status: 'queued',
         sequence: document.nextSequence,
@@ -140,8 +144,9 @@ export class TaskStore {
       const queued = document.tasks.filter((task) => task.status === 'queued')
       if (queued.length === 0) return null
 
-      const owners = queued.filter((task) => this.#isOwner(task.issuer)).sort(compareWithinIssuer)
-      const selected = owners[0] ?? this.#selectNearestPlayerTask(queued, resolveDistance)
+      const administrators = queued.filter(task => task.source === 'webui_admin').sort(compareWithinIssuer)
+      const owners = queued.filter((task) => task.source !== 'webui_admin' && this.#isOwner(task.issuer)).sort(compareWithinIssuer)
+      const selected = administrators[0] ?? owners[0] ?? this.#selectNearestPlayerTask(queued, resolveDistance)
       if (!selected) return null
       this.#transitionToRunning(selected)
       document.updatedAt = selected.updatedAt
@@ -255,7 +260,7 @@ export class TaskStore {
   #selectNearestPlayerTask(queued: TaskRecord[], resolveDistance: PlayerDistanceResolver): TaskRecord | undefined {
     const groups = new Map<string, TaskRecord[]>()
     for (const task of queued) {
-      if (this.#isOwner(task.issuer)) continue
+      if (task.source === 'webui_admin' || this.#isOwner(task.issuer)) continue
       const key = issuerKey(task.issuer)
       const group = groups.get(key)
       if (group) group.push(task)

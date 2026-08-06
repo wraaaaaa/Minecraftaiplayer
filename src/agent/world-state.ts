@@ -38,6 +38,7 @@ export interface WorldState {
     z: number
     distance: number
     resourceCategory?: string
+    interactable?: 'button' | 'lever' | 'door' | 'gate' | 'portal'
     classification: 'natural_resource' | 'protected_likely' | 'bot_owned' | 'unclassified'
     blockEntity: boolean
     replaceable: boolean
@@ -100,6 +101,6 @@ export interface WorldState {
   }
   activePrimitive?: string
   navigationStatus?: string
-  home?: { dimension: string; x: number; y: number; z: number; doorX?: number; doorY?: number; doorZ?: number; persisted?: boolean }
+  home?: { dimension: string; x: number; y: number; z: number; radius?: number; source?: 'first_home' | 'registered_shelter'; doorX?: number; doorY?: number; doorZ?: number; persisted?: boolean }
   currentTask?: string
 }

@@ -77,6 +77,11 @@
           <div id="centralChatTimeline" class="central-chat-timeline" aria-live="polite"><p class="central-chat-empty">暂无对话或诊断记录</p></div>
           <aside class="central-task-panel"><h3>当前任务队列</h3><div id="centralTaskSummary" class="central-task-summary">暂无任务</div><h3>模型消耗</h3><div id="centralCostSummary" class="central-task-summary">暂无模型轮次</div><p class="muted">失败详情只在本机保存；API Key、登录密码、令牌、服务器地址和项目绝对路径会在写入前脱敏。</p></aside>
         </div>
+        <form id="adminCommandForm" class="admin-command-form">
+          <label for="adminCommandInput"><strong>最高权限管理指令</strong><small>仅本机可提交。会立即停止当前任务并交给同一 Agent 工具闭环执行；详细步骤仍只显示在总聊天。</small></label>
+          <textarea id="adminCommandInput" class="ui-only" rows="2" maxlength="1000" placeholder="例如：回家；收下我丢在你旁边的铁胸甲并装备；停止当前任务"></textarea>
+          <button id="sendAdminCommandButton" class="button primary" type="submit">发送最高权限指令</button>
+        </form>
       </section>
 
       <section id="server" class="panel">
@@ -181,6 +186,13 @@
               <label>低于此饱食度进食<input id="eatBelowFood" type="number" min="1" max="20"></label>
               <label>敌对生物扫描半径（格）<input id="hostileScanRadius" type="number" min="1" max="32"></label>
               <label class="span-two">自主发展与玩家最小距离（格）<input id="wildernessMinPlayerDistance" type="number" min="16" max="512"><small>只是最低距离门槛；可信区域、财产归属和行为安全层仍会再次检查。</small></label>
+            </div>
+            <h3>第一个家 / 安全位置</h3>
+            <div class="toggle-row"><label class="switch"><input id="firstHomeEnabled" type="checkbox"><span></span>启用固定第一个家</label></div>
+            <div class="form-grid three">
+              <label>维度<select id="firstHomeDimension"><option value="minecraft:overworld">主世界</option><option value="minecraft:the_nether">下界</option><option value="minecraft:the_end">末地</option></select></label>
+              <label>X<input id="firstHomeX" type="number" step="1"></label><label>Y<input id="firstHomeY" type="number" step="1"></label><label>Z<input id="firstHomeZ" type="number" step="1"></label>
+              <label>安全半径<input id="firstHomeRadius" type="number" min="1" max="64" step="1"><small>默认中心 1226,65,199，半径 10 格。</small></label>
             </div>
           </article>
           <article class="autonomy-card autonomy-capabilities">

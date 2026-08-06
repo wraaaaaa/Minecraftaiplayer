@@ -27,7 +27,8 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
-  longTermGoal: 'reach_end'
+  longTermGoal: 'reach_end',
+  firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 
 const WORKSPACE_DEFAULTS = Object.freeze({
@@ -264,6 +265,8 @@ function populate(snapshot) {
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
   for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand']) setChecked(id, autonomy[id])
+  const firstHome = { ...AUTONOMY_DEFAULTS.firstHome, ...(autonomy.firstHome || {}) }
+  setChecked('firstHomeEnabled', firstHome.enabled); set('firstHomeDimension', firstHome.dimension); setNumber('firstHomeX', firstHome.x); setNumber('firstHomeY', firstHome.y); setNumber('firstHomeZ', firstHome.z); setNumber('firstHomeRadius', firstHome.radius)
   const workspace = { ...WORKSPACE_DEFAULTS, ...(c.agentWorkspace || {}), selfImprovement: { ...WORKSPACE_DEFAULTS.selfImprovement, ...(c.agentWorkspace?.selfImprovement || {}) } }
   set('promptDirectory', workspace.promptDirectory); set('playerProfilesDirectory', workspace.playerProfilesDirectory); setNumber('contextBudgetChars', workspace.contextBudgetChars); setNumber('compressionTriggerRatio', workspace.compressionTriggerRatio); setNumber('retainRecentEvents', workspace.retainRecentEvents)
   setChecked('selfImprovementEnabled', workspace.selfImprovement.enabled); setChecked('allowPromptEdits', workspace.selfImprovement.allowPromptEdits); setChecked('allowBehaviorPatches', workspace.selfImprovement.allowBehaviorPatches); setNumber('minimumRepeatedFailures', workspace.selfImprovement.minimumRepeatedFailures); set('researchProvider', workspace.selfImprovement.researchProvider); set('researchEndpoint', workspace.selfImprovement.researchEndpoint); setNumber('researchTimeoutMs', workspace.selfImprovement.researchTimeoutMs)
@@ -299,7 +302,8 @@ function collect() {
     safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
     autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'),
-    longTermGoal: 'reach_end'
+    longTermGoal: 'reach_end',
+    firstHome: { enabled: checked('firstHomeEnabled'), dimension: value('firstHomeDimension'), x: number('firstHomeX'), y: number('firstHomeY'), z: number('firstHomeZ'), radius: number('firstHomeRadius') }
   }
   c.agentWorkspace = {
     promptDirectory: value('promptDirectory').trim(), playerProfilesDirectory: value('playerProfilesDirectory').trim(), contextBudgetChars: number('contextBudgetChars'), compressionTriggerRatio: number('compressionTriggerRatio'), retainRecentEvents: number('retainRecentEvents'),
@@ -415,6 +419,21 @@ async function refreshCentralChat() {
   } catch (error) { toast(error.message, true) }
 }
 
+async function sendAdminCommand(event) {
+  event.preventDefault()
+  const message = value('adminCommandInput').trim()
+  if (!message) return toast('请先填写管理指令', true)
+  const button = $('sendAdminCommandButton')
+  button.disabled = true
+  try {
+    await request('/api/admin/command', { method: 'POST', body: JSON.stringify({ message }) })
+    set('adminCommandInput', '')
+    toast('最高权限指令已提交，正在抢占并执行当前任务')
+    await refreshCentralChat()
+  } catch (error) { toast(error.message, true) }
+  finally { button.disabled = false }
+}
+
 $('saveButton').addEventListener('click', save)
 $('reloadButton').addEventListener('click', () => { if (!dirty || confirm('放弃尚未保存的修改？')) load() })
 $('saveSecretsButton').addEventListener('click', saveSecrets)
@@ -432,6 +451,7 @@ $('testModelButton').addEventListener('click', async () => { try { $('modelTestR
 $('refreshLogsButton').addEventListener('click', refreshStatus)
 $('refreshCentralChatButton').addEventListener('click', refreshCentralChat)
 $('centralChatFilter').addEventListener('change', () => renderCentralChat(state))
+$('adminCommandForm').addEventListener('submit', sendAdminCommand)
 $('modelProvider').addEventListener('change', () => {
   const presets = {
     deepseek: { model: 'deepseek-v4-flash', key: 'DEEPSEEK_API_KEY', url: 'https://api.deepseek.com' },
