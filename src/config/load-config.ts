@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { agentWorkspaceConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
+import { agentWorkspaceConfig, speechConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
 import { parseJsonDocument } from '../core/json.js'
 
 const VALID_EFFORTS = new Set<ReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
@@ -89,6 +89,34 @@ export function validateConfig(config: BotConfig): void {
       if (typeof config.model.multimodal[key] !== 'boolean') throw new Error(`model.multimodal.${key} 必须是布尔值`)
     }
     requireString(config.model.multimodal.sensoryDirectory, 'model.multimodal.sensoryDirectory')
+  }
+  if (config.speech !== undefined) {
+    const speech = speechConfig(config)
+    if (!['volcengine', 'openai', 'mimo', 'multimodal', 'custom'].includes(speech.provider)) throw new Error('speech.provider 无效')
+    if (!['volcengine_v1', 'openai_speech', 'openai_chat_audio', 'mimo_chat_audio', 'custom_binary', 'custom_json_base64'].includes(speech.protocol)) throw new Error('speech.protocol 无效')
+    for (const [value, name] of [[speech.model, 'speech.model'], [speech.baseUrl, 'speech.baseUrl'], [speech.voice, 'speech.voice']] as const) requireString(value, name)
+    const knownProvider = speech.provider !== 'custom'
+    if (knownProvider) requireString(speech.apiKeyEnv, 'speech.apiKeyEnv')
+    if (speech.provider === 'volcengine') {
+      requireString(speech.volcengineAppIdEnv, 'speech.volcengineAppIdEnv')
+      requireString(speech.volcengineCluster, 'speech.volcengineCluster')
+    }
+    if (speech.provider === 'custom' && speech.apiKeyEnv) requireString(speech.customAuthHeader, 'speech.customAuthHeader')
+    if (speech.provider === 'custom' && speech.protocol === 'custom_json_base64') requireString(speech.customAudioJsonPath, 'speech.customAudioJsonPath')
+    for (const name of [speech.apiKeyEnv, ...(speech.provider === 'volcengine' ? [speech.volcengineAppIdEnv] : [])]) {
+      if (name && !/^[A-Z][A-Z0-9_]{1,63}$/u.test(name)) throw new Error('语音密钥只能通过大写环境变量名引用')
+    }
+    const speechUrl = new URL(speech.baseUrl)
+    const localSpeechEndpoint = ['localhost', '127.0.0.1', '::1'].includes(speechUrl.hostname)
+      || /^(?:10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.)/u.test(speechUrl.hostname)
+    if (speechUrl.protocol !== 'https:' && !localSpeechEndpoint) throw new Error('speech.baseUrl 必须使用 HTTPS；仅本机或局域网自定义接口可使用 HTTP')
+    for (const [name, value, minimum, maximum] of [
+      ['speed', speech.speed, 0.25, 4], ['volume', speech.volume, 0, 2], ['timeoutMs', speech.timeoutMs, 1000, 120000],
+      ['maxTextChars', speech.maxTextChars, 1, 1000], ['maxAudioSeconds', speech.maxAudioSeconds, 1, 60],
+      ['queueLimit', speech.queueLimit, 1, 10], ['cacheEntries', speech.cacheEntries, 0, 256]
+    ] as const) if (!Number.isFinite(value) || value < minimum || value > maximum) throw new Error(`speech.${name} 必须在 ${minimum}-${maximum} 之间`)
+    if (![16000, 24000, 32000, 48000].includes(speech.sampleRate)) throw new Error('speech.sampleRate 只支持 16000/24000/32000/48000')
+    if (speech.provider === 'custom' && speech.apiKeyEnv && !/^[A-Za-z0-9-]{1,64}$/u.test(speech.customAuthHeader)) throw new Error('speech.customAuthHeader 格式无效')
   }
   requireString(config.storage?.memoryFile, 'storage.memoryFile')
   requireString(config.storage?.experienceFile, 'storage.experienceFile')

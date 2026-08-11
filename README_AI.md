@@ -169,7 +169,7 @@ npm test
 | 经验/进化 | 失败写入经验；重复失败可研究公开资料并更新托管工具经验与声明式补丁 | 不是训练模型；不允许自改可执行代码、硬规则或秘密，补丁仍须通过原有能力/策略/Fabric 验证 |
 | WebUI 总聊天 | 聚合记忆中的玩家/Bot 对话与 `data/diagnostics.json` 的结构化决策、步骤、后置条件和完整脱敏错误；独立 4 秒刷新和三种筛选 | 明确只展示可验证决策摘要，不提供或伪造模型隐藏思维链；诊断文件不是长期记忆输入 |
 | 皮肤 | 校验标准皮肤 PNG，并可生成其他玩家客户端安装包 | LocalSkin 不会由 Bot 广播；每位观察者都要装包或共同使用在线皮肤站 |
-| 语音 | 多模态输入协议可读取新鲜的外部音频帧 | Simple Voice Chat 尚无音频帧生产桥，也没有 TTS/麦克风/扬声器管线；Headless 环境通常没有 OpenAL 音频设备 |
+| 语音 | 多模态输入协议可读取外部音频帧；TTS 输出支持火山、OpenAI、MiMo、音频多模态和自定义接口，并通过 Simple Voice Chat 的 Bot UDP 连接发声 | 输入帧生产器仍需外部实现；输出集成针对 2.6.20+26.2，后续内部类变化会安全关闭语音；服务端 UDP 端口仍需管理员正确开放 |
 
 ## 3. 总体架构
 
@@ -893,7 +893,9 @@ WebUI 只接受标准 Minecraft PNG：现代 64x64 或旧版 64x32，手臂模�
 
 `skin.capeFile` 和 `data/capes` 只预留本地路径。正版官方披风不能用普通 PNG 伪造，必须由实际拥有披风的 Microsoft 账号提供；离线多人披风也需要共同皮肤站/客户端资源方案。
 
-多模态 Agent 已定义外部音频帧入口 `data/sensory/latest-audio.json`，只读取 15 秒内、最大 2 MiB 的受支持 MIME，并只在首个模型轮发送一次。Simple Voice Chat 目前仍没有把实际语音写入该文件的桥，也没有 TTS、麦克风或扬声器管线；历史环境能加载其 jar 不等于语音适配完成。没有真实帧时状态必须为 `audio:unavailable`，文本和结构化动作不依赖语音。
+多模态 Agent 已定义外部音频帧入口 `data/sensory/latest-audio.json`，只读取 15 秒内、最大 2 MiB 的受支持 MIME，并只在首个模型轮发送一次。当前仍没有把其他玩家的 Simple Voice Chat 收音写入该文件的生产器，因此没有真实输入帧时状态必须为 `audio:unavailable`。
+
+语音输出是独立链路：`src/speech/speech-service.ts` 将已经通过严格游戏聊天出口的台词交给 TTS；`FabricBridgeClient` 用 `voice_playback_begin/chunk/end` 在本机鉴权桥分块传输 PCM；`VoicePlaybackManager` 重采样并复用 Simple Voice Chat 客户端已经建立的加密 UDP 连接发出 Opus 麦克风包。Headless 没有 OpenAL speaker 或物理 microphone 不再阻塞输出语音。输入不可用不得被误写为输出不可用，反之亦然。
 
 ## 17. 中国大陆网络设计
 
@@ -1106,7 +1108,7 @@ git push origin main
 8. 增加记忆摘要、经验实际应用计数/验证、任务归档和 WebUI 安全导入/编辑。
 9. 实现 Microsoft Headless 登录与正版皮肤/披风路径。
 10. 在无 VPN 的干净中国 Windows 验证一键安装和所有镜像回退。
-11. 最后研究 Simple Voice Chat API、虚拟音频和 TTS/STT；语音不得阻塞文本控制主线。
+11. Simple Voice Chat TTS 输出已实现；下一步是实服多人听见矩阵、版本升级兼容检查，以及独立的玩家语音收音/STT。语音始终不得阻塞文本控制主线。
 
 当前最重要的诚实限制：项目已经从早期的跟随基线扩展到真实动作控制框架，但距离“像人类朋友一样完整生存和长期发展”仍有明显差距。后续开发不能通过增加提示词假装完成；必须在本地控制器、状态后置条件、持久规划和真实服务器测试四层同时推进。
 
@@ -1645,3 +1647,55 @@ Java `ToolSelector`、`PrimitiveTaskController`、`SurvivalController` 不再排
 随后实服出现真实路过玩家，诊断确认 `source=companion-local, tokenCost=0` 的陪伴邀请与 `follow_player` 已启动。玩家回复“就到这吧”时未命中旧拒绝正则，错误进入 Tool Agent，现场因此产生两轮模型调用后才停止。热修复把“就到这/到这就好/这样就好/够了”加入寻址和邀请拒绝语义，并将该实话替换进零 provider 调用测试；以后命中时本地执行 `stop -> return_home`。接受邀请、动作表情和物品交换仍以自动回归/编译证据为主，尚未在这次现场逐项验收。
 
 同步到私有部署目录时，只复制源码、测试、模板和文档；绝不覆盖 `.env`、`config/bot.json` 中的真实连接/模型值、`config/persona.json`、`data/agent-prompts/SOUL.md`/`IDENTITY.md`、记忆、玩家画像、日志和 `.runtime` 业务状态。可用小脚本只向私有 bot.json 合并上述新字段并保持其他键值。公共提交前运行 `npm run audit`、`git diff --check`、`git ls-files` 敏感路径检查；公共文档只能使用 `你的域名.com`。
+
+## 31. 2026-08-11：TTS 与 Simple Voice Chat 输出适配交接
+
+### 31.1 已验证的上游约束
+
+目标客户端 JAR 为 `voicechat-fabric-2.6.20+26.2`，其 `fabric.mod.json` 要求 Minecraft 26.2.x、Fabric Loader >=0.19.3、Java >=25，内嵌 API 版本 2.6.20。官方 API 要求音频为 48 kHz、16-bit PCM，发送节拍为每帧 960 samples/20 ms。官方服务端 `AudioSender` 只能模拟“没有安装语音模组”的玩家；Bot 本身已经安装该模组，所以注册必然失败，不能采用 server API 假发音。
+
+本项目因此走客户端已鉴权路径。2.6.20 内部真实发送序列为 `MicThread.sendAudioPacket(short[960], whispering) -> OpusEncoder -> MicPacket -> NetworkMessage -> ClientVoicechatConnection.sendToServer`，停流包是空 Opus data 的 `MicPacket`。`VoicePlaybackManager` 优先反射调用同一个 `MicThread` 私有发送方法，并在播放期 `setMicrophoneLocked(true)`，避免物理麦克风和 TTS 的 sequence 交错；Headless 没有 MicThread 时，才创建 API Opus encoder 并反射构造 `MicPacket/NetworkMessage` 直接发送。任何类、方法、构造器或 UDP 鉴权状态不匹配都返回 `simple_voice_chat_unavailable`，不得影响文字聊天或其他动作。
+
+不能把 `你的域名.com:25565` 占位符替换成真实域名后再提交到 Git；Minecraft 连接仍来自私有 `server.host/server.port`。Simple Voice Chat 的实际 UDP 主机、端口、secret 和加密连接由其服务端握手包建立。公网部署必须额外确认服务端实际语音 UDP 端口已开放；上游默认常见端口 24454 只是默认，不可硬编码为目标服事实。
+
+### 31.2 Node TTS 层
+
+唯一入口是 `src/speech/speech-service.ts`：
+
+1. `FabricBridgeClient.chat()` 先发送已经过 `SecretGuard`/`game-reply` 边界的文字，成功后才调用 `SpeechService.enqueue()`。模型思考、tool call、动作结果和错误详情没有进入这个方法，不能被朗读。
+2. 文本去除 Minecraft 格式码、URL、Markdown 控制字符并受 `maxTextChars` 限制。队列严格串行且不超过 `queueLimit`；满队列丢弃新语音但保留文字。
+3. 缓存键包括 provider/protocol/model/voice/style/speed/text，缓存只在当前 Node 进程内，条数由 `cacheEntries` 限制，不写记忆文件和 Git。
+4. 所有提供者归一化为单声道 little-endian PCM16；奇数字节被移除，时长受 `maxAudioSeconds` 限制，`volume` 本地饱和缩放。当前内置端点都按 `sampleRate=24000` 请求；若管理员改变供应商采样率，必须同步填写真实返回采样率。
+5. 音频按 72 KiB 原始块经 Base64 发送，每块都有 session/sequence。Java 端只接受顺序块、预声明总字节一致、单会话不超过 6 MiB、队列不超过 3。桥仍逐行不超过 1 MiB，不需要共享绝对文件路径。
+
+内置协议：
+
+- `volcengine_v1`：POST 火山在线 TTS V1；Header `Authorization: Bearer;<access token>`；JSON 同时携带 AppID、cluster、voice_type、PCM encoding、sample_rate、唯一 reqid；只接受 code 3000 和 Base64 `data`。
+- `openai_speech`：POST `${baseUrl}/audio/speech`，请求 `response_format:pcm`，支持 model/voice/instructions/speed，响应为原始 PCM。
+- `mimo_chat_audio`：POST `${baseUrl}/chat/completions`，Header `api-key`；目标朗读文本必须放 assistant message，style 放 user message，音频 `format:pcm16`；读取 `choices[0].message.audio.data`。
+- `openai_chat_audio`：适配能输出音频的多模态 Chat Completions 模型，发送 `modalities:[text,audio]` 与 `audio:{voice,format:pcm16}`，读取同一 message audio 路径。当前示例为 `gpt-audio`；普通 GPT-5.6 文本/视觉模型不应误选此协议。
+- `custom_binary`：自定义端点直接返回 PCM16 binary；`custom_json_base64` 按 `customAudioJsonPath` 读取 Base64。请求体固定携带 model/input/voice/style/speed/format/sample_rate；鉴权 Header、scheme 和 key env 可配置，`apiKeyEnv` 留空时不发送鉴权 Header。自定义接口不允许把密钥字面值写进 bot.json。
+
+中国网络默认推荐火山引擎或 MiMo；OpenAI 仅作为可选供应商，不得成为启动必需依赖。TTS 默认 `enabled:false`，旧配置无 `speech` 时由 `speechConfig()` 合并安全默认值。缺少任一语音密钥只会在第一条需要合成的回复上产生本地脱敏警告。
+
+### 31.3 配置、WebUI 和秘密
+
+类型/默认值在 `src/config/types.ts` 的 `SpeechConfig`/`DEFAULT_SPEECH_CONFIG`；校验在 `src/config/load-config.ts`；示例在 `config/bot.example.json`；完整字段索引在 `PARAMETERS.md`。WebUI `#speech` 面板读写同一个 `config.speech`，供应商切换只填公开预设，不回显秘密。
+
+秘密键为 `VOLCENGINE_TTS_APP_ID`、`VOLCENGINE_TTS_ACCESS_TOKEN`、既有 `OPENAI_API_KEY`/`MIMO_API_KEY` 和 `CUSTOM_TTS_API_KEY`。`src/webui/server.ts` 的 `secretKeys` 控制 `.env` 原子写入与状态布尔值；`BotRuntime` 将当前 `speech.apiKeyEnv` 和 `volcengineAppIdEnv` 的值同时加入 Logger/SecretGuard 脱敏集合。禁止在诊断事件、错误消息、内存缓存键、WebUI snapshot、测试 fixture 或 README 中输出实际值。
+
+### 31.4 Java 生命周期与失败模式
+
+`MinecraftAiBridgeClient.processActions()` 在普通任务 busy 检查之前识别三种 voice action，因此正在持续跟随/建房时也能说话。上传完成时先检查 `ClientManager.getClient().getConnection().isInitialized()`，未完成 UDP 鉴权则拒绝入队。播放线程是 daemon platform thread，使用 `LockSupport.parkNanos` 按 20 ms 节拍发送。输入用线性插值重采样为 48 kHz并在最后一帧补零；每段结束发送停流包并释放 encoder/麦克风锁。
+
+桥断开会 `voicePlayback.cancel("bridge_disconnected")`、清空上传和播放队列并中断线程。异步完成/失败通过 `voice_status` 回传 Node；Node 只记本地 debug/warn。未来升级 Simple Voice Chat 时必须重新用目标 JAR 的 `javap` 检查 `ClientManager`、`ClientVoicechat`、`MicThread.sendAudioPacket/sendStopPacket`、`MicPacket` 和 `NetworkMessage` 签名，再做真实多人听见验收；只有 Fabric build 成功不能证明内部运行签名没变。
+
+`scripts/test-voice-bridge.mjs` 是零云端费用的现场诊断器。它要求 Node 控制器停止、Minecraft/Fabric 客户端保持在线，仅允许绑定回环 `bridgeHost`，发送 0.6 秒低音量 PCM 测试音，并等待 Java 返回 `voice_playback_completed`。它验证桥上传、重采样/分帧、Opus 与 SVC 客户端发送入口；它不验证另一名玩家的扬声器、距离衰减或服务端是否最终把包转发给听者。
+
+### 31.5 本轮验证证据与未完成项
+
+新增 `test/speech-service.test.ts` 覆盖 OpenAI 原始 PCM、火山 Bearer 分号/AppID/code 3000、MiMo 与多模态嵌套 Base64、无鉴权本机自定义 PCM、串行播放和重复缓存。完成代码时 `npm run check`、完整 Node 124/124 测试、Java 25 Fabric Gradle build 均通过。WebUI 已用真实浏览器验证：桌面 1280 宽和移动端 390×844 均无水平溢出；火山/OpenAI/MiMo/多模态/自定义预设联动中的 MiMo 样例已验证为 `mimo_chat_audio`、`mimo-v2.5-tts`、24 kHz 与“冰糖”；毛玻璃样式生效，语音密钥输入不回显，控制台无 warning/error，未保存或改写任何本机配置。
+
+私有部署现场重新进服后，上游日志依次出现发送 secret 请求、收到 secret、语音服务端确认鉴权、确认连接检查。Headless 环境没有 OpenAL 扬声器和实体麦克风，上游因此打印对应警告，但 UDP 会话仍保持。停止 Node 控制器且保持 Fabric 客户端在线后运行 `npm run test:voice-bridge`，实际回传 `voice_playback_completed`，输入为 24 kHz、28,800 bytes 的 0.6 秒测试音；随后控制器和 WebUI 已恢复运行。该证据覆盖 Bot 端 PCM 上传、重采样、分帧、Opus 和已鉴权发送入口，不等价于另一名玩家已实际听见。
+
+没有用户提供火山 TTS AppID/Access Token、OpenAI/MiMo 音频配额或自定义接口，因此本轮不能花费/猜测凭据做云端真实合成。真实服务器上还必须由另一名安装 Simple Voice Chat 的玩家站在 Bot 听距内，确认文字出现后能听到 Bot 的语音、距离衰减正确、离开范围听不到、连续两句顺序正确、TTS 失败不阻塞跟随。完成前只能声称“协议、编译和 mock 链路已验证”，不能声称服务器内实际听见已验收。Simple Voice Chat 收音/语音识别仍未实现，本轮只解决声音生成与输出。

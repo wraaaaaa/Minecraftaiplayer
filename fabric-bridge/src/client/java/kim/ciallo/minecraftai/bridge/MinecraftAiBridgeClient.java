@@ -88,6 +88,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private final PrimitiveTaskController primitives = new PrimitiveTaskController();
     private final AdvancedTaskController advanced = new AdvancedTaskController(primitives);
     private final ShelterController shelter = new ShelterController();
+    private final VoicePlaybackManager voicePlayback = new VoicePlaybackManager(this::sendVoiceStatus);
 
     @Override
     public void onInitializeClient() {
@@ -125,6 +126,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             primitives.cancel(client, "bridge_disconnected");
             advanced.cancel(client, "bridge_disconnected");
             shelter.cancel(client, "bridge_disconnected");
+            voicePlayback.cancel("bridge_disconnected");
             while (bridge.poll() != null) {
                 // Discard commands from the dead controller session; they must never replay.
             }
@@ -444,6 +446,11 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             JsonObject action = envelope.has("action") && envelope.get("action").isJsonObject() ? envelope.getAsJsonObject("action") : new JsonObject();
             action = normalizeAgentPrimitive(action);
             String actionType = string(action, "type");
+            if (actionType.startsWith("voice_playback_")) {
+                VoicePlaybackManager.Result voiceResult = voicePlayback.handle(action);
+                sendActionResult(id, voiceResult.ok(), voiceResult.detail());
+                continue;
+            }
             if ("navigate_to".equals(actionType)) {
                 if (pendingNavigation != null || pendingSurvivalAction != null || !primitives.activeType().isEmpty()
                     || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
@@ -603,6 +610,13 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         response.addProperty("id", id);
         response.addProperty("ok", ok);
         response.addProperty("detail", detail);
+        bridge.send(response);
+    }
+
+    private void sendVoiceStatus(VoicePlaybackManager.Status status) {
+        JsonObject response = baseMessage("voice_status");
+        response.addProperty("ok", status.ok());
+        response.addProperty("detail", status.detail());
         bridge.send(response);
     }
 

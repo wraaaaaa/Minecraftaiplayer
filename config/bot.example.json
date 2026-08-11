@@ -45,6 +45,29 @@
       "sensoryDirectory": "data/sensory"
     }
   },
+  "speech": {
+    "enabled": false,
+    "provider": "volcengine",
+    "protocol": "volcengine_v1",
+    "model": "volcano_tts",
+    "apiKeyEnv": "VOLCENGINE_TTS_ACCESS_TOKEN",
+    "baseUrl": "https://openspeech.bytedance.com/api/v1/tts",
+    "voice": "BV001_streaming",
+    "style": "用自然、温柔、像朋友聊天的中文语气朗读，不要播报表情符号或系统信息。",
+    "speed": 1,
+    "volume": 1,
+    "sampleRate": 24000,
+    "timeoutMs": 30000,
+    "maxTextChars": 180,
+    "maxAudioSeconds": 18,
+    "queueLimit": 3,
+    "cacheEntries": 32,
+    "volcengineAppIdEnv": "VOLCENGINE_TTS_APP_ID",
+    "volcengineCluster": "volcano_tts",
+    "customAuthHeader": "Authorization",
+    "customAuthScheme": "Bearer",
+    "customAudioJsonPath": "audio.data"
+  },
   "chat": {
     "requireMention": true,
     "replyPrefix": "",

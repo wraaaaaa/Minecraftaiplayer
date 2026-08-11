@@ -25,6 +25,7 @@
       <a href="#central-chat">总聊天</a>
       <a href="#server">服务器</a>
       <a href="#model">大模型</a>
+      <a href="#speech">游戏内语音</a>
       <a href="#chat">聊天与陪伴</a>
       <a href="#autonomy">陪伴模式与任务</a>
       <a href="#persona">提示词与玩家画像</a>
@@ -139,6 +140,45 @@
           <div class="form-grid three"><label>感知文件目录<input id="sensoryDirectory" type="text"><small>无摄像帧时自动生成附近方块/实体语义图；语音桥可写入 latest-audio.json。</small></label></div>
         </div>
         <div class="inline-actions"><button id="saveSecretsButton" class="button ghost">安全保存密钥</button><button id="clearSecretsButton" class="button danger">清空本机全部密钥</button><button id="testModelButton" class="button ghost">最小额度测试模型</button><span id="modelTestResult" class="muted"></span></div>
+      </section>
+
+      <section id="speech" class="panel">
+        <div class="section-heading">
+          <div><p class="eyebrow">VOICE OUTPUT</p><h2>游戏内语音</h2><p class="muted">把 Bot 已经发到游戏聊天框的自然回复合成为声音，并通过 Simple Voice Chat 以 Bot 自身的位置发送给附近玩家。</p></div>
+          <details><summary>服务器地址和语音端口要填在哪里？</summary><p>这里不重复填写服务器地址。Simple Voice Chat 会在 Bot 加入 Minecraft 后通过模组握手取得实际 UDP 语音地址；Minecraft 地址仍在“服务器”页配置。请确认服务端开放其语音 UDP 端口，不能只开放 TCP 25565。</p></details>
+        </div>
+        <div class="toggle-row"><label class="switch"><input id="speechEnabled" type="checkbox"><span></span>启用游戏内语音输出</label></div>
+        <div class="form-grid three">
+          <label>语音供应商<select id="speechProvider"><option value="volcengine">火山引擎 / 豆包语音</option><option value="openai">OpenAI Speech API</option><option value="mimo">小米 MiMo TTS</option><option value="multimodal">可输出音频的多模态模型</option><option value="custom">自定义接口</option></select></label>
+          <label>接口协议<select id="speechProtocol"><option value="volcengine_v1">火山引擎在线 TTS V1</option><option value="openai_speech">OpenAI /audio/speech</option><option value="openai_chat_audio">OpenAI 兼容多模态音频</option><option value="mimo_chat_audio">MiMo Chat Audio</option><option value="custom_binary">自定义二进制 PCM</option><option value="custom_json_base64">自定义 JSON Base64</option></select><small>已知供应商会自动使用正确协议；此项主要供“自定义接口”使用。</small></label>
+          <label>模型<input id="speechModel" type="text" placeholder="volcano_tts / gpt-4o-mini-tts / mimo-v2.5-tts"></label>
+          <label class="span-two">API 地址<input id="speechBaseUrl" type="url"></label>
+          <label>密钥环境变量<input id="speechApiKeyEnv" type="text"><small>这里只保存变量名，不保存密钥内容；无需鉴权的自定义接口可留空。</small></label>
+          <label>音色 ID<input id="speechVoice" type="text" placeholder="BV001_streaming / alloy / 冰糖"></label>
+          <label>采样率<select id="speechSampleRate"><option value="16000">16000 Hz</option><option value="24000">24000 Hz</option><option value="32000">32000 Hz</option><option value="48000">48000 Hz</option></select></label>
+          <label>语速<input id="speechSpeed" type="number" min="0.25" max="4" step="0.05"></label>
+          <label>本地音量<input id="speechVolume" type="number" min="0" max="2" step="0.05"></label>
+          <label>接口超时（毫秒）<input id="speechTimeout" type="number" min="1000" max="120000"></label>
+          <label>最多朗读字符<input id="speechMaxTextChars" type="number" min="1" max="1000"></label>
+          <label>最长音频（秒）<input id="speechMaxAudioSeconds" type="number" min="1" max="60"></label>
+          <label>等待队列长度<input id="speechQueueLimit" type="number" min="1" max="10"></label>
+          <label>内存缓存条目<input id="speechCacheEntries" type="number" min="0" max="256"></label>
+          <label class="span-two">声音风格 / 指令<textarea id="speechStyle" rows="3"></textarea></label>
+        </div>
+        <div class="subpanel">
+          <h3>火山引擎与自定义接口</h3>
+          <div class="form-grid three">
+            <label>火山 AppID 变量<input id="speechVolcAppIdEnv" type="text"></label>
+            <label>火山集群<input id="speechVolcCluster" type="text"></label>
+            <label>火山 AppID<input id="volcTtsAppId" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+            <label>火山 Access Token<input id="volcTtsToken" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+            <label>自定义 API Key<input id="customTtsKey" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label>
+            <label>自定义鉴权 Header<input id="speechCustomAuthHeader" type="text"></label>
+            <label>自定义鉴权前缀<input id="speechCustomAuthScheme" type="text" placeholder="Bearer；可留空"></label>
+            <label>JSON Base64 字段路径<input id="speechCustomAudioJsonPath" type="text" placeholder="audio.data"></label>
+          </div>
+        </div>
+        <p class="muted">语音由 AI 合成。请向服务器玩家明确说明 Bot 使用合成声音。TTS 失败不会把错误发进游戏聊天，也不会阻塞文字回复、跟随或其他动作。</p>
       </section>
 
       <section id="chat" class="panel">

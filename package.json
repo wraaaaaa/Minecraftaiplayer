@@ -27,6 +27,7 @@
     "stop:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-webui-background.ps1",
     "dashboard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-control-center.ps1",
     "audit": "node scripts/audit-repository.mjs",
+    "test:voice-bridge": "node scripts/test-voice-bridge.mjs --send-test-tone",
     "test": "tsx --test test/**/*.test.ts"
   },
   "dependencies": {

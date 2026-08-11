@@ -14,7 +14,7 @@ import { DiagnosticStore } from '../diagnostics/diagnostic-store.js'
 import { SecretGuard } from '../security/secret-guard.js'
 import path from 'node:path'
 import { ProgressionStore } from '../progression/progression-store.js'
-import { agentWorkspaceConfig } from '../config/types.js'
+import { agentWorkspaceConfig, speechConfig } from '../config/types.js'
 import { PromptWorkspace } from '../prompts/prompt-workspace.js'
 import { ContextCompressor } from '../memory/context-compressor.js'
 import { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
@@ -28,7 +28,8 @@ export class BotRuntime {
 
   constructor(loaded: LoadedProjectConfig) {
     this.#loaded = loaded
-    this.#logger = new Logger({ ...loaded.config.logging, secrets: [loaded.apiKey, loaded.easyAuthPassword ?? '', loaded.config.server.host] })
+    const speech = speechConfig(loaded.config)
+    this.#logger = new Logger({ ...loaded.config.logging, secrets: [loaded.apiKey, loaded.easyAuthPassword ?? '', process.env[speech.apiKeyEnv] ?? '', process.env[speech.volcengineAppIdEnv] ?? '', loaded.config.server.host] })
   }
 
   async run(): Promise<void> {
@@ -38,7 +39,8 @@ export class BotRuntime {
     const tasks = new TaskStore(config.storage.taskFile ?? 'data/tasks.json', config.autonomy?.ownerName ? { ownerName: config.autonomy.ownerName } : {})
     const diagnostics = new DiagnosticStore('data/diagnostics.json')
     const progression = new ProgressionStore(config.storage.progressionFile ?? 'data/progression.json')
-    const secrets = new SecretGuard([apiKey, easyAuthPassword, config.server.host, path.resolve('.')])
+    const speech = speechConfig(config)
+    const secrets = new SecretGuard([apiKey, easyAuthPassword, process.env[speech.apiKeyEnv], process.env[speech.volcengineAppIdEnv], config.server.host, path.resolve('.')])
     const workspaceConfig = agentWorkspaceConfig(config)
     const promptWorkspace = new PromptWorkspace({
       promptDirectory: workspaceConfig.promptDirectory,

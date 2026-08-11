@@ -4,7 +4,7 @@ import { access, copyFile, mkdir, readFile, writeFile, rename } from 'node:fs/pr
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
-import { agentWorkspaceConfig, DEFAULT_AGENT_WORKSPACE_CONFIG, DEFAULT_AUTONOMY_CONFIG, type BehaviorRules, type BotConfig, type ModsConfig, type Persona, type PromptTemplates, type SkinConfig } from '../config/types.js'
+import { agentWorkspaceConfig, DEFAULT_AGENT_WORKSPACE_CONFIG, DEFAULT_AUTONOMY_CONFIG, DEFAULT_SPEECH_CONFIG, type BehaviorRules, type BotConfig, type ModsConfig, type Persona, type PromptTemplates, type SkinConfig } from '../config/types.js'
 import { Logger } from '../core/logger.js'
 import { parseJsonDocument } from '../core/json.js'
 import { createLlmProvider } from '../llm/provider-factory.js'
@@ -25,7 +25,7 @@ const publicRoot = path.join(projectRoot, 'public', 'webui')
 const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
-const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY'] as const
+const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY', 'VOLCENGINE_TTS_APP_ID', 'VOLCENGINE_TTS_ACCESS_TOKEN', 'CUSTOM_TTS_API_KEY'] as const
 const adminInbox = new AdminCommandInbox(path.join(projectRoot, 'data', 'admin-inbox'))
 
 type WebUiBotConfig = BotConfig
@@ -239,6 +239,7 @@ async function snapshot(): Promise<unknown> {
   delete storedAutonomy.developmentZone
   const config: WebUiBotConfig = {
     ...storedConfig,
+    speech: { ...DEFAULT_SPEECH_CONFIG, ...storedConfig.speech },
     storage: { ...storedConfig.storage, taskFile: storedConfig.storage.taskFile ?? 'data/tasks.json', autonomyFile: storedConfig.storage.autonomyFile ?? 'data/autonomy-state.json', progressionFile: storedConfig.storage.progressionFile ?? 'data/progression.json', ownedBlocksFile: storedConfig.storage.ownedBlocksFile ?? 'data/owned-blocks.json' },
     agentWorkspace: { ...DEFAULT_AGENT_WORKSPACE_CONFIG, ...storedConfig.agentWorkspace, selfImprovement: { ...DEFAULT_AGENT_WORKSPACE_CONFIG.selfImprovement, ...storedConfig.agentWorkspace?.selfImprovement } },
     autonomy: {

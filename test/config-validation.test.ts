@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { validateConfig } from '../src/config/load-config.js'
-import type { BotConfig } from '../src/config/types.js'
+import { DEFAULT_SPEECH_CONFIG, type BotConfig } from '../src/config/types.js'
 
 const baseConfig: BotConfig = {
   server: { adapter: 'fabric_bridge', connectionMode: 'direct', host: 'example.invalid', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'Valid_Bot', auth: 'offline', connectTimeoutMs: 30000, reconnectDelayMs: 10000, autoRespawn: true, respawnDelayMs: 3000, bridgeHost: '127.0.0.1', bridgePort: 8765, actionTimeoutMs: 10000 },
@@ -43,6 +43,21 @@ test('小米 MiMo 与 Agent 费用硬预算配置可通过校验', () => {
     agentMaxInputTokensPerCall: 48_000, agentMaxOutputTokens: 1024,
     agentFollowupReasoningEffort: 'none',
     multimodal: { autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory' }
+  }
+  assert.doesNotThrow(() => validateConfig(config))
+})
+
+test('本机自定义语音接口可以明确关闭鉴权', () => {
+  const config = structuredClone(baseConfig)
+  config.speech = {
+    ...DEFAULT_SPEECH_CONFIG,
+    enabled: true,
+    provider: 'custom',
+    protocol: 'custom_binary',
+    apiKeyEnv: '',
+    baseUrl: 'http://127.0.0.1:18080/tts',
+    customAuthHeader: '',
+    customAudioJsonPath: ''
   }
   assert.doesNotThrow(() => validateConfig(config))
 })

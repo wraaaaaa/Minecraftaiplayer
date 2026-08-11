@@ -13,6 +13,7 @@
 - Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2` 原生客户端桥。
 - Windows 无界面启动，控制器与游戏客户端均隐藏在后台；提供安全启动、停止和 PID 记录。
 - 本机 Web 总控台：可视化编辑所有 Bot 参数、人设、规则、模组路径和秘密，并查看运行进程、世界坐标、生命、饱食度、维度、附近玩家及日志；“总聊天”把分玩家对话、结构化决策摘要、动作步骤、后置条件和完整脱敏错误合并成一条本机时间线。
+- 游戏内合成语音：Bot 的自然回复可通过火山引擎、OpenAI、MiMo、音频多模态或自定义 TTS 生成 PCM，再借 Simple Voice Chat 以 Bot 自身位置发送；文字先行，语音失败不阻塞陪伴和动作。
 - DeepSeek、火山方舟（豆包）、小米 MiMo Chat Completions function calling 与 OpenAI Responses function calling；模型名、端点、推理强度、API/Token 硬预算均可配置。DeepSeek 思考模式会在工具轮之间正确回传 `reasoning_content`，但不会把隐藏思维链写入日志、WebUI 或游戏聊天。
 - DeepSeek 等纯文本模型使用结构化世界状态。识别到多模态模型后自动在首轮加入视觉图；小米 `mimo-v2.5`/`mimo-v2.5-pro` 会启用视觉、可用语音帧与攻略搜索。无摄像帧时生成真实方块/实体语义图；没有语音桥帧时明确保持“听觉不可用”，不会伪造听见。
 - 玩家聊天、系统消息、位置、生命、饱食度、空气、着火/入水、维度、时间、光照、装备/附魔/耐久、背包、附近玩家、敌对生物和掉落物状态。
@@ -73,7 +74,7 @@
 - 已实现熔炼、村民交易、附魔和床，但没有农业种植/繁殖、药水酿造、铁砧组合、锻造台升级或任意建筑设计器。住所目前是固定 3×3 安全小屋。
 - 村民交易只在成年、未占用且已加载的村民旁选择当前背包付得起的有益交易；不会自动刷职业或重置交易。附魔只使用当前附魔台可提供且经验/青金石付得起的选项。
 - 模组食物通过 26.2 的 `FOOD`/`CONSUMABLE` 数据组件识别；已知有害原版食物被拒绝，但未知模组副作用无法完全推断。模组矿物、装备、容器和配方需要后续注册表扩展。
-- Microsoft 正版登录自动化、正版披风上传和自动通关尚未实现。多模态语音输入协议已接入，但 Simple Voice Chat 仍缺少把实际语音帧写入感知目录的桥；Headless 环境没有音频设备时状态会显示 `unavailable`。
+- Microsoft 正版登录自动化、正版披风上传和自动通关尚未实现。多模态语音输入仍依赖外部感知帧；游戏内语音输出已接入 Simple Voice Chat 2.6.20，可使用火山引擎、OpenAI、MiMo、音频多模态或自定义 TTS。它直接发送 Bot 的 UDP/Opus 麦克风包，不依赖 Headless 主机的扬声器或真实麦克风。
 
 ### 2026-08-05 实服回归结果
 
@@ -411,6 +412,26 @@ CialloAI 跟着我
 
 原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。只有真实记忆/画像接近预算时，`ContextCompressor` 才保留最近事件并总结更早内容；世界快照不再误算成记忆压力。压缩在玩家任务结束后后台启动，返回格式错误会记录到总控台但不会让“来找我”等游戏任务失败。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `data/agent-prompts/`。
 
+## 让小默在 Simple Voice Chat 里说话
+
+前提：服务端和 Bot 客户端都安装与 Minecraft/Fabric 匹配的 Simple Voice Chat。当前适配和实机 JAR 版本是 `voicechat-fabric-2.6.20+26.2`。服务端必须开放 Simple Voice Chat 配置的 **UDP** 端口；Minecraft 的 `你的域名.com:25565` 是进服地址，不等于语音必然使用 TCP/UDP 25565。Bot 进服后会通过模组握手自动取得语音主机、端口和加密秘密，不要把公网地址填进 TTS 的 `baseUrl`。
+
+1. 打开根目录的“打开总控台”，进入“游戏内语音”。
+2. 勾选“启用游戏内语音输出”，选择供应商。推荐中国大陆网络优先使用“火山引擎 / 豆包语音”或“小米 MiMo TTS”。
+3. 按供应商填写：
+
+   - 火山引擎：在页面秘密区填写 AppID 与 Access Token；`voice` 填控制台已授权的音色 ID，默认示例 `BV001_streaming` 只是示例音色。
+   - OpenAI：使用 `gpt-4o-mini-tts`、`OPENAI_API_KEY` 和 `/v1` Base URL。
+   - MiMo：使用 `mimo-v2.5-tts`、`MIMO_API_KEY`，内置中文音色可填 `冰糖`、`茉莉`、`苏打` 或 `白桦`。
+   - 音频多模态：用于支持 Chat Completions 音频输出的模型，如 `gpt-audio`；接口需返回 `choices[0].message.audio.data` 的 Base64 PCM16。
+   - 自定义：可选直接返回 PCM16 二进制，或 JSON Base64；需要鉴权时密钥只从 `.env` 环境变量读取，无鉴权的本机/局域网接口可把“密钥环境变量”留空。
+
+4. 保存设置并完整重启 Bot。之后 Bot 每次真正发给玩家的自然聊天会先以文字立即出现，再异步合成声音。内部思考、工具名、动作回执和完整错误永远不会被朗读。
+
+统一音频链路为“供应商 PCM16 单声道 → 最长时长/音量限制 → 本地桥分块 → Fabric 重采样为 48 kHz → 960 sample/20 ms → Opus → Simple Voice Chat 已鉴权 UDP 连接”。语音队列默认最多 3 条，重复台词有 32 条内存缓存；TTS 超时、余额不足或模组 UDP 未连接时只写本地日志，文字聊天和游戏动作不受影响。请向同服玩家明确告知这是 AI 合成声音。
+
+如果要在不调用任何付费语音 API 的情况下检查发送链，可先只停止 Node 控制器、保持 Minecraft 客户端在线，然后在项目根目录运行 `npm run test:voice-bridge`。它只监听回环地址，并让 Bot 发送约 0.6 秒、6% 音量的测试音；出现 `voice_playback_completed` 代表 PCM 分帧、Opus 编码和 Simple Voice Chat 客户端发包入口均已执行。测试后重新启动 Bot 控制器。这个结果仍不能替代另一名玩家在听距内的实际听见验收。
+
 ## 离线皮肤与多人可见
 
 1. 在 WebUI“Bot 皮肤”选择 `classic` 或 `slim`，上传标准 64x64（或旧版 64x32）PNG。
@@ -441,13 +462,13 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | --- | --- | --- |
 | `Install-and-Open-Control-Center.cmd` | 双击完成安装并打开总控台 | 从项目目录调用 PowerShell 部署器，失败时保留窗口和日志 |
 | `Open-WebUI.cmd` / `Start-Bot.cmd` / `Stop-Bot.cmd` | 日常打开页面、静默启动和停止 | 调用固定脚本并保持工作目录正确 |
-| `config/bot.json` | 实际服务器、模型、聊天、存储和日志参数 | 总控台将表单转换为 JSON；启动时严格校验后一次性载入 |
+| `config/bot.json` | 实际服务器、模型、语音、聊天、存储和日志参数 | 总控台将表单转换为 JSON；启动时严格校验后一次性载入 |
 | `config/persona.json` | 实际 Bot 人设 | 每次模型请求把描述、说话风格、目标和边界放入系统上下文 |
 | `config/prompts.json` | 完整系统/记忆/动作/空闲提示词 | 启动时读取，页面可编辑，模板再注入人设 |
 | `config/skin.json` | 皮肤模型、路径和多人可见方式 | PNG 校验后保存本地副本或指导共同皮肤站配置 |
 | `config/behavior-rules.json` | 实际安全规则 | LLM 动作执行前由 `PolicyEngine` 再审查，不能靠提示词绕过 |
 | `config/mods.json` | 服务器 mod 来源和同步规则 | 启动前/按钮触发时与上次清单比较，受管理地替换 jar |
-| `.env` | API Key 和 EasyAuth 密码 | 仅本机载入且被 Git 忽略；WebUI 只显示是否存在，不返回值 |
+| `.env` | 大模型/TTS API Key、火山 TTS AppID/Token 和 EasyAuth 密码 | 仅本机载入且被 Git 忽略；WebUI 只显示是否存在，不返回值 |
 | `data/memory.json` | 所有长期记忆和玩家档案 | UUID 分玩家、限制事件数量、原子写入并保留 `.bak` |
 | `data/experience.json` | 任务经验、失败与修正 | 与记忆独立，提示组装时按任务检索相关经验 |
 | `data/tasks.json` | 持久任务队列和全部终态 | 保存发令者、优先级、尝试次数、真实结果；同进程重连与进程重启均可恢复孤立任务 |
@@ -479,6 +500,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/agent/world-state.ts` | 结构化世界状态，包括生命、物理环境、装备/附魔、实体、动作和住所 |
 | `src/agent/tool-agent.ts` | 分层 Agent 循环、原子工具/连续技能映射、增量观察、API/Token 硬预算与地下自动返程 |
 | `src/agent/multimodal-sensors.ts` | 读取新鲜画面/语音帧；没有画面时把真实方块和实体渲染成小尺寸 PNG 语义图 |
+| `src/speech/speech-service.ts` | 火山/OpenAI/MiMo/多模态/自定义 TTS，PCM 归一化、限长、串行队列、缓存和失败隔离 |
 | `src/memory/memory-store.ts` | 单文件长期记忆、UUID 玩家隔离和事件裁剪 |
 | `src/memory/context-compressor.ts` | 只按真实记忆压力压缩旧事件；在玩家任务后后台运行，更新摘要和当前玩家 `USER.md` |
 | `src/prompts/prompt-workspace.ts` | 管理五份 Markdown 提示词、分玩家画像和声明式行为补丁，限制运行时写入边界 |
@@ -487,7 +509,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/tasks/task-store.ts` | 原子任务 schema、owner/距离/紧急度排序、单运行任务、终态、取消和重连恢复 |
 | `src/security/secret-guard.ts` | 在模型、持久化和游戏聊天出口拦截已知秘密、密钥形状及秘密提取请求 |
 | `src/policy/policy-engine.ts` | 财产保护、未知归属拒绝、自卫攻击者与时间窗口验证 |
-| `src/minecraft/fabric-bridge-client.ts` | 仅本机 TCP JSON Lines 服务，接收 Fabric 状态并发送带结果 ID 的白名单动作 |
+| `src/minecraft/fabric-bridge-client.ts` | 仅本机 TCP JSON Lines 服务，接收 Fabric 状态、发送带结果 ID 的白名单动作，并分块传输 PCM 语音 |
 | `src/minecraft/minecraft-client.ts` | Mineflayer 诊断适配器，不用于当前模组服正式运行 |
 | `src/minecraft/easy-auth.ts` | Mineflayer 路线的认证提示处理；正式 Fabric 路线在 Java 模组中处理 |
 | `src/runtime/bot-runtime.ts` | 创建模块、连接/关闭/重连循环并写运行阶段 |
@@ -505,6 +527,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `fabric-bridge/.../TraversalRecovery.java` | 持续跟随无路后的安全开路/搭桥恢复；只改天然方块或经荒野校验的自有垫脚块 |
 | `fabric-bridge/.../ToolSelector.java` | 扫描完整背包，按正确掉落工具类别、速度、耐久和附魔选择并同步快捷栏 |
 | `fabric-bridge/.../BridgeConnection.java` | Java 侧本机 JSON Lines 连接、重连和动作队列 |
+| `fabric-bridge/.../VoicePlaybackManager.java` | 重采样至 48 kHz，按 20 ms 帧编码 Opus，并复用 Simple Voice Chat 的已鉴权 UDP 连接发声 |
 | `fabric-bridge/.../LivingEntityDamageMixin.java` | 从真实伤害事件识别玩家攻击者，作为允许自卫的唯一依据 |
 | `fabric-bridge/.../WorldStateEncoder.java` | 每秒输出 schema v2 的稳定物品 ID、槽位、耐久/附魔、装备、危险实体、光照和安全原因 |
 | `fabric-bridge/.../SurvivalController.java` | 每 tick 的安全进食和确认威胁反击；只使用正常背包点击、使用物品和攻击 API |

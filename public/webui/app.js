@@ -43,6 +43,13 @@ const WORKSPACE_DEFAULTS = Object.freeze({
   selfImprovement: Object.freeze({ enabled: true, allowPromptEdits: true, allowBehaviorPatches: true, minimumRepeatedFailures: 3, researchProvider: 'baidu', researchEndpoint: 'https://www.baidu.com/s', researchTimeoutMs: 12000 })
 })
 
+const SPEECH_DEFAULTS = Object.freeze({
+  enabled: false, provider: 'volcengine', protocol: 'volcengine_v1', model: 'volcano_tts', apiKeyEnv: 'VOLCENGINE_TTS_ACCESS_TOKEN',
+  baseUrl: 'https://openspeech.bytedance.com/api/v1/tts', voice: 'BV001_streaming', style: '用自然、温柔、像朋友聊天的中文语气朗读，不要播报表情符号或系统信息。',
+  speed: 1, volume: 1, sampleRate: 24000, timeoutMs: 30000, maxTextChars: 180, maxAudioSeconds: 18, queueLimit: 3, cacheEntries: 32,
+  volcengineAppIdEnv: 'VOLCENGINE_TTS_APP_ID', volcengineCluster: 'volcano_tts', customAuthHeader: 'Authorization', customAuthScheme: 'Bearer', customAudioJsonPath: 'audio.data'
+})
+
 const $ = id => document.getElementById(id)
 const value = id => $(id).value
 const number = id => Number($(id).value)
@@ -266,6 +273,10 @@ function populate(snapshot) {
   setNumber('agentMaxApiCalls', c.model.agentMaxApiCalls ?? 8); setNumber('agentMaxTaskTokens', c.model.agentMaxTaskTokens ?? 160000); setNumber('agentMaxInputTokensPerCall', c.model.agentMaxInputTokensPerCall ?? 48000); setNumber('agentMaxOutputTokens', c.model.agentMaxOutputTokens ?? 1024); set('agentFollowupReasoningEffort', c.model.agentFollowupReasoningEffort ?? 'none')
   const multimodal = { autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory', ...(c.model.multimodal || {}) }
   setChecked('multimodalAutoDetect', multimodal.autoDetect); setChecked('visionEnabled', multimodal.visionEnabled); setChecked('audioEnabled', multimodal.audioEnabled); setChecked('onlineResearchEnabled', multimodal.onlineResearchEnabled); set('sensoryDirectory', multimodal.sensoryDirectory)
+  const speech = { ...SPEECH_DEFAULTS, ...(c.speech || {}) }
+  setChecked('speechEnabled', speech.enabled); set('speechProvider', speech.provider); set('speechProtocol', speech.protocol); set('speechModel', speech.model); set('speechApiKeyEnv', speech.apiKeyEnv); set('speechBaseUrl', speech.baseUrl); set('speechVoice', speech.voice); set('speechStyle', speech.style)
+  setNumber('speechSpeed', speech.speed); setNumber('speechVolume', speech.volume); set('speechSampleRate', String(speech.sampleRate)); setNumber('speechTimeout', speech.timeoutMs); setNumber('speechMaxTextChars', speech.maxTextChars); setNumber('speechMaxAudioSeconds', speech.maxAudioSeconds); setNumber('speechQueueLimit', speech.queueLimit); setNumber('speechCacheEntries', speech.cacheEntries)
+  set('speechVolcAppIdEnv', speech.volcengineAppIdEnv); set('speechVolcCluster', speech.volcengineCluster); set('speechCustomAuthHeader', speech.customAuthHeader); set('speechCustomAuthScheme', speech.customAuthScheme); set('speechCustomAudioJsonPath', speech.customAudioJsonPath)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
   setChecked('autonomyEnabled', autonomy.enabled); set('autonomyMode', autonomy.mode); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
@@ -297,6 +308,11 @@ function collect() {
   Object.assign(c.server, { connectionMode: value('connectionMode'), adapter: value('serverAdapter'), host: value('serverHost').trim(), port: number('serverPort'), lanDiscoveryTimeoutMs: number('lanDiscoveryTimeout'), version: value('serverVersion').trim(), username, auth: value('serverAuth'), connectTimeoutMs: number('connectTimeout'), reconnectDelayMs: number('reconnectDelay'), autoRespawn: checked('autoRespawn'), respawnDelayMs: number('respawnDelay'), bridgeHost: value('bridgeHost').trim(), bridgePort: number('bridgePort'), actionTimeoutMs: number('actionTimeout') })
   Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
   Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens'), agentMaxSteps: number('agentMaxSteps'), autonomousAgentMaxSteps: number('autonomousAgentMaxSteps'), agentMaxApiCalls: number('agentMaxApiCalls'), agentMaxTaskTokens: number('agentMaxTaskTokens'), agentMaxInputTokensPerCall: number('agentMaxInputTokensPerCall'), agentMaxOutputTokens: number('agentMaxOutputTokens'), agentFollowupReasoningEffort: value('agentFollowupReasoningEffort'), multimodal: { autoDetect: checked('multimodalAutoDetect'), visionEnabled: checked('visionEnabled'), audioEnabled: checked('audioEnabled'), onlineResearchEnabled: checked('onlineResearchEnabled'), sensoryDirectory: value('sensoryDirectory').trim() } })
+  c.speech = {
+    enabled: checked('speechEnabled'), provider: value('speechProvider'), protocol: value('speechProtocol'), model: value('speechModel').trim(), apiKeyEnv: value('speechApiKeyEnv').trim(), baseUrl: value('speechBaseUrl').trim(), voice: value('speechVoice').trim(), style: value('speechStyle').trim(),
+    speed: number('speechSpeed'), volume: number('speechVolume'), sampleRate: number('speechSampleRate'), timeoutMs: number('speechTimeout'), maxTextChars: number('speechMaxTextChars'), maxAudioSeconds: number('speechMaxAudioSeconds'), queueLimit: number('speechQueueLimit'), cacheEntries: number('speechCacheEntries'),
+    volcengineAppIdEnv: value('speechVolcAppIdEnv').trim(), volcengineCluster: value('speechVolcCluster').trim(), customAuthHeader: value('speechCustomAuthHeader').trim(), customAuthScheme: value('speechCustomAuthScheme').trim(), customAudioJsonPath: value('speechCustomAudioJsonPath').trim()
+  }
   Object.assign(c.chat, { requireMention: checked('requireMention'), replyPrefix: value('replyPrefix'), cooldownMs: number('cooldownMs'), proactiveEnabled: checked('proactiveEnabled'), proactiveIdleMs: number('proactiveIdleMs'), proactiveMinIntervalMs: number('proactiveMinIntervalMs') })
   const ownerName = value('ownerName').trim()
   if (!/^[A-Za-z0-9_]{3,16}$/.test(ownerName)) throw new Error('最高优先玩家名只能使用 3-16 位英文字母、数字或下划线')
@@ -354,9 +370,9 @@ async function savePlayerProfile() {
 
 async function saveSecrets() {
   try {
-    const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey'), MIMO_API_KEY: value('mimoKey') }
+    const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey'), MIMO_API_KEY: value('mimoKey'), VOLCENGINE_TTS_APP_ID: value('volcTtsAppId'), VOLCENGINE_TTS_ACCESS_TOKEN: value('volcTtsToken'), CUSTOM_TTS_API_KEY: value('customTtsKey') }
     await request('/api/secrets', { method: 'PUT', body: JSON.stringify(secrets) })
-    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey', 'mimoKey']) set(id, '')
+    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey', 'mimoKey', 'volcTtsAppId', 'volcTtsToken', 'customTtsKey']) set(id, '')
     toast('密钥已保存到本机 .env，不会在页面中回显')
     await refreshStatus()
   } catch (error) { toast(error.message, true) }
@@ -469,6 +485,18 @@ $('modelProvider').addEventListener('change', () => {
   const preset = presets[value('modelProvider')]
   if (!preset) return
   set('modelName', preset.model); set('apiKeyEnv', preset.key); set('modelBaseUrl', preset.url); setDirty(true)
+})
+$('speechProvider').addEventListener('change', () => {
+  const presets = {
+    volcengine: { protocol: 'volcengine_v1', model: 'volcano_tts', key: 'VOLCENGINE_TTS_ACCESS_TOKEN', url: 'https://openspeech.bytedance.com/api/v1/tts', voice: 'BV001_streaming', sampleRate: 24000 },
+    openai: { protocol: 'openai_speech', model: 'gpt-4o-mini-tts', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1', voice: 'alloy', sampleRate: 24000 },
+    mimo: { protocol: 'mimo_chat_audio', model: 'mimo-v2.5-tts', key: 'MIMO_API_KEY', url: 'https://api.xiaomimimo.com/v1', voice: '冰糖', sampleRate: 24000 },
+    multimodal: { protocol: 'openai_chat_audio', model: 'gpt-audio', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1', voice: 'alloy', sampleRate: 24000 },
+    custom: { protocol: 'custom_binary', model: 'custom-tts', key: 'CUSTOM_TTS_API_KEY', url: 'http://127.0.0.1:8080/v1/tts', voice: 'default', sampleRate: 24000 }
+  }
+  const preset = presets[value('speechProvider')]
+  if (!preset) return
+  set('speechProtocol', preset.protocol); set('speechModel', preset.model); set('speechApiKeyEnv', preset.key); set('speechBaseUrl', preset.url); set('speechVoice', preset.voice); set('speechSampleRate', String(preset.sampleRate)); setDirty(true)
 })
 document.querySelectorAll('input:not(.ui-only), select:not(.ui-only), textarea:not(.ui-only)').forEach(control => control.addEventListener('input', () => setDirty(true)))
 document.querySelectorAll('.sidebar a').forEach(link => link.addEventListener('click', () => { document.querySelectorAll('.sidebar a').forEach(item => item.classList.remove('active')); link.classList.add('active') }))

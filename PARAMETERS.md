@@ -79,7 +79,32 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 `model.multimodal` 包含：`autoDetect`、`visionEnabled`、`audioEnabled`、`onlineResearchEnabled` 和 `sensoryDirectory`。默认全部开启并使用 `data/sensory`，但只有检测到模型具备对应能力才真正发送。DeepSeek 固定为纯文本；MiMo 2.5/2.5 Pro 自动识别为视觉、音频、视频理解和攻略搜索模型。未知模型可把 `autoDetect:false` 后用三个开关人工声明，修改后必须用 WebUI 最小测试确认。
 
 - 视觉：优先读取 15 秒内、最大 1.5 MiB 的 `data/sensory/latest.png`；没有时由 `WorldState` 生成 128×128 PNG 语义俯视图。只在 Agent 首轮发送一次。
-- 语音：读取 `data/sensory/latest-audio.json`，格式为 `{"capturedAt":"ISO时间","mimeType":"audio/wav","dataBase64":"..."}`；只接受 15 秒内、最大 2 MiB 的 wav/mpeg/mp3/ogg/webm/flac。Simple Voice Chat 当前尚无生产帧写入桥，所以默认显示 `unavailable`，不会伪造听觉。
+- 语音输入：读取 `data/sensory/latest-audio.json`，格式为 `{"capturedAt":"ISO时间","mimeType":"audio/wav","dataBase64":"..."}`；只接受 15 秒内、最大 2 MiB 的 wav/mpeg/mp3/ogg/webm/flac。游戏内语音输出不会伪装成输入听觉，二者是独立管线。
+
+## 4.1 游戏内声音生成与 Simple Voice Chat 输出
+
+存储位置：`config/bot.json` 的 `speech`。WebUI 对应“游戏内语音”。密钥内容只存 `.env`，配置文件只记录环境变量名。
+
+| 字段 | 可选值/默认示例 | 作用 |
+| --- | --- | --- |
+| `enabled` | `false` | 是否把 Bot 的自然游戏回复异步合成为语音。关闭时零 TTS 请求。 |
+| `provider` | `volcengine` / `openai` / `mimo` / `multimodal` / `custom` | 选择内置供应商或自定义端点。 |
+| `protocol` | `volcengine_v1` / `openai_speech` / `openai_chat_audio` / `mimo_chat_audio` / `custom_binary` / `custom_json_base64` | 已知供应商会自动选择；仅 `custom` 直接使用此值。 |
+| `model` | `volcano_tts` | TTS/音频模型 ID。OpenAI 推荐 `gpt-4o-mini-tts`；MiMo 为 `mimo-v2.5-tts`；音频多模态可用 `gpt-audio`。 |
+| `apiKeyEnv` | `VOLCENGINE_TTS_ACCESS_TOKEN` | API 密钥所在环境变量名，必须是大写字母/数字/下划线；无鉴权的自定义接口可留空。 |
+| `baseUrl` | 火山在线 TTS 地址 | HTTPS API 地址；只有本机/局域网自定义服务允许 HTTP。不是 Minecraft 服务器地址。 |
+| `voice` | `BV001_streaming` | 音色 ID。必须以供应商控制台实际授权音色为准。 |
+| `style` | 示例中文风格 | OpenAI `instructions`、MiMo/多模态 user style；火山 V1 目前不直接消费该字段。 |
+| `speed` / `volume` | `1` / `1` | 语速传给支持的供应商；音量在返回后本地缩放，范围分别 0.25–4、0–2。 |
+| `sampleRate` | `24000` | 供应商返回的 PCM16LE 单声道采样率，可为 16000/24000/32000/48000；Fabric 最终重采样到 48000。 |
+| `timeoutMs` | `30000` | 单次合成超时；不影响文字回复。 |
+| `maxTextChars` / `maxAudioSeconds` | `180` / `18` | 朗读文本与送入游戏的音频硬上限，避免队列、费用和桥消息失控。 |
+| `queueLimit` / `cacheEntries` | `3` / `32` | 串行等待条数与进程内重复台词缓存数。队列满只丢语音，不丢文字。 |
+| `volcengineAppIdEnv` / `volcengineCluster` | `VOLCENGINE_TTS_APP_ID` / `volcano_tts` | 火山在线 TTS 的 AppID 环境变量和业务集群。 |
+| `customAuthHeader` / `customAuthScheme` | `Authorization` / `Bearer` | 自定义接口的鉴权 Header 与前缀。密钥仍来自 `apiKeyEnv`；`apiKeyEnv` 为空时不发送鉴权 Header。 |
+| `customAudioJsonPath` | `audio.data` | `custom_json_base64` 响应中 Base64 PCM 字段的点分路径。 |
+
+相关 `.env` 位置：`VOLCENGINE_TTS_APP_ID`、`VOLCENGINE_TTS_ACCESS_TOKEN`、`OPENAI_API_KEY`、`MIMO_API_KEY`、`CUSTOM_TTS_API_KEY`。Simple Voice Chat 的服务器 UDP 地址不存于这些字段：它由 Minecraft 模组握手自动协商。服务端需开放 `voicechat-server.properties` 实际配置的 UDP 端口；默认上游端口通常为 UDP 24454，但应以服务器实际配置为准。
 - 攻略搜索：只有模型能力与开关同时为真时向 Agent 暴露 `search_game_guide`；实际使用 `agentWorkspace.selfImprovement.researchProvider` 的百度/SearXNG，查询会脱敏、结果限长并在当前任务缓存。
 
 ## 5. 人设、OpenClaw 风格提示词与自我改进

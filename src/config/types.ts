@@ -1,5 +1,35 @@
 export type ReasoningEffort = 'none' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
+export type SpeechProvider = 'volcengine' | 'openai' | 'mimo' | 'multimodal' | 'custom'
+export type SpeechProtocol = 'volcengine_v1' | 'openai_speech' | 'openai_chat_audio' | 'mimo_chat_audio' | 'custom_binary' | 'custom_json_base64'
+
+export interface SpeechConfig {
+  enabled: boolean
+  provider: SpeechProvider
+  /** Protocol is mainly useful for custom gateways; known providers select their native protocol. */
+  protocol: SpeechProtocol
+  model: string
+  apiKeyEnv: string
+  baseUrl: string
+  voice: string
+  style: string
+  speed: number
+  volume: number
+  sampleRate: 16000 | 24000 | 32000 | 48000
+  timeoutMs: number
+  maxTextChars: number
+  maxAudioSeconds: number
+  queueLimit: number
+  cacheEntries: number
+  /** Volcengine online TTS uses an AppID in addition to its Access Token. */
+  volcengineAppIdEnv: string
+  volcengineCluster: string
+  /** Custom endpoints never store the credential itself here, only its environment-variable name. */
+  customAuthHeader: string
+  customAuthScheme: string
+  customAudioJsonPath: string
+}
+
 export interface BotConfig {
   server: {
     adapter: 'fabric_bridge' | 'mineflayer'
@@ -54,6 +84,7 @@ export interface BotConfig {
       sensoryDirectory: string
     }
   }
+  speech?: SpeechConfig
   chat: {
     requireMention: boolean
     replyPrefix: string
@@ -148,6 +179,34 @@ export interface BotConfig {
     level: 'debug' | 'info' | 'warn' | 'error'
     console: boolean
   }
+}
+
+export const DEFAULT_SPEECH_CONFIG: Readonly<SpeechConfig> = Object.freeze({
+  enabled: false,
+  provider: 'volcengine',
+  protocol: 'volcengine_v1',
+  model: 'volcano_tts',
+  apiKeyEnv: 'VOLCENGINE_TTS_ACCESS_TOKEN',
+  baseUrl: 'https://openspeech.bytedance.com/api/v1/tts',
+  voice: 'BV001_streaming',
+  style: '用自然、温柔、像朋友聊天的中文语气朗读，不要播报表情符号或系统信息。',
+  speed: 1,
+  volume: 1,
+  sampleRate: 24000,
+  timeoutMs: 30000,
+  maxTextChars: 180,
+  maxAudioSeconds: 18,
+  queueLimit: 3,
+  cacheEntries: 32,
+  volcengineAppIdEnv: 'VOLCENGINE_TTS_APP_ID',
+  volcengineCluster: 'volcano_tts',
+  customAuthHeader: 'Authorization',
+  customAuthScheme: 'Bearer',
+  customAudioJsonPath: 'audio.data'
+})
+
+export function speechConfig(config: BotConfig): SpeechConfig {
+  return { ...DEFAULT_SPEECH_CONFIG, ...config.speech }
 }
 
 export interface AutonomyConfig {

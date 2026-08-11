@@ -9,14 +9,20 @@ import type { MemoryStore, PlayerIdentity } from '../memory/memory-store.js'
 import type { RuntimeStatus } from '../runtime/status-store.js'
 import { parseDecoratedPlayerChat } from './chat-parser.js'
 import { AddressingEngine } from '../agent/addressing.js'
-import { autonomyConfig } from '../config/types.js'
+import { autonomyConfig, speechConfig } from '../config/types.js'
 import type { SecretGuard } from '../security/secret-guard.js'
+import { SpeechService, type PcmSpeech } from '../speech/speech-service.js'
 
 type PlayerMessageHandler = (identity: PlayerIdentity, message: string, world: WorldState) => Promise<void>
 type ProactiveHandler = (world: WorldState) => Promise<void>
 type AddressAliasesResolver = (identity: PlayerIdentity) => Promise<readonly string[]>
 type ActionResult = { ok: boolean; detail: string }
 type PendingAction = { resolve: (result: ActionResult) => void; timer: NodeJS.Timeout }
+type VoiceBridgeAction =
+  | { type: 'voice_playback_begin'; sessionId: string; sampleRate: number; expectedBytes: number }
+  | { type: 'voice_playback_chunk'; sessionId: string; sequence: number; data: string }
+  | { type: 'voice_playback_end'; sessionId: string }
+type BridgeAction = AgentAction | { type: 'chat'; message: string } | VoiceBridgeAction
 
 type BridgeMessage = {
   type?: string
@@ -91,6 +97,7 @@ export class FabricBridgeClient implements ActionExecutor {
   readonly #policy: PolicyEngine
   readonly #secrets: SecretGuard
   readonly #addressing: AddressingEngine
+  readonly #speech: SpeechService
   readonly #expectedToken: string
   readonly #pending = new Map<string, PendingAction>()
   readonly #statusHandler: (phase: RuntimeStatus['phase'], world: WorldState) => Promise<void>
@@ -121,6 +128,11 @@ export class FabricBridgeClient implements ActionExecutor {
     const bridgeSessionCredential = process.env.MCAI_BRIDGE_TOKEN?.trim() ?? ''
     this.#expectedToken = bridgeSessionCredential
     this.#statusHandler = options.statusHandler
+    this.#speech = new SpeechService({
+      config: speechConfig(options.config),
+      logger: options.logger,
+      playback: speech => this.#playVoice(speech)
+    })
   }
 
   setMessageHandler(handler: PlayerMessageHandler): void { this.#messageHandler = handler }
@@ -162,6 +174,7 @@ export class FabricBridgeClient implements ActionExecutor {
 
   async close(reason = 'shutdown'): Promise<void> {
     this.#closing = true
+    this.#speech.close()
     if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
     this.#proactiveTimer = undefined
     this.#failPending(`桥接已关闭: ${reason}`)
@@ -177,6 +190,7 @@ export class FabricBridgeClient implements ActionExecutor {
     if (!sanitized) return
     const result = await this.#sendAction({ type: 'chat', message: sanitized })
     if (!result.ok) throw new Error(result.detail)
+    this.#speech.enqueue(sanitized)
   }
 
   async execute(action: AgentAction): Promise<ActionResult> {
@@ -256,6 +270,10 @@ export class FabricBridgeClient implements ActionExecutor {
         break
       }
       case 'attacked_by_player': this.#handleAttack(message); break
+      case 'voice_status':
+        if (message.ok === false) this.#logger.warn('Simple Voice Chat 播放状态异常', { detail: message.detail })
+        else this.#logger.debug('Simple Voice Chat 播放状态', { detail: message.detail })
+        break
       case 'death':
         this.#logger.warn('Bot 已死亡，等待客户端自动复活')
         void this.#memory.recordGameEvent('Bot 已死亡，等待自动复活', { health: message.health ?? 0 }).catch((error) => this.#logger.warn('记录死亡事件失败', error))
@@ -482,7 +500,23 @@ export class FabricBridgeClient implements ActionExecutor {
       .catch(error => this.#logger.warn('自动自卫动作失败', error))
   }
 
-  #sendAction(action: AgentAction | { type: 'chat'; message: string }): Promise<ActionResult> {
+  async #playVoice(speech: PcmSpeech): Promise<void> {
+    const sessionId = randomUUID()
+    const begin = await this.#sendAction({ type: 'voice_playback_begin', sessionId, sampleRate: speech.sampleRate, expectedBytes: speech.pcm16le.length })
+    if (!begin.ok) throw new Error(begin.detail)
+    const chunkBytes = 72 * 1024
+    let sequence = 0
+    for (let offset = 0; offset < speech.pcm16le.length; offset += chunkBytes) {
+      const chunk = speech.pcm16le.subarray(offset, Math.min(offset + chunkBytes, speech.pcm16le.length))
+      const result = await this.#sendAction({ type: 'voice_playback_chunk', sessionId, sequence, data: chunk.toString('base64') })
+      if (!result.ok) throw new Error(result.detail)
+      sequence++
+    }
+    const end = await this.#sendAction({ type: 'voice_playback_end', sessionId })
+    if (!end.ok) throw new Error(end.detail)
+  }
+
+  #sendAction(action: BridgeAction): Promise<ActionResult> {
     const socket = this.#socket
     if (!this.#connected || !socket || socket.destroyed) return Promise.resolve({ ok: false, detail: 'Fabric 客户端桥未连接' })
     const id = randomUUID()
