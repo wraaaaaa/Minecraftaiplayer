@@ -1640,6 +1640,8 @@ Java `ToolSelector`、`PrimitiveTaskController`、`SurvivalController` 不再排
 
 本次候选的自动验证：`npm run check` 通过；Node 测试 118/118 通过；`npm run build` 通过；Java 25 下 Fabric Gradle build 通过。浏览器回归确认桌面与 390×844 视口无水平溢出，新控件存在、默认 mode 为 companion、毛玻璃计算样式生效、控制台无 warning/error。新增测试覆盖 companion 空闲零 provider 调用、路过邀请拒绝回家、待机一次清理、严格 `<say>` 清洗、build/eat/discard 连续动作映射。
 
-私有部署实服回归同步 23 个受管 mod 且无同步器警告，Headless Fabric 26.2 最终连接桥并通过 EasyAuth。第一次空闲观察暴露两个配置/状态问题：私有 `.env` 缺少 EasyAuth 密码；旧本机私密副本仍有该项，因此通过 WebUI secret API 只恢复缺失字段，没有输出值或覆盖其他秘密。其次，Fabric 明明上报 first-home radius/source，`FabricBridgeClient` 归一化却丢弃它们，Node 退回半径 2，导致边界附近每分钟重新发 `return_home`。现已在桥消息类型和归一化保留 `radius/source`，`insideHome` 加 0.75 格块中心容差，且 activePrimitive 已是 `return_home` 时不重复下发。重建后 Bot 从半径外返回第一个家，途中本地处理一次敌对威胁，随后 `activePrimitive` 清空并写入 `source=companion-local, tokenCost=0` 的零 Token 待机事件；该时段模型事件计数为 0。现场没有其他玩家，路过邀请/拒绝、动作表情和物品交换只有自动回归/编译证据，尚未新增多人现场证据。
+私有部署实服回归同步 23 个受管 mod 且无同步器警告，Headless Fabric 26.2 最终连接桥并通过 EasyAuth。第一次空闲观察暴露两个配置/状态问题：私有 `.env` 缺少 EasyAuth 密码；旧本机私密副本仍有该项，因此通过 WebUI secret API 只恢复缺失字段，没有输出值或覆盖其他秘密。其次，Fabric 明明上报 first-home radius/source，`FabricBridgeClient` 归一化却丢弃它们，Node 退回半径 2，导致边界附近每分钟重新发 `return_home`。现已在桥消息类型和归一化保留 `radius/source`，`insideHome` 加 0.75 格块中心容差，且 activePrimitive 已是 `return_home` 时不重复下发。重建后 Bot 从半径外返回第一个家，途中本地处理一次敌对威胁，随后 `activePrimitive` 清空并写入 `source=companion-local, tokenCost=0` 的零 Token 待机事件；该时段模型事件计数为 0。
+
+随后实服出现真实路过玩家，诊断确认 `source=companion-local, tokenCost=0` 的陪伴邀请与 `follow_player` 已启动。玩家回复“就到这吧”时未命中旧拒绝正则，错误进入 Tool Agent，现场因此产生两轮模型调用后才停止。热修复把“就到这/到这就好/这样就好/够了”加入寻址和邀请拒绝语义，并将该实话替换进零 provider 调用测试；以后命中时本地执行 `stop -> return_home`。接受邀请、动作表情和物品交换仍以自动回归/编译证据为主，尚未在这次现场逐项验收。
 
 同步到私有部署目录时，只复制源码、测试、模板和文档；绝不覆盖 `.env`、`config/bot.json` 中的真实连接/模型值、`config/persona.json`、`data/agent-prompts/SOUL.md`/`IDENTITY.md`、记忆、玩家画像、日志和 `.runtime` 业务状态。可用小脚本只向私有 bot.json 合并上述新字段并保持其他键值。公共提交前运行 `npm run audit`、`git diff --check`、`git ls-files` 敏感路径检查；公共文档只能使用 `你的域名.com`。
