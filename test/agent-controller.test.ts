@@ -326,7 +326,7 @@ test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止�
   })
 
   await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
-  await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice' }, '不需要', { ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+  await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice' }, '就到这吧', { ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
 
   assert.equal(providerCalls, 0)
   assert.deepEqual(actions, [

@@ -25,7 +25,7 @@ function uniqueNames(base: readonly string[], extra: readonly string[]): string[
 
 function commandLike(text: string): boolean {
   const normalized = text.trim()
-  return /^(?:你|麻烦|请|帮|陪|跟|过来|来|走|停|别|不用|不要|不需要|算了|去|回来|看|打|攻击|保护|采|挖|收集|做|合成|造|建|吃|用|给|等|守|准备|我们|咱们)|[?？]$/u.test(normalized)
+  return /^(?:你|麻烦|请|帮|陪|跟|过来|来|走|停|别|不用|不要|不需要|算了|去|回来|看|打|攻击|保护|采|挖|收集|做|合成|造|建|吃|用|给|等|守|准备|我们|咱们)|^(?:就到这|到这(?:就)?好|这样就好|够了)|[?？]$/u.test(normalized)
 }
 
 export class AddressingEngine {

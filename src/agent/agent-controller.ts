@@ -52,7 +52,7 @@ function requestsPersistentHold(message: string): boolean {
 }
 
 function isCompanionInviteDecline(message: string): boolean {
-  return /^(?:不用|不要|不需要|算了|不用了|别跟(?:着)?我|你回去|回家等我)(?:了|啦|吧|哦|呀)?[！!。.?？\s]*$/iu.test(message.trim())
+  return /^(?:不用|不要|不需要|算了|不用了|别跟(?:着)?我|你回去|回家等我|就到这|到这(?:就)?好|这样就好|够了)(?:了|啦|吧|哦|呀)?[！!。.?？\s]*$/iu.test(message.trim())
 }
 
 function isCompanionInviteAccept(message: string): boolean {
