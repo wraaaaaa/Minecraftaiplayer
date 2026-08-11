@@ -3,6 +3,7 @@ let dirty = false
 
 const AUTONOMY_DEFAULTS = Object.freeze({
   enabled: true,
+  mode: 'companion',
   ownerName: 'wraaaaaa',
   commandArbitrationMs: 350,
   contextualAddressing: true,
@@ -14,6 +15,11 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   hostileScanRadius: 12,
   wildernessMinPlayerDistance: 48,
   safeIdleEnabled: true,
+  autoInviteNearbyPlayers: true,
+  inviteRadius: 7,
+  inviteCooldownMs: 1800000,
+  discardWornTools: true,
+  wornToolRemainingDurability: 1,
   autoGather: true,
   autoCraft: true,
   autoBuildShelter: true,
@@ -209,7 +215,8 @@ function renderStatus(snapshot) {
     const name = document.createElement('span')
     name.textContent = mod.name
     const size = document.createElement('span')
-    size.textContent = `${(mod.size / 1024 / 1024).toFixed(2)} MB`
+    const compatibility = mod.compatibility?.status === 'copied_unverified' ? '待启动验证' : mod.compatibility?.status === 'likely_server_only' ? '疑似仅服务端' : mod.compatibility?.status === 'likely_incompatible_loader' ? '疑似非 Fabric' : '旧清单'
+    size.textContent = `${(mod.size / 1024 / 1024).toFixed(2)} MB · ${compatibility}`
     item.append(name, size)
     return item
   }))
@@ -261,9 +268,9 @@ function populate(snapshot) {
   setChecked('multimodalAutoDetect', multimodal.autoDetect); setChecked('visionEnabled', multimodal.visionEnabled); setChecked('audioEnabled', multimodal.audioEnabled); setChecked('onlineResearchEnabled', multimodal.onlineResearchEnabled); set('sensoryDirectory', multimodal.sensoryDirectory)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
-  setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
+  setChecked('autonomyEnabled', autonomy.enabled); set('autonomyMode', autonomy.mode); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
-  setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
+  setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoInviteNearbyPlayers', autonomy.autoInviteNearbyPlayers); setNumber('inviteRadius', autonomy.inviteRadius); setNumber('inviteCooldownMs', autonomy.inviteCooldownMs); setChecked('discardWornTools', autonomy.discardWornTools); setNumber('wornToolRemainingDurability', autonomy.wornToolRemainingDurability); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
   for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand']) setChecked(id, autonomy[id])
   const firstHome = { ...AUTONOMY_DEFAULTS.firstHome, ...(autonomy.firstHome || {}) }
   setChecked('firstHomeEnabled', firstHome.enabled); set('firstHomeDimension', firstHome.dimension); setNumber('firstHomeX', firstHome.x); setNumber('firstHomeY', firstHome.y); setNumber('firstHomeZ', firstHome.z); setNumber('firstHomeRadius', firstHome.radius)
@@ -297,9 +304,9 @@ function collect() {
   const criticalHealthThreshold = number('criticalHealthThreshold')
   if (criticalHealthThreshold > lowHealthThreshold) throw new Error('危险生命阈值不能高于低生命阈值')
   c.autonomy = {
-    enabled: checked('autonomyEnabled'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
+    enabled: checked('autonomyEnabled'), mode: value('autonomyMode'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
-    safeIdleEnabled: checked('safeIdleEnabled'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
+    safeIdleEnabled: checked('safeIdleEnabled'), autoInviteNearbyPlayers: checked('autoInviteNearbyPlayers'), inviteRadius: number('inviteRadius'), inviteCooldownMs: number('inviteCooldownMs'), discardWornTools: checked('discardWornTools'), wornToolRemainingDurability: number('wornToolRemainingDurability'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
     autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'),
     longTermGoal: 'reach_end',

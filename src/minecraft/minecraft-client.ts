@@ -164,6 +164,34 @@ export class MinecraftClient implements ActionExecutor {
       }
       case 'return_to_zone':
         return { ok: false, detail: 'Mineflayer 兼容适配器不具备 Fabric 的逐目标环境与财产保护验证；请使用 Fabric 26.2 桥接客户端。' }
+      case 'discard_worn_tools': {
+        const worn = bot.inventory.items().filter(item => typeof item.durabilityUsed === 'number'
+          && typeof item.maxDurability === 'number'
+          && /(?:pickaxe|axe|shovel|hoe|sword)$/i.test(item.name)
+          && (!item.enchants || item.enchants.length === 0)
+          && item.maxDurability - item.durabilityUsed <= action.remainingDurability)
+        for (const item of worn) await bot.tossStack(item)
+        return { ok: true, detail: `worn_tool_cleanup_confirmed=${worn.length}` }
+      }
+      case 'gesture': {
+        if (action.gesture === 'afraid') {
+          bot.setControlState('forward', true)
+          bot.setControlState('sprint', true)
+          bot.setControlState('jump', true)
+          setTimeout(() => {
+            bot.setControlState('forward', false)
+            bot.setControlState('sprint', false)
+            bot.setControlState('jump', false)
+          }, 1_500).unref()
+          return { ok: true, detail: `gesture_started=${action.gesture}` }
+        }
+        const control = action.gesture === 'acknowledge' ? 'sneak' : 'jump'
+        bot.setControlState(control, true)
+        setTimeout(() => bot.setControlState(control, false), 250).unref()
+        setTimeout(() => bot.setControlState(control, true), 450).unref()
+        setTimeout(() => bot.setControlState(control, false), 700).unref()
+        return { ok: true, detail: `gesture_started=${action.gesture}` }
+      }
       case 'attack_player': {
         const entity = bot.players[action.target]?.entity
         if (!entity) return { ok: false, detail: `附近找不到攻击者 ${action.target}` }

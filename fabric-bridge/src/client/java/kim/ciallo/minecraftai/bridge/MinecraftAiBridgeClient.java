@@ -15,6 +15,7 @@ import net.minecraft.client.player.AbstractClientPlayer;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.component.DataComponents;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket;
 import net.minecraft.tags.FluidTags;
@@ -65,6 +66,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private long airRescueBreakStarted;
     private PendingSurvivalAction pendingSurvivalAction;
     private PendingNavigation pendingNavigation;
+    private String activeGesture = "";
+    private int gestureStartedTick;
     private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
     private final boolean firstHomeEnabled = Boolean.parseBoolean(environment("MCAI_FIRST_HOME_ENABLED", "true"));
@@ -203,6 +206,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         drainAdvancedResults();
         drainShelterResults();
         resolvePendingNavigation(client, player);
+        tickGesture(client);
         if (tick % 20 == 0) bridge.send(buildState(client, player));
     }
 
@@ -673,7 +677,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (!primitives.activeType().isEmpty()) return primitives.activeType();
         if (!advanced.activeType().isEmpty()) return advanced.activeType();
         if (!shelter.activeType().isEmpty()) return shelter.activeType();
-        return movement == null ? "" : "movement";
+        if (movement == null) return "";
+        if (movement.follow() && movement.playerName() != null) return "follow_player";
+        if (movement.follow()) return "return_home";
+        return "movement";
     }
 
     private ActionResult execute(Minecraft client, LocalPlayer player, JsonObject action) {
@@ -688,6 +695,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 primitives.cancel(client, "stopped_by_command");
                 advanced.cancel(client, "stopped_by_command");
                 shelter.cancel(client, "stopped_by_command");
+                activeGesture = "";
                 clearMovement(client);
                 yield new ActionResult(true, "已停止移动");
             }
@@ -735,6 +743,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             }
             case "interact_block" -> interactBlock(client, player, action);
             case "drop_inventory_item" -> dropInventoryItem(client, player, action);
+            case "discard_worn_tools" -> discardWornTools(client, player, action);
+            case "gesture" -> startGesture(action);
             case "send_server_command" -> {
                 String command = string(action, "command").trim().replaceFirst("^/+", "");
                 if (!command.matches("(?i)(?:tp|teleport)\\s+[A-Za-z0-9_]{1,16}")) {
@@ -927,6 +937,62 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             for (int index = 0; index < count; index++) client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 0, ContainerInput.THROW, player);
         }
         return new ActionResult(true, "drop_requested; slot=" + slot + "; count=" + count);
+    }
+
+    private static ActionResult discardWornTools(Minecraft client, LocalPlayer player, JsonObject action) {
+        if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+            return new ActionResult(false, "normal inventory with empty cursor is required");
+        }
+        int threshold = Math.max(0, Math.min(16, (int) number(action, "remainingDurability", 1)));
+        int discardedStacks = 0;
+        int discardedItems = 0;
+        for (int slot = 0; slot < player.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty() || !stack.isDamageableItem() || stack.getMaxDamage() <= 0) continue;
+            if (!stack.has(DataComponents.TOOL) && !stack.has(DataComponents.WEAPON)) continue;
+            if (!stack.getEnchantments().isEmpty()) continue;
+            int remaining = stack.getMaxDamage() - stack.getDamageValue();
+            if (remaining > threshold) continue;
+            int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
+            int count = stack.getCount();
+            client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+            discardedStacks++;
+            discardedItems += count;
+        }
+        return new ActionResult(true, "worn_tool_cleanup_confirmed; threshold=" + threshold
+            + "; discarded_stacks=" + discardedStacks + "; discarded_items=" + discardedItems);
+    }
+
+    private ActionResult startGesture(JsonObject action) {
+        String gesture = string(action, "gesture").trim().toLowerCase(Locale.ROOT);
+        if (!gesture.equals("acknowledge") && !gesture.equals("happy") && !gesture.equals("afraid")) {
+            return new ActionResult(false, "unsupported gesture");
+        }
+        activeGesture = gesture;
+        gestureStartedTick = tick;
+        return new ActionResult(true, "gesture_started=" + gesture);
+    }
+
+    private void tickGesture(Minecraft client) {
+        if (activeGesture.isEmpty()) return;
+        int elapsed = tick - gestureStartedTick;
+        boolean done = elapsed >= (activeGesture.equals("afraid") ? 30 : 20);
+        if (done) {
+            client.options.keyShift.setDown(false);
+            client.options.keyJump.setDown(false);
+            client.options.keySprint.setDown(false);
+            activeGesture = "";
+            return;
+        }
+        switch (activeGesture) {
+            case "acknowledge" -> client.options.keyShift.setDown((elapsed >= 1 && elapsed <= 4) || (elapsed >= 9 && elapsed <= 12));
+            case "happy" -> client.options.keyJump.setDown((elapsed >= 1 && elapsed <= 3) || (elapsed >= 11 && elapsed <= 13));
+            case "afraid" -> {
+                client.options.keySprint.setDown(true);
+                client.options.keyJump.setDown(elapsed % 9 <= 3);
+            }
+            default -> activeGesture = "";
+        }
     }
 
     private void updateMovement(Minecraft client, LocalPlayer player) {

@@ -149,7 +149,7 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 | `requireMention` | `true` | 没有足够近距离/连续对话语境时要求显式 Bot 名或 `!`；不是“每句话都必须点名”。 |
 | `replyPrefix` | 空 | 每条任务回复前缀。 |
 | `cooldownMs` | `2500` | 游戏聊天最小间隔。 |
-| `proactiveEnabled` | `true` | 启用限频的空闲模型决策与偶尔聊天；关闭它不会关闭本地进食、防卫、安全挂机或持久任务恢复。 |
+| `proactiveEnabled` | `false` | 陪伴模式建议关闭；空闲不调用模型。关闭它不会关闭本地进食、防卫、安全挂机、路过邀请或持久任务恢复。 |
 | `proactiveIdleMs` | `180000` | 最后一次玩家消息后至少等待多久才调用一次空闲决策。 |
 | `proactiveMinIntervalMs` | `300000` | 两次空闲决策的最小间隔；同时控制主动聊天频率和模型 API 消耗。 |
 
@@ -157,7 +157,9 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 
 WebUI“总聊天”底部的文本栏调用本机 `POST /api/admin/command`，其消息是全项目最高任务优先级。每条命令独立存入 `data/admin-inbox/<时间前缀-UUID>.pending.json`；控制器领取后依次变为 `processing` 和 `done/error`。如果 Bot 没运行，文件会保留，下一次客户端连接后再处理。这里的“最高权限”是任务队列优先级，不会绕过 Fabric 财产保护、SecretGuard、游戏服务器权限或安全后置条件。明确“停止/原地等我”会建立进程内 hold；它没有单独 JSON 参数，也不跨控制器重启持久化。下一条定向消息，或受击、低血、严重饥饿、着火、水下低氧会解除。
 
-空闲发展与玩家任务都使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。玩家任务的第一个工具选择会先触发一次本地自然开工回应，不增加 API 调用；纯聊天不会触发。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，第一次无路或普通玩家短暂离开实体加载范围不会清除它；空闲发展也不会在后续心跳覆盖。停止、冲突任务、紧急安全动作、死亡或断线可以结束；跨维度和真正离线时只能在最后已知位置等待，不能承诺物理意义上的永不丢失。空闲目标固定为安全生存、持续发展并最终到达末地；程序硬性拒绝侵害玩家财产，玩家任务会抢占。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+玩家任务使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。玩家任务的第一个工具选择会先触发一次本地自然开工回应和两次蹲下，不增加 API 调用；纯聊天不会触发。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，第一次无路或普通玩家短暂离开实体加载范围不会清除它。停止、冲突任务、紧急安全动作、死亡或断线可以结束；跨维度和真正离线时只能在最后已知位置等待，不能承诺物理意义上的永不丢失。
+
+默认 `autonomy.mode:"companion"` 时，空闲路径不会创建 Tool Agent，也不会推进末地目标；只用本地状态机回家、安全等待、清理近乎报废的普通工具以及邀请刚进入半径的玩家。只有手工切换为 `survival` 才恢复实验性的空闲发育循环。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
 
 Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘要 1500 字、事件 6×240 字、全局摘要 1200 字、经验 4 条；首轮/后续世界附近方块 16/6，实体各最多 8。工具模式首轮不重复发送 `TOOLS.md` 的接口目录，但仍发送规则、身份、SOUL、MEMORY、当前 USER、安全/研究内容、AI 学习段和运行时 JSON Schema；续轮 system/user 压缩常量也在 `src/agent/tool-agent.ts`。若未来需要改这些常量，位置是 `src/agent/prompt.ts`、`src/agent/tool-agent.ts` 与 `src/prompts/prompt-workspace.ts`，改后必须重新测真实供应商 usage。
 
@@ -176,7 +178,7 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 
 当真实记忆提示估算接近 `contextBudgetChars × compressionTriggerRatio`，`ContextCompressor` 使用当前模型总结较旧事件，更新 `conversationSummary`、`globalSummary` 和对应 `USER.md`，再按事件 ID 原子移除已压缩内容。世界快照不计入记忆压力；压缩在玩家任务离开关键路径后延迟执行，格式错误只写警告，绝不再让当前游戏任务失败。最近 `retainRecentEvents` 条不删除；模型失败或触发 SecretGuard 时原事件不丢失。
 
-## 7. 持久任务、自主生存与动态环境安全
+## 7. 持久任务、陪伴模式与动态环境安全
 
 实际配置：`config/bot.json` 的 `autonomy` 与 `storage.taskFile` / `storage.autonomyFile` / `storage.progressionFile` / `storage.ownedBlocksFile`。运行数据：
 
@@ -191,7 +193,8 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 
 | `autonomy` 字段 | 默认值 | 位置与效果 |
 | --- | --- | --- |
-| `enabled` | `true` | 主动进食/防卫、寻找住所和安全挂机的总开关；不会关闭玩家明确命令，也不会关闭启动时的任务恢复。 |
+| `enabled` | `true` | 本地进食/防卫、寻找住所和安全挂机的总开关；不会关闭玩家明确命令，也不会关闭启动时的任务恢复。 |
+| `mode` | `companion` | `companion`：空闲零模型调用，只陪伴、回家和待机；`survival`：启用未完成端到端验收的实验性自主发育。 |
 | `ownerName` | `wraaaaaa` | 离线服最高优先玩家名；其任务始终先于其他玩家。EasyAuth 必须保护该名称，避免冒用。 |
 | `commandArbitrationMs` | `350` | 同时收集多人消息的短窗口；窗口后普通玩家按当前距离从近到远选人，同一玩家内部按紧急度再按先入先出。 |
 | `contextualAddressing` | `true` | 结合命令语气、最近对话和距离判断是否在叫 Bot；近距离自然交流不要求每次点名。显式 `!` 或 Bot 名始终视为点名。 |
@@ -203,6 +206,11 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 | `hostileScanRadius` | `12` | 确认实际威胁的敌对生物扫描半径。苦力怕、末影人、猪灵等高风险/中立目标不会被盲目自动攻击。 |
 | `wildernessMinPlayerDistance` | `48` | 采集/建房与其他客户端玩家的最小距离；Node 先检查，Java 在动作开始及建房过程中继续硬检查。 |
 | `safeIdleEnabled` | `true` | 无任务时先验证安全；夜间/危险位置寻找已记录住所、床或安全点，安全后停止移动等待。 |
+| `autoInviteNearbyPlayers` | `true` | 新玩家第一次进入邀请半径时，本地启动跟随并询问是否需要陪伴；不调用模型。 |
+| `inviteRadius` | `7` | 路过玩家邀请的水平/三维观察距离，范围 2–32 格。 |
+| `inviteCooldownMs` | `1800000` | 同一玩家两次主动邀请的最短间隔，默认 30 分钟。 |
+| `discardWornTools` | `true` | 待机时清理近乎报废且未附魔的普通工具/武器；不会丢盔甲。 |
+| `wornToolRemainingDurability` | `1` | 自动清理的剩余耐久阈值，范围 0–16；近乎报废工具也会在选择工具时优先继续用坏。 |
 | `autoGather` / `autoCraft` / `autoBuildShelter` | `true` | 分别允许规划采集、合成和住所；不是绕过 Fabric 硬检查或行为规则的授权。 |
 | `autoHunt` / `autoSmelt` / `autoMine` | `true` | 允许确定性长期规划狩猎、烹饪/冶炼和阶梯矿道；每个 Java 动作仍单独检查生命、空气、危险流体、归属和后置条件。 |
 | `autoTrade` / `autoEnchant` | `true` | 允许在已加载村民/自有附魔台满足费用时交易和附魔；不会打开玩家容器或无限刷新村民职业。 |
@@ -210,7 +218,7 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 | `protectOwner` | `true` | 怪物把 `ownerName` 设为攻击目标时保护主人；紧跟其他玩家期间也临时保护当前跟随目标。 |
 | `allowVerifiedWilderness` | `true` | 是否允许 Java 通过自然地形、玩家结构、玩家距离、方块实体、危险源和逐目标后置条件授权采集/放置/开矿/建造；关闭时直接拒绝世界修改。 |
 | `allowTeleportCommand` | `false` | 只有服务器管理员已经给 Bot `/tp`/`/teleport` 权限后才改为 `true`。启动脚本把它映射为 `MCAI_TP_COMMAND_ENABLED`；只允许把 Bot 自己传到一个普通玩家名，坐标、选择器和其他命令全部拒绝。 |
-| `longTermGoal` | `reach_end` | 当前唯一长期目标：从生存物资逐步推进到下界、要塞和末地；不能填其他字符串。 |
+| `longTermGoal` | `reach_end` | 仅 `survival` 实验模式使用的长期目标；陪伴模式不会在空闲时推进它。 |
 | `firstHome.enabled` | `true` | 是否启用固定第一个家/安全位置。它只表示回家目的区域，不代表已建房。 |
 | `firstHome.dimension` | `minecraft:overworld` | 固定第一个家所在维度；可选主世界、下界、末地完整 ID。 |
 | `firstHome.x/y/z` | `1226 / 65 / 199` | 固定第一个家的中心坐标，可在 WebUI“自主生存与任务”修改。 |
@@ -227,7 +235,7 @@ AI 不再依赖人工坐标框判断可挖、可采或可放置。Node 只验证
 
 - 移动/交流：`look_at_player`、`follow_player`、`come_to_player`、`return_home`、`wander`、`explore_frontier`、聊天与 `stop`；废弃的 `return_to_zone` 会明确拒绝。`LocalPathNavigator` 在已加载区做有界 A*，支持平走、一格跳跃、游泳态跳上岸、1.5 格潜行通道、水中水平/上下移动、半砖/雪层碰撞面、木门/栅栏门，以及为铁门寻找附近按钮/拉杆。通过门后会在仍可交互时尽量关闭/复位。持续 8 次无路后 `TraversalRecovery` 按目标、左右和后方尝试，只可破坏逐块验证的天然障碍，或在动态安全检查通过的缺口/水下支撑面铺一块自有普通材料并登记到 `owned-blocks.json`。持续跟随在目标从附近传送门消失时会进入所见门体并跨维度保留状态；没有观察到门时不会猜测。梯子、藤蔓、复杂红石门、复杂跑酷和未知模组碰撞仍可能失败。
 - 生存/战斗：`eat_best_food`、`equip_best`、`prepare_for`、`attack_hostile`、`hunt_entity` 和短时自卫 `attack_player`。食物使用 26.2 数据组件识别；空气低于 75% 时暂停任务，搜索可呼吸水面，必要时破坏可验证的天然冰/雪顶。狩猎拒绝幼体、驯服、拴绳和自定义名称实体。
-- 物品/生产：`use_item`、`gather_resource`/`break_block`、`collect_own_drops`、`craft_item`、`place_block`、`drop_item`、`accept_items`、`smelt_item`、`trade_villager`、`enchant_item`、`sleep_in_bed`、`excavate_tunnel`、`build_nether_portal`、`travel_to_dimension`。`drop_item` 是 Bot 给玩家；`accept_items` 是拾取明确玩家身边近期匹配掉落物并验证背包增加。合成走真实 2×2/3×3 菜单；熔炼、交易和附魔走对应容器并以背包增量/附魔状态确认。采掘工具由 `ToolSelector` 扫描整个背包，正确掉落类别优先于纯速度，剩余耐久不超过 3 的工具排除；背包换入快捷栏后等待下一 Tick 才开挖。玩家/未知归属容器始终不支持。
+- 物品/生产：`use_item`、`gather_resource`/`break_block`、`collect_own_drops`、`craft_item`、`place_block`、`drop_item`、`accept_items`、`smelt_item`、`trade_villager`、`enchant_item`、`sleep_in_bed`、`excavate_tunnel`、`build_nether_portal`、`travel_to_dimension`。`drop_item` 是 Bot 给玩家；`accept_items` 是拾取明确玩家身边近期匹配掉落物并验证背包增加。合成走真实 2×2/3×3 菜单；熔炼、交易和附魔走对应容器并以背包增量/附魔状态确认。采掘工具由 `ToolSelector` 扫描整个背包，正确掉落类别优先于纯速度；剩余耐久大于 0 的近乎报废工具会得到优先使用分，直至损坏。待机清理只丢未附魔工具/武器，不丢盔甲。背包换入快捷栏后等待下一 Tick才开挖。玩家/未知归属容器始终不支持。
 
 `place_block.itemId` 可省略以自动选择安全材料，`count` 范围 1–16；当前 Java 白名单包括泥土类、基础石材、木板、羊毛、原木/木头和基础设施方块。每个候选位置必须通过玩家结构扫描、已加载、可替换、稳定支撑、碰撞、方块实体、危险源、撤退路线及服务端 `mayUseItemAt` 检查。`craft_item.itemId` 是目标物品 ID，`count` 是目标新增数量；3×3 工作台搜索半径为 8 格，且必须在 `owned-blocks.json` 中登记并与服务端现状一致。
 - 安全/住所：`seek_shelter`、`build_shelter`、`wait_safe`。长期规划会准备材料、建固定住所、取得三份同色羊毛、制作并登记床；夜间 `sleep_in_bed` 以 `player.isSleeping()` 确认睡觉和重生点设置。

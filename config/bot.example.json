@@ -49,7 +49,7 @@
     "requireMention": true,
     "replyPrefix": "",
     "cooldownMs": 2500,
-    "proactiveEnabled": true,
+    "proactiveEnabled": false,
     "proactiveIdleMs": 180000,
     "proactiveMinIntervalMs": 300000
   },
@@ -80,6 +80,7 @@
   },
   "autonomy": {
     "enabled": true,
+    "mode": "companion",
     "ownerName": "wraaaaaa",
     "commandArbitrationMs": 350,
     "contextualAddressing": true,
@@ -91,6 +92,11 @@
     "hostileScanRadius": 12,
     "wildernessMinPlayerDistance": 48,
     "safeIdleEnabled": true,
+    "autoInviteNearbyPlayers": true,
+    "inviteRadius": 7,
+    "inviteCooldownMs": 1800000,
+    "discardWornTools": true,
+    "wornToolRemainingDurability": 1,
     "autoGather": true,
     "autoCraft": true,
     "autoBuildShelter": true,

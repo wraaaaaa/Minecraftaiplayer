@@ -81,7 +81,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
     socket.setEncoding('utf8')
     socket.write(`${JSON.stringify({ type: 'hello', protocolVersion: 1, adapter: 'fabric-26.2' })}\n`)
     await connecting
-    socket.write(`${JSON.stringify({ type: 'state', connected: true, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventory: [{ name: '石头', itemId: 'minecraft:stone', placeableBlockId: 'minecraft:stone', count: 3 }], nearbyPlayers: [{ name: 'Alice', distance: 4 }], blockSurvey: { radius: 8, verticalRadius: 5, sampledBlocks: 3179, solidBlocks: 1200, blockEntityCount: 0, center: { x: 1, y: 64, z: 2 }, resources: [{ blockId: 'minecraft:stone', category: 'stone', count: 500, nearestDistance: 1, nearest: { x: 1, y: 63, z: 2 } }], artificial: [], other: [], classification: 'natural_terrain_likely', protectedLikely: false, reasons: ['natural_resource_blocks_detected'] }, activePrimitive: 'seek_shelter', navigationStatus: 'route=6; waypoint=2; target=10,64,10', home: { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, doorX: 9, doorY: 65, doorZ: 9, persisted: true } })}\n`)
+    socket.write(`${JSON.stringify({ type: 'state', connected: true, position: { x: 1, y: 64, z: 2 }, health: 20, food: 20, inventory: [{ name: '石头', itemId: 'minecraft:stone', placeableBlockId: 'minecraft:stone', count: 3 }], nearbyPlayers: [{ name: 'Alice', distance: 4 }], blockSurvey: { radius: 8, verticalRadius: 5, sampledBlocks: 3179, solidBlocks: 1200, blockEntityCount: 0, center: { x: 1, y: 64, z: 2 }, resources: [{ blockId: 'minecraft:stone', category: 'stone', count: 500, nearestDistance: 1, nearest: { x: 1, y: 63, z: 2 } }], artificial: [], other: [], classification: 'natural_terrain_likely', protectedLikely: false, reasons: ['natural_resource_blocks_detected'] }, activePrimitive: 'seek_shelter', navigationStatus: 'route=6; waypoint=2; target=10,64,10', home: { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, radius: 10, source: 'first_home', doorX: 9, doorY: 65, doorZ: 9, persisted: true } })}\n`)
     await delay(20)
     assert.deepEqual(bridge.snapshot().position, { x: 1, y: 64, z: 2 })
     assert.equal(bridge.snapshot().nearbyPlayers[0]?.name, 'Alice')
@@ -90,7 +90,7 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
     assert.equal(bridge.snapshot().blockSurvey?.resources[0]?.nearest?.y, 63)
     assert.equal(bridge.snapshot().activePrimitive, 'seek_shelter')
     assert.equal(bridge.snapshot().navigationStatus, 'route=6; waypoint=2; target=10,64,10')
-    assert.deepEqual(bridge.snapshot().home, { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, doorX: 9, doorY: 65, doorZ: 9, persisted: true })
+    assert.deepEqual(bridge.snapshot().home, { dimension: 'minecraft:overworld', x: 8, y: 65, z: 9, radius: 10, source: 'first_home', doorX: 9, doorY: 65, doorZ: 9, persisted: true })
 
     socket.write(`${JSON.stringify({ type: 'game_message', message: '<[管理员]Alice> @CialloAI 跟我来' })}\n`)
     await delay(20)

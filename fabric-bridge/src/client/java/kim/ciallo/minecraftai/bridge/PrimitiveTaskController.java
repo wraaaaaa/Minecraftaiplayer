@@ -1887,25 +1887,25 @@ public final class PrimitiveTaskController {
     }
 
     private static double blockToolScore(ItemStack stack, BlockState state) {
-        if (stack == null || stack.isEmpty() || stack.get(DataComponents.TOOL) == null || !hasSafeDurability(stack)) {
+        if (stack == null || stack.isEmpty() || stack.get(DataComponents.TOOL) == null || !hasUsableToolDurability(stack)) {
             return Double.NEGATIVE_INFINITY;
         }
         double score = stack.getDestroySpeed(state);
         if (stack.isCorrectToolForDrops(state)) score += 10_000.0D;
         int enchantments = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
-        return score + enchantments * 0.01D;
+        return score + wearOutBonus(stack) + enchantments * 0.01D;
     }
 
     private static double genericToolScore(ItemStack stack) {
-        if (stack == null || stack.isEmpty() || !hasSafeDurability(stack)) return Double.NEGATIVE_INFINITY;
+        if (stack == null || stack.isEmpty() || !hasUsableToolDurability(stack)) return Double.NEGATIVE_INFINITY;
         Tool tool = stack.get(DataComponents.TOOL);
         if (tool == null) return Double.NEGATIVE_INFINITY;
         int enchantments = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
-        return tool.defaultMiningSpeed() * 10.0D + enchantments * 0.5D;
+        return tool.defaultMiningSpeed() * 10.0D + wearOutBonus(stack) + enchantments * 0.5D;
     }
 
     private static double weaponScore(LocalPlayer player, ItemStack stack) {
-        if (stack == null || stack.isEmpty() || !stack.has(DataComponents.WEAPON) || !hasSafeDurability(stack)) {
+        if (stack == null || stack.isEmpty() || !stack.has(DataComponents.WEAPON) || !hasUsableToolDurability(stack)) {
             return Double.NEGATIVE_INFINITY;
         }
         ItemAttributeModifiers modifiers = stack.get(DataComponents.ATTRIBUTE_MODIFIERS);
@@ -1923,6 +1923,7 @@ public final class PrimitiveTaskController {
         );
         int enchantments = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
         return damage * Math.max(0.25D, Math.min(8.0D, speed))
+            + wearOutBonus(stack)
             + enchantments * 0.35D
             + (stack.has(DataComponents.WEAPON) ? 2.0D : 0.0D);
     }
@@ -1977,6 +1978,17 @@ public final class PrimitiveTaskController {
         if (!stack.isDamageableItem() || stack.getMaxDamage() <= 0) return true;
         int remaining = stack.getMaxDamage() - stack.getDamageValue();
         return remaining >= Math.max(5, (int) Math.ceil(stack.getMaxDamage() * 0.2D));
+    }
+
+    private static boolean hasUsableToolDurability(ItemStack stack) {
+        return !stack.isDamageableItem() || stack.getMaxDamage() <= 0
+            || stack.getMaxDamage() - stack.getDamageValue() > 0;
+    }
+
+    private static double wearOutBonus(ItemStack stack) {
+        if (!stack.isDamageableItem() || stack.getMaxDamage() <= 0) return 0.0D;
+        int remaining = stack.getMaxDamage() - stack.getDamageValue();
+        return remaining > 0 && remaining <= 3 ? 100.0D : 0.0D;
     }
 
     private static boolean isSafeConsumableFood(LocalPlayer player, ItemStack stack) {

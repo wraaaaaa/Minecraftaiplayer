@@ -249,6 +249,8 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
   const testConfig = structuredClone(config)
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
+    mode: 'survival',
+    autoInviteNearbyPlayers: false,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -16, minY: 60, minZ: -16, maxX: 16, maxY: 90, maxZ: 16 }
   }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
@@ -280,6 +282,8 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
   testConfig.chat = { ...testConfig.chat, proactiveEnabled: true, proactiveIdleMs: 0, proactiveMinIntervalMs: 0 }
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
+    mode: 'survival',
+    autoInviteNearbyPlayers: false,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
   }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
@@ -298,6 +302,75 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
     { type: 'prepare_for', purpose: 'mining' },
     { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa', verifiedWilderness: true },
     { type: 'collect_own_drops', count: 2, radius: 16 }
+  ])
+  await logger.flush()
+})
+
+test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止跟随回家', async () => {
+  const suffix = `${process.pid}-${Date.now()}-companion-invite`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000 }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  let providerCalls = 0
+  const actions: AgentAction[] = []
+  const chats: string[] = []
+  const controller = new AgentController({
+    config: testConfig, persona, prompts,
+    provider: { complete: async () => { providerCalls++; throw new Error('陪伴待机不应调用模型') } },
+    memory, experience, policy: new PolicyEngine(rules),
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async message => { chats.push(message) } },
+    logger, tasks, secrets: new SecretGuard([])
+  })
+
+  await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+  await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice' }, '不需要', { ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+
+  assert.equal(providerCalls, 0)
+  assert.deepEqual(actions, [
+    { type: 'follow_player', target: 'Alice' },
+    { type: 'gesture', gesture: 'happy' },
+    { type: 'stop' },
+    { type: 'return_home' }
+  ])
+  assert.equal(chats.length, 2)
+  assert.match(chats[0] ?? '', /要不要|好不好/u)
+  assert.match(chats[1] ?? '', /不打扰|不跟/u)
+  await logger.flush()
+})
+
+test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', async () => {
+  const suffix = `${process.pid}-${Date.now()}-companion-standby`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', autoInviteNearbyPlayers: false, commandArbitrationMs: 0 }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  let providerCalls = 0
+  const actions: AgentAction[] = []
+  const controller = new AgentController({
+    config: testConfig, persona, prompts,
+    provider: { complete: async () => { providerCalls++; throw new Error('陪伴待机不应调用模型') } },
+    memory, experience, policy: new PolicyEngine(rules),
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: 'verified' } }, chat: async () => {} },
+    logger, tasks, secrets: new SecretGuard([])
+  })
+  const safeWorld: WorldState = { ...world, nearbyPlayers: [], environment: { isNight: false, safeToIdle: true } }
+  await controller.proactiveTick(safeWorld)
+  await controller.proactiveTick(safeWorld)
+  await controller.proactiveTick({
+    ...safeWorld,
+    position: { x: 0, y: 64, z: 0 },
+    home: { dimension: 'minecraft:overworld', x: 100, y: 64, z: 100, radius: 10, source: 'first_home' },
+    activePrimitive: 'return_home'
+  })
+  assert.equal(providerCalls, 0)
+  assert.deepEqual(actions, [
+    { type: 'discard_worn_tools', remainingDurability: 1 },
+    { type: 'wait_safe' }
   ])
   await logger.flush()
 })

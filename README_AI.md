@@ -1584,6 +1584,62 @@ WebUI 增加玩家/空闲 Agent 步数和 TP 权限开关。每次工具调用�
 
 ### 29.4 工具选择与 Token 边界
 
-`ToolSelector.ensureBestMiningTool` 的 false 不代表没有工具：可能表示已发出背包到快捷栏的 SWAP，调用者必须 return 并在下一 Tick 重试。高级矿道、探索开路、要塞下探和空气救援都遵守此契约；不得在 SWAP 同一 Tick 调用 `startDestroyBlock`。评分中正确掉落类别远高于速度，避免错误工具；近乎损坏的工具不选。没有 TOOL 组件时返回 true，让调用层按空手/当前物品继续，具体方块是否允许掉落仍由任务后置条件决定。
+`ToolSelector.ensureBestMiningTool` 的 false 不代表没有工具：可能表示已发出背包到快捷栏的 SWAP，调用者必须 return 并在下一 Tick 重试。高级矿道、探索开路、要塞下探和空气救援都遵守此契约；不得在 SWAP 同一 Tick 调用 `startDestroyBlock`。评分中正确掉落类别远高于速度，避免错误工具；近乎损坏但剩余耐久仍大于 0 的工具会优先继续用坏。没有 TOOL 组件时返回 true，让调用层按空手/当前物品继续，具体方块是否允许掉落仍由任务后置条件决定。
 
 Token 收缩只删除重复和限长历史，不删除硬规则、当前玩家画像、人格或 JSON 参数校验。续轮仍通过 `compactContinuation` 保存最新合法工具协议和最多 16 条真实账本；实际供应商 usage 继续写诊断。未来如果再缩短，应先增加测试证明关键安全语义仍在，并用私有隔离探针比较真实 input tokens，禁止只按字符串长度宣称节省。
+
+## 30. 2026-08-11：默认陪伴模式、零 Token 待机和低层连续动作交接
+
+本节是当前行为真值，优先于前面带日期的自主生存历史快照。产品定位已由“无人时持续发育直到末地”调整为“玩家出现时陪伴、跟随和聊天的队友”。自主生存实现没有从仓库物理删除，因为玩家明确任务和后续研究仍会复用这些工具；但它只在 `autonomy.mode:"survival"` 下进入空闲模型循环，默认 `companion` 不会启动。不要再把 `longTermGoal:reach_end`、`autoMine` 等保留字段解释成陪伴模式会自动执行。
+
+### 30.1 配置和状态机
+
+`AutonomyConfig` 新增：
+
+- `mode: "companion" | "survival"`，默认 `companion`。
+- `autoInviteNearbyPlayers:true`、`inviteRadius:7`、`inviteCooldownMs:1800000`。
+- `discardWornTools:true`、`wornToolRemainingDurability:1`。
+
+定义、默认值和旧配置归一化位于 `src/config/types.ts`，边界校验位于 `src/config/load-config.ts`；WebUI 的读写映射在 `public/webui/app.js`。旧私有 `bot.json` 没有这些字段时会用默认值，不需要人工迁移才能启动。`config/bot.example.json` 同时把 `chat.proactiveEnabled` 改为 false。
+
+`AgentController.#runProactiveTick` 在处理本地危险后先调用 `#maybeInvitePassingPlayer`。若为 companion 且不存在任务/持续动作，则进入 `#runCompanionStandby`，不会构造 `ToolAgent`，因此模型 API 调用为零。待机规则：已有 home 且不在区域内就执行一次 `return_home`；没有 home 但真实状态不安全才 `seek_shelter`；安全后只执行一次 `wait_safe` 并设置 `#standbyEngaged`，后续 Tick 直接返回。每五分钟可执行一次完全本地的近乎报废工具清理。玩家消息、受击/危险和新任务会清除待机标志。
+
+路过邀请以“上个 Tick 不在半径、本 Tick 新进入”为触发，不会反复扫描同一个站在旁边的玩家。程序先启动 `follow_player`，再以固定自然句式询问并执行 `gesture:happy`，不调用模型。`#pendingCompanionInvite` 记录玩家和到期时间；接受/拒绝口语由本地正则识别，拒绝无需再次叫 Bot 名。拒绝会 `stop -> return_home`；接受保留持续跟随并执行两次蹲下。按玩家名维护冷却，玩家主动说话也会登记为已接触，避免 Bot 刚回复又发邀请。
+
+Java `activeTaskType()` 现在区分 `follow_player`、`return_home` 与普通 `movement`。邀请只允许替换空闲状态，或已经回到 home 的 `return_home`；不会覆盖现有长期跟随。这一字符串也是 `WorldState.activePrimitive` 的真值，Node 不应再把所有移动都笼统当成可替换 `movement`。
+
+### 30.2 持久任务、建房和采矿边界
+
+玩家任务仍通过 `TaskStore` 持久化，控制器重启时恢复孤立 `running` 并继续 `queued`。持续物理技能在 Java 客户端内逐 Tick 运行，不应每个方块回到模型：
+
+- `build_shelter` 已作为一个 Tool Agent 工具直接映射到同名 `AgentAction`，Fabric 的 `ShelterController` 完成固定 3×3 住所的全部放置和后置条件。系统提示明确要求先到目标区域，再只调用一次该技能，禁止多个 `place_block` 循环。
+- `eat_safe_food` 映射到客户端 `eat_best_food`；它是完整消费动作，不是单次右键草稿。
+- `discard_worn_tools` 是本地背包清理工具。
+
+私有总聊天定位到旧建房延迟根因：一次任务在采集失败后尝试了非法快捷栏 10，随后连续六次模型调用 `place_block`；8 次 API 上限内约消耗 70,325 Token，却只放了少量方块。修复策略不是提高步数，而是把重复物理循环下沉到 Fabric 连续技能，并在首轮/续轮系统规则同时禁止逐块建房。`FOLLOWUP_SYSTEM` 必须继续保留该约束和严格 `<say>` 出口，避免上下文压缩后安全语义消失。
+
+采矿提示已改为优先玩家带领到已知天然洞穴；禁止垂直直挖。当前世界感知只覆盖已加载邻域，没有跨地图洞穴索引，所以无法诚实实现“自动找到任意天然矿坑”。`excavate_safely` 仍是实验性阶梯后备而非默认策略。陪伴模式空闲不会采矿。后续如果实现 CaveLocator，应基于已加载区块的洞穴连通性、返回路径账本和真实进出后置条件，不可用模型臆测坐标。
+
+### 30.3 耐久、基础陪伴动作和聊天出口
+
+Java `ToolSelector`、`PrimitiveTaskController`、`SurvivalController` 不再排除剩余耐久 1–3 的工具/武器。剩余耐久大于 0 即可用，并给近乎报废工具较高选择分，让它优先被正常使用直至损坏；盔甲选择仍保留安全耐久门槛。`discard_worn_tools` 在 `MinecraftAiBridgeClient` 扫描普通背包槽，只丢 damageable 且带 TOOL/WEAPON 组件、无附魔、剩余耐久不高于阈值的物品；不丢盔甲、附魔物品或正常工具。Mineflayer 诊断适配器也只匹配镐/斧/铲/锄/剑名称。
+
+`gesture` 为本地动作：`acknowledge` 两次蹲下，`happy` 两次跳跃，`afraid` 短时冲刺加跳跃。开工回调用 `onToolSelected` 与 acknowledge 并发；成功结果触发 happy；本地威胁可触发 afraid。完成后必须释放 Shift/Jump/Sprint，`stop` 也要清除所有移动键。动作名和回执只进入诊断。
+
+最终游戏回复采用 `src/agent/game-reply.ts` 的双层边界。新模型合约要求最终文字只能出现在最后一个 `<say>...</say>` 内；存在标签时只抽取标签内容。无标签旧供应商走兼容清洗，过滤 JSON、代码块、工具/函数名、命名空间 ID、内部动词、`停止所有动作` 和执行回执。详细失败、模型文本和工具参数只写 `data/diagnostics.json`/WebUI 总聊天。不得为了“可观察”把内部日志重新发回 MC 聊天。
+
+### 30.4 模组兼容的诚实结论
+
+`scripts/sync-client-mods.mjs` 会验证 JAR/ZIP 文件头、复制未被排除的文件、计算 SHA-256，并在 `managed-mods.json` 为每项写 `compatibility` 提示。文件名可提示明显的 Forge/NeoForge、Quilt-only 或 server-only 风险；顶层 `compatibilityGuarantee` 固定为 `best_effort_copy_and_fabric_runtime_validation`。
+
+这不是任意模组加载器，也不可能静态保证未来任意 mod：Minecraft/Fabric/Java 版本、客户端/服务端环境、前置依赖、Mixin 冲突、渲染和音频要求、登录握手都只能由 Fabric 实际启动验证。正确升级流程是更新私有 `config/mods.json.sourceDirectory` 指向的文件夹，重新同步，查看兼容提示，启动真实 26.2 客户端并检查 `latest.log`/是否进服。公共仓库不能记录真实来源路径或服务器必需模组清单。
+
+### 30.5 WebUI 和验证快照
+
+总控台保留暖白/橙色主题，新增多层半透明渐变、`backdrop-filter`、边缘高光、悬浮位移和背景流体动画，并为 `prefers-reduced-motion` 禁用动画。陪伴模式、邀请半径/冷却、近乎报废工具清理都可视化编辑；旧生存开关明确标为实验能力。模组页直接说明复制不等于兼容。
+
+本次候选的自动验证：`npm run check` 通过；Node 测试 118/118 通过；`npm run build` 通过；Java 25 下 Fabric Gradle build 通过。浏览器回归确认桌面与 390×844 视口无水平溢出，新控件存在、默认 mode 为 companion、毛玻璃计算样式生效、控制台无 warning/error。新增测试覆盖 companion 空闲零 provider 调用、路过邀请拒绝回家、待机一次清理、严格 `<say>` 清洗、build/eat/discard 连续动作映射。
+
+私有部署实服回归同步 23 个受管 mod 且无同步器警告，Headless Fabric 26.2 最终连接桥并通过 EasyAuth。第一次空闲观察暴露两个配置/状态问题：私有 `.env` 缺少 EasyAuth 密码；旧本机私密副本仍有该项，因此通过 WebUI secret API 只恢复缺失字段，没有输出值或覆盖其他秘密。其次，Fabric 明明上报 first-home radius/source，`FabricBridgeClient` 归一化却丢弃它们，Node 退回半径 2，导致边界附近每分钟重新发 `return_home`。现已在桥消息类型和归一化保留 `radius/source`，`insideHome` 加 0.75 格块中心容差，且 activePrimitive 已是 `return_home` 时不重复下发。重建后 Bot 从半径外返回第一个家，途中本地处理一次敌对威胁，随后 `activePrimitive` 清空并写入 `source=companion-local, tokenCost=0` 的零 Token 待机事件；该时段模型事件计数为 0。现场没有其他玩家，路过邀请/拒绝、动作表情和物品交换只有自动回归/编译证据，尚未新增多人现场证据。
+
+同步到私有部署目录时，只复制源码、测试、模板和文档；绝不覆盖 `.env`、`config/bot.json` 中的真实连接/模型值、`config/persona.json`、`data/agent-prompts/SOUL.md`/`IDENTITY.md`、记忆、玩家画像、日志和 `.runtime` 业务状态。可用小脚本只向私有 bot.json 合并上述新字段并保持其他键值。公共提交前运行 `npm run audit`、`git diff --check`、`git ls-files` 敏感路径检查；公共文档只能使用 `你的域名.com`。

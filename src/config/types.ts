@@ -89,6 +89,8 @@ export interface BotConfig {
   }
   autonomy?: {
     enabled: boolean
+    /** Companion mode never asks the model to invent idle survival goals. */
+    mode?: 'companion' | 'survival'
     ownerName: string
     commandArbitrationMs: number
     contextualAddressing: boolean
@@ -100,6 +102,11 @@ export interface BotConfig {
     hostileScanRadius: number
     wildernessMinPlayerDistance: number
     safeIdleEnabled: boolean
+    autoInviteNearbyPlayers?: boolean
+    inviteRadius?: number
+    inviteCooldownMs?: number
+    discardWornTools?: boolean
+    wornToolRemainingDurability?: number
     autoGather: boolean
     autoCraft: boolean
     autoBuildShelter: boolean
@@ -145,6 +152,7 @@ export interface BotConfig {
 
 export interface AutonomyConfig {
   enabled: boolean
+  mode: 'companion' | 'survival'
   ownerName: string
   commandArbitrationMs: number
   contextualAddressing: boolean
@@ -156,6 +164,11 @@ export interface AutonomyConfig {
   hostileScanRadius: number
   wildernessMinPlayerDistance: number
   safeIdleEnabled: boolean
+  autoInviteNearbyPlayers: boolean
+  inviteRadius: number
+  inviteCooldownMs: number
+  discardWornTools: boolean
+  wornToolRemainingDurability: number
   autoGather: boolean
   autoCraft: boolean
   autoBuildShelter: boolean
@@ -193,6 +206,7 @@ export interface AutonomyConfig {
 
 export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   enabled: true,
+  mode: 'companion',
   ownerName: 'wraaaaaa',
   commandArbitrationMs: 350,
   contextualAddressing: true,
@@ -204,6 +218,11 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   hostileScanRadius: 12,
   wildernessMinPlayerDistance: 48,
   safeIdleEnabled: true,
+  autoInviteNearbyPlayers: true,
+  inviteRadius: 7,
+  inviteCooldownMs: 30 * 60_000,
+  discardWornTools: true,
+  wornToolRemainingDurability: 1,
   autoGather: true,
   autoCraft: true,
   autoBuildShelter: true,

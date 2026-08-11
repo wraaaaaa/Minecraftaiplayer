@@ -16,6 +16,16 @@ test('工具结果与自然台词混在一起时不把执行回执发进游戏�
   assert.equal(naturalGameText(raw, '我在。', 'wraaaaaa'), '我已经停下来了，就在原地乖乖等你，不走也不挖了喵~')
 })
 
+test('显式 say 边界只放行玩家台词并丢弃标签外调用过程', () => {
+  const raw = '我准备调用 build_shelter，参数已确认。<say>主人，我先把小屋认真搭好，你在旁边陪陪我嘛~</say>工具执行结束。'
+  assert.equal(naturalGameText(raw, '我在。', 'wraaaaaa'), '主人，我先把小屋认真搭好，你在旁边陪陪我嘛~')
+})
+
+test('停止所有动作等执行回执不会进入游戏聊天', () => {
+  const raw = '@wraaaaaa 我已经执行工具，停止所有动作。<say>好啦，我就在这里乖乖等你，哪儿也不去喵~</say>'
+  assert.equal(naturalGameText(raw, '我在。', 'wraaaaaa'), '好啦，我就在这里乖乖等你，哪儿也不去喵~')
+})
+
 test('确认语有轮换且同一玩家不会连续收到完全相同文本', () => {
   const composer = new ReplyComposer()
   const replies = Array.from({ length: 8 }, (_, index) => composer.acknowledgement(`task-${index}`))

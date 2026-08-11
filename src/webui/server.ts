@@ -261,7 +261,7 @@ async function snapshot(): Promise<unknown> {
     readJson<SkinConfig>(files.skin, files.skinExample),
     readJson<BehaviorRules>(files.rules),
     readJson<ModsConfig>(files.mods, files.modsExample),
-    readJson<{ sourceDirectory?: string; syncedAt?: string; files?: Array<{ name: string; size: number; sha256: string }> }>(files.modManifest).catch(() => ({ files: [] })),
+    readJson<{ sourceDirectory?: string; syncedAt?: string; compatibilityNotice?: string; files?: Array<{ name: string; size: number; sha256: string; compatibility?: { status: string; note: string } }> }>(files.modManifest).catch(() => ({ files: [] })),
     readRuntimeJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
     readRuntimeJson<MemoryDocument>(memoryFile).catch(() => null),
     readRuntimeJson<ExperienceDocument>(experienceFile).catch(() => null),

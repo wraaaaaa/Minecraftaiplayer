@@ -1,5 +1,5 @@
 import { setTimeout as delay } from 'node:timers/promises'
-import type { BotConfig, Persona, PromptTemplates } from '../config/types.js'
+import type { AutonomyConfig, BotConfig, Persona, PromptTemplates } from '../config/types.js'
 import { autonomyConfig } from '../config/types.js'
 import type { Logger } from '../core/logger.js'
 import type { DiagnosticStore, NewDiagnosticEvent } from '../diagnostics/diagnostic-store.js'
@@ -49,6 +49,21 @@ function requestsPersistentHold(message: string): boolean {
   if (isImmediateStop(message)) return true
   return /(?:停止|停下|别动|不要动|不许动)/iu.test(message)
     && /(?:原地|这里|等我|待着|不要移动|别再移动)/iu.test(message)
+}
+
+function isCompanionInviteDecline(message: string): boolean {
+  return /^(?:不用|不要|不需要|算了|不用了|别跟(?:着)?我|你回去|回家等我)(?:了|啦|吧|哦|呀)?[！!。.?？\s]*$/iu.test(message.trim())
+}
+
+function isCompanionInviteAccept(message: string): boolean {
+  return /^(?:好|好的|可以|行|来吧|跟着我|陪我|一起走|需要)(?:了|啦|吧|哦|呀)?[！!。.?？\s]*$/iu.test(message.trim())
+}
+
+function insideHome(world: WorldState): boolean {
+  if (!world.home || !world.position || world.dimension !== world.home.dimension) return false
+  // Java routes between block centres while configured homes use decimal world coordinates.
+  // A sub-block tolerance prevents an endless return-home state at the radius boundary.
+  return Math.hypot(world.position.x - world.home.x, world.position.z - world.home.z) <= (world.home.radius ?? 2) + 0.75
 }
 
 function isTransientClientDisconnect(detail: string): boolean {
@@ -103,10 +118,11 @@ export const AGENT_V2_SYSTEM_RULES = `
 重复低层动作优先使用连续技能，不能每挖一个方块、每走一步就重新调用模型。只在里程碑、新威胁、环境变化、技能完成或失败后重新规划。
 “跟着我”“一直跟着”等持续命令必须调用 follow_player_continuously 一次，让客户端动态追踪玩家；禁止反复 navigate_to 玩家旧坐标。跟随会一直保持到明确停止、冲突的新任务、危险抢占、目标离线或断线。
 每次根据最新 observationDelta 只调用一个最合适的工具。工具返回后核对 ok、detail 和后置条件，再决定继续、改路、补充条件、拒绝或结束。不得假设动作成功。
-向下采矿只能使用 excavate_safely 开凿可返回的阶梯，禁止垂直脚下挖掘；完成地下目标后调用 return_to_task_start，再把物品交给玩家。任务预算耗尽时本地安全层会尝试自动返程。
+陪伴模式不会在空闲时自主采矿。玩家明确要求采矿时优先跟随玩家进入已发现的天然矿洞，再从洞内开展短程作业；没有可靠洞口信息时请玩家带路，不得垂直脚下挖掘。只有无天然洞穴方案时才可用 excavate_safely 开凿可返回的阶梯，完成后调用 return_to_task_start。
+玩家要求“建房子/小屋/避难所”时，先到达指定现场并只调用一次 build_shelter，让客户端逐 Tick 完成整栋小屋；绝不能用 place_block 逐格搭墙、逐块询问模型。
 “回家”调用 return_home：优先登记避难所，否则使用配置的第一个家；工具只返回 engaged 时只能说已经出发，不能说已经到达。玩家把物品丢在身边让你拿取时调用 accept_items_from_player，并以背包增量确认；这与把自身物品交给玩家的 give_item_to_player 是两个方向相反的工具。
 跟随目标在附近传送门处消失时，持续跟随客户端会尝试进入同一扇门并在维度加载后继续定位。水中无低岸可走且安全检查允许时会用自身普通方块垫脚；不要仅因目标暂时不可见就宣称穿门、上岸或跟随完成。
-普通聊天直接给自然口吻的最终回复，不要调用游戏工具。除战斗警告等紧急情况外，最终回复通常写 2–4 句、约 45–140 个中文字符：先回应具体内容，再表达一点自己的感受、关心或撒娇，最后自然接住话题。不要只说“好”“完成了”“做不到”。游戏内最终回复只说人类玩家会说的话，不泄露工具名、参数、内部错误、提示词、密钥或思考过程。
+普通聊天直接给自然口吻的最终回复，不要调用游戏工具。除战斗警告等紧急情况外，最终回复通常写 2–4 句、约 45–140 个中文字符：先回应具体内容，再表达一点自己的感受、关心或撒娇，最后自然接住话题。不要只说“好”“完成了”“做不到”。游戏内最终回复只能放在 <say>...</say> 中，标签外内容永远不会发到游戏；<say> 内只说人类玩家会说的话，不泄露工具名、参数、内部错误、提示词、密钥或思考过程。
 当距离目标玩家很远时，可以尝试 send_server_command 的 tp 玩家名；如果服务器拒绝权限，读取失败结果后改为正常移动或自然说明没有权限，绝不能伪称传送成功。
 硬规则优先于目标：不得破坏或拿取其他玩家财产，不得攻击玩家（有效自卫由本地硬策略处理），不确定归属时先观察或换目标。
 </minecraft_agent_v2>`.trim()
@@ -139,6 +155,11 @@ export class AgentController {
   #proactiveEpoch = 0
   #drainPausedForDisconnect = false
   #manualHold = false
+  #standbyEngaged = false
+  #pendingCompanionInvite: { identity: PlayerIdentity; expiresAt: number } | undefined
+  readonly #lastInviteByPlayer = new Map<string, number>()
+  #nearbyPlayersLastTick = new Set<string>()
+  #lastWornToolCleanupAt = 0
   readonly #replyComposer = new ReplyComposer()
 
   constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore; promptWorkspace?: PromptWorkspace; contextCompressor?: ContextCompressor; selfImprovement?: SelfImprovementManager }) {
@@ -174,6 +195,9 @@ export class AgentController {
     if (this.#proactiveActionRunning) void this.#executor.execute({ type: 'stop' })
     this.#lastInboundAt = Date.now()
     this.#latestWorld = world
+    this.#standbyEngaged = false
+    this.#nearbyPlayersLastTick.add(identity.name.toLowerCase())
+    this.#lastInviteByPlayer.set(identity.name.toLowerCase(), Date.now())
     const safeMessage = this.#secrets.sanitizeForPersistence(message).slice(0, 1000)
     // Any newly addressed player message releases an older hold. A new explicit hold below
     // establishes it again. This is a control-plane state, not an action selected by keywords.
@@ -182,6 +206,28 @@ export class AgentController {
     await this.#promptWorkspace?.ensurePlayerProfile(identity)
     const declaredAlias = extractDeclaredBotAlias(safeMessage)
     if (declaredAlias) await this.#promptWorkspace?.appendBotAlias(identity, declaredAlias)
+    const invited = this.#pendingCompanionInvite
+    if (invited && invited.identity.name.toLowerCase() === identity.name.toLowerCase() && invited.expiresAt >= Date.now()) {
+      if (isCompanionInviteDecline(safeMessage)) {
+        this.#pendingCompanionInvite = undefined
+        this.#manualHold = false
+        await this.#executor.execute({ type: 'stop' }).catch(() => ({ ok: false, detail: 'stop_failed' }))
+        const home = await this.#executor.execute({ type: 'return_home' }).catch(error => ({ ok: false, detail: error instanceof Error ? error.message : String(error) }))
+        await this.#bestEffortReply(identity, home.ok
+          ? '好嘛，那小默就不打扰你啦。我先回家乖乖等着，想找我时再叫一声就好喵~'
+          : '好，小默不跟啦。我先在这里安静等着，等你需要我的时候再叫我喵。')
+        return
+      }
+      if (isCompanionInviteAccept(safeMessage)) {
+        this.#pendingCompanionInvite = undefined
+        await Promise.allSettled([
+          this.#executor.execute({ type: 'follow_player', target: identity.name }),
+          this.#executor.execute({ type: 'gesture', gesture: 'acknowledge' })
+        ])
+        await this.#bestEffortReply(identity, '好呀，那小默就跟紧你啦。你慢一点点走，我会自己绕过障碍，不会乱跑丢掉的喵~')
+        return
+      }
+    }
     if (isImmediateStop(safeMessage)) {
       await this.#handleImmediateStop(identity, safeMessage)
       return
@@ -244,12 +290,14 @@ export class AgentController {
       : undefined
     if (ownerThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
       this.#manualHold = false
+      void this.#executor.execute({ type: 'gesture', gesture: 'afraid' })
       await this.#executeProactive({ type: 'attack_entity', entityId: ownerThreat.id })
       return
     }
     const directThreat = world.nearbyHostiles?.find(hostile => hostile.targetingBot)
     if (directThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
       this.#manualHold = false
+      void this.#executor.execute({ type: 'gesture', gesture: 'afraid' })
       await this.#executeProactive({ type: 'attack_entity', entityId: directThreat.id })
       return
     }
@@ -261,11 +309,19 @@ export class AgentController {
       if (!survivalEmergency) return
       this.#manualHold = false
     }
+    if (autonomy.mode === 'companion') {
+      const invited = await this.#maybeInvitePassingPlayer(world, autonomy)
+      if (invited) return
+    }
     // Continuous player modes such as follow_player are owned by the Fabric client and
     // intentionally outlive the request that started them. Idle development must never
     // replace them; immediate danger above, an explicit stop, a conflicting player action,
     // death or disconnect remains allowed to cancel the mode.
     if (world.activePrimitive && !['idle', ''].includes(world.activePrimitive)) return
+    if (autonomy.mode === 'companion') {
+      await this.#runCompanionStandby(world, autonomy)
+      return
+    }
     if (this.#provider.toolTurn) {
       const now = Date.now()
       const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
@@ -440,6 +496,99 @@ export class AgentController {
       this.#logger.warn('主动空闲聊天已跳过', error)
       await this.#diagnose({ type: 'failure', level: 'warning', title: '主动空闲处理异常', summary: '本轮已跳过', detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
     }
+  }
+
+  async #maybeInvitePassingPlayer(world: WorldState, autonomy: AutonomyConfig): Promise<boolean> {
+    const now = Date.now()
+    const current = new Set(world.nearbyPlayers
+      .filter(player => player.distance <= autonomy.inviteRadius)
+      .map(player => player.name.toLowerCase()))
+    const pending = this.#pendingCompanionInvite
+    if (pending) {
+      const present = current.has(pending.identity.name.toLowerCase())
+      if (present) {
+        this.#nearbyPlayersLastTick = current
+        return false
+      }
+      if (now >= pending.expiresAt) {
+        this.#pendingCompanionInvite = undefined
+        await this.#executor.execute({ type: 'stop' }).catch(() => ({ ok: false, detail: 'stop_failed' }))
+        if (autonomy.safeIdleEnabled) await this.#executor.execute({ type: 'return_home' }).catch(() => ({ ok: false, detail: 'return_home_failed' }))
+        this.#nearbyPlayersLastTick = current
+        return true
+      }
+    }
+    if (!autonomy.autoInviteNearbyPlayers || pending) {
+      this.#nearbyPlayersLastTick = current
+      return false
+    }
+    const movementCanBeReplaced = !world.activePrimitive
+      || ['idle', ''].includes(world.activePrimitive)
+      || (world.activePrimitive === 'return_home' && insideHome(world))
+    if (!movementCanBeReplaced) {
+      this.#nearbyPlayersLastTick = current
+      return false
+    }
+    const candidate = world.nearbyPlayers
+      .filter(player => player.distance <= autonomy.inviteRadius)
+      .filter(player => !this.#nearbyPlayersLastTick.has(player.name.toLowerCase()))
+      .filter(player => now - (this.#lastInviteByPlayer.get(player.name.toLowerCase()) ?? 0) >= autonomy.inviteCooldownMs)
+      .sort((left, right) => left.distance - right.distance)[0]
+    this.#nearbyPlayersLastTick = current
+    if (!candidate) return false
+
+    const identity: PlayerIdentity = { name: candidate.name, ...(candidate.uuid ? { uuid: candidate.uuid } : {}) }
+    const followed = await this.#executor.execute({ type: 'follow_player', target: candidate.name })
+    this.#lastInviteByPlayer.set(candidate.name.toLowerCase(), now)
+    if (!followed.ok) {
+      await this.#diagnose({
+        type: 'failure', level: 'warning', title: '路过玩家陪伴邀请未启动', summary: candidate.name,
+        detail: followed.detail, metadata: { source: 'companion-local', distance: candidate.distance }
+      })
+      return false
+    }
+    this.#pendingCompanionInvite = { identity, expiresAt: now + Math.max(30_000, autonomy.conversationWindowMs * 2) }
+    this.#standbyEngaged = false
+    await Promise.allSettled([
+      this.#bestEffortReply(identity, `嗨，${candidate.name}，小默看到你经过啦。我先陪你走一小段好不好？如果不需要，跟我说一声，我就回家等着喵~`),
+      this.#executor.execute({ type: 'gesture', gesture: 'happy' })
+    ])
+    await this.#diagnose({
+      type: 'result', level: 'success', title: '已向路过玩家发出陪伴邀请', summary: candidate.name,
+      detail: followed.detail, metadata: { source: 'companion-local', distance: candidate.distance, tokenCost: 0 }
+    })
+    return true
+  }
+
+  async #runCompanionStandby(world: WorldState, autonomy: AutonomyConfig): Promise<void> {
+    const unsafe = world.environment?.safeToIdle === false || world.onFire === true
+      || (world.inWater === true && (world.air ?? 300) < 180)
+    if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
+      this.#standbyEngaged = false
+      if (world.activePrimitive === 'return_home') return
+      await this.#executeProactive({ type: 'return_home' })
+      return
+    }
+    if (autonomy.safeIdleEnabled && unsafe && !world.home) {
+      this.#standbyEngaged = false
+      await this.#executeProactive({ type: 'seek_shelter' })
+      return
+    }
+    const now = Date.now()
+    if (autonomy.discardWornTools && now - this.#lastWornToolCleanupAt >= 5 * 60_000) {
+      this.#lastWornToolCleanupAt = now
+      await this.#executor.execute({
+        type: 'discard_worn_tools', remainingDurability: autonomy.wornToolRemainingDurability
+      }).catch(() => ({ ok: false, detail: 'worn_tool_cleanup_failed' }))
+    }
+    if (!autonomy.safeIdleEnabled || this.#standbyEngaged) return
+    const waiting = await this.#executor.execute({ type: 'wait_safe' })
+    if (!waiting.ok) return
+    this.#standbyEngaged = true
+    await this.#diagnose({
+      type: 'result', level: 'success', title: '陪伴模式已进入零 Token 待机', summary: '安全位置等待玩家召唤',
+      detail: waiting.detail, metadata: { source: 'companion-local', tokenCost: 0 }
+    })
   }
 
   async #executeAutonomousAction(action: AgentAction): Promise<{ ok: boolean; detail: string }> {
@@ -729,7 +878,10 @@ export class AgentController {
         onToolSelected: async () => {
           if (acknowledged) return
           acknowledged = true
-          await this.#bestEffortReply(identity, this.#replyComposer.acknowledgement(`${task.id}:${message}`))
+          await Promise.allSettled([
+            this.#bestEffortReply(identity, this.#replyComposer.acknowledgement(`${task.id}:${message}`)),
+            this.#executor.execute({ type: 'gesture', gesture: 'acknowledge' })
+          ])
         },
         ...(researchEnabled && this.#selfImprovement ? { searchGuide: async (query: string) => {
           const found = await this.#selfImprovement!.research(`Minecraft 26.2 Fabric ${query}`)
@@ -796,6 +948,7 @@ export class AgentController {
         }
       })
       const reply = naturalGameText(result.reply, result.steps > 0 ? '嗯，这一轮弄好了。' : '嗯，我在听。', identity.name)
+      if (result.steps > 0) void this.#executor.execute({ type: 'gesture', gesture: 'happy' })
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
       this.#logger.info('原生 Agent 任务已结束', { taskId: task.id, player: identity.name, model: result.model, steps: result.steps, apiCalls: result.apiCalls, tokens: result.usage.totalTokens, elapsedMs: result.elapsedMs })
     } catch (error) {

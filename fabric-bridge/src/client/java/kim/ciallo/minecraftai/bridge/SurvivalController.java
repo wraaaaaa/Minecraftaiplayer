@@ -535,7 +535,8 @@ public final class SurvivalController {
 
     private static double weaponScore(LocalPlayer player, ItemStack stack) {
         if (stack == null || stack.isEmpty()) return 0.0D;
-        if (stack.isDamageableItem() && stack.getMaxDamage() - stack.getDamageValue() <= 3) return -1.0D;
+        int remaining = stack.isDamageableItem() ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
+        if (remaining <= 0) return -1.0D;
 
         double baseDamage = player.getAttributeBaseValue(Attributes.ATTACK_DAMAGE);
         double baseSpeed = player.getAttributeBaseValue(Attributes.ATTACK_SPEED);
@@ -548,7 +549,8 @@ public final class SurvivalController {
             : modifiers.compute(Attributes.ATTACK_SPEED, baseSpeed, EquipmentSlot.MAINHAND);
         int enchantmentLevels = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
         double weaponBonus = stack.has(DataComponents.WEAPON) ? 2.0D : 0.0D;
-        return damage * Math.max(0.25D, Math.min(speed, 8.0D)) + enchantmentLevels * 0.35D + weaponBonus;
+        double wearOutBonus = remaining <= 3 ? 100.0D : 0.0D;
+        return damage * Math.max(0.25D, Math.min(speed, 8.0D)) + wearOutBonus + enchantmentLevels * 0.35D + weaponBonus;
     }
 
     private static void selectHotbar(LocalPlayer player, int slot) {

@@ -72,13 +72,17 @@ final class ToolSelector {
 
     private static double score(ItemStack stack, BlockState state) {
         if (stack == null || stack.isEmpty() || !stack.has(DataComponents.TOOL)) return Double.NEGATIVE_INFINITY;
-        if (stack.isDamageableItem() && stack.getMaxDamage() - stack.getDamageValue() <= 3) return Double.NEGATIVE_INFINITY;
+        int remaining = stack.isDamageableItem() ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
+        if (remaining <= 0) return Double.NEGATIVE_INFINITY;
         double score = stack.getDestroySpeed(state);
         // Correct drop capability dominates raw speed, preventing shovel-on-stone and
         // pickaxe-on-dirt choices whenever the matching tool exists.
         if (stack.isCorrectToolForDrops(state)) score += 10_000.0D;
         int enchantments = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
-        return score + enchantments * 0.01D;
+        // Prefer finishing a nearly worn-out correct tool instead of permanently hoarding it.
+        // Minecraft removes the stack itself after the final legal use.
+        double wearOutBonus = remaining <= 3 ? 100.0D : 0.0D;
+        return score + wearOutBonus + enchantments * 0.01D;
     }
 
     private static void select(LocalPlayer player, int slot) {

@@ -69,6 +69,27 @@ test('模型可自主选择回家与接收玩家物品接口', async () => {
   ])
 })
 
+test('建房、进食和磨损工具清理都映射为一次客户端技能', async () => {
+  const provider = turns(
+    { text: '', toolCalls: [{ id: 'eat', name: 'eat_safe_food', arguments: '{}' }], continuation: { turn: 1 }, model: 'mock', requestedEffort: 'high', effectiveEffort: 'high' },
+    { text: '', toolCalls: [{ id: 'clean', name: 'discard_worn_tools', arguments: '{"remaining_durability":1}' }], continuation: { turn: 2 }, model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' },
+    { text: '', toolCalls: [{ id: 'house', name: 'build_shelter', arguments: '{}' }], continuation: { turn: 3 }, model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' },
+    { text: '<say>吃饱也收好背包啦，小屋我会一口气搭完喵~</say>', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+  )
+  const actions: AgentAction[] = []
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 6
+  }).run({ system: 'system', goal: '吃点东西清背包再建一个小屋', initialWorld: initial })
+  assert.equal(result.ok, true)
+  assert.deepEqual(actions, [
+    { type: 'eat_best_food' },
+    { type: 'discard_worn_tools', remainingDurability: 1 },
+    { type: 'build_shelter', verifiedWilderness: true }
+  ])
+})
+
 test('一个工具失败后不会继续旧计划，而是把失败交还模型重新规划', async () => {
   const requests: unknown[] = []
   const provider: LlmProvider = {

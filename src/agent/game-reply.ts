@@ -1,5 +1,6 @@
-const INTERNAL_SENTENCE = /(?:```|\{\s*"?(?:action|actions|type)"?\s*:|\bminecraft:[a-z0-9_]+\b|\b(?:follow_player|follow_player_continuously|navigate_to|move_to|wander|explore_frontier|return_to_zone|return_home|eat_best_food|equip_best|attack_hostile|attack_player|hunt_entity|collect_own_drops|gather_resource|craft_item|place_block|smelt_item|trade_villager|enchant_item|sleep_in_bed|excavate_tunnel|build_nether_portal|travel_to_dimension|drop_item|accept_items_from_player|use_item|seek_shelter|build_shelter|prepare_for|wait_safe)\b|\b(?:tool|function|action)\s*(?:call|name)?\b|^(?:已经|已)(?:停止|开始|完成|确认|选择|装备|移动|跟随|到达|进入|退出|返回|放置|破坏|采集|合成|丢出|拾取|执行)|(?:动作名|调用名|调用指令|工具调用|接口参数|内部指令|思考过程|隐藏思维链|现在回应(?:玩家|主人)|回复(?:玩家|主人)|给(?:他|她|玩家|主人).{0,16}(?:自然|回复)|不需要额外操作|客户端(?:会|已)|持续跟随已启动|模型(?:选择|调用)|执行步骤|坐标参数))/iu
+const INTERNAL_SENTENCE = /(?:```|<\/?(?:tool|analysis|thinking|function)[^>]*>|\{\s*"?(?:action|actions|type)"?\s*:|\bminecraft:[a-z0-9_]+\b|\b(?:follow_player|follow_player_continuously|navigate_to|move_to|wander|explore_frontier|return_to_zone|return_home|eat_best_food|equip_best|attack_hostile|attack_player|hunt_entity|collect_own_drops|gather_resource|craft_item|place_block|smelt_item|trade_villager|enchant_item|sleep_in_bed|excavate_tunnel|build_nether_portal|travel_to_dimension|drop_item|accept_items_from_player|use_item|seek_shelter|build_shelter|prepare_for|wait_safe)\b|\b(?:tool|function|action)\s*(?:call|name)?\b|^(?:final|assistant|回复|答复|游戏回复)\s*[:：]|(?:我)?(?:已经|已|正在|准备|将要)(?:调用|执行|选择|启动|提交)(?:工具|动作|指令|接口|函数)|(?:停止所有动作|动作名|动作列表|执行回执|调用名|调用指令|工具调用|接口参数|内部指令|思考过程|隐藏思维链|现在回应(?:玩家|主人)|回复(?:玩家|主人)|给(?:他|她|玩家|主人).{0,16}(?:自然|回复)|不需要额外操作|客户端(?:会|已)|持续跟随已启动|模型(?:选择|调用)|执行步骤|坐标参数))/iu
 const MENTION = /@[\p{L}\p{N}_-]{1,32}/gu
+const SAY = /<say>([\s\S]*?)<\/say>/giu
 
 function normalize(value: string): string {
   return value.replace(/[\r\n\t]+/gu, ' ').replace(/\s{2,}/gu, ' ').trim()
@@ -11,7 +12,9 @@ function normalize(value: string): string {
  * addressed segment is retained.  Otherwise any internal marker makes the safe fallback win.
  */
 export function naturalGameText(value: string | undefined, fallback: string, recipient?: string): string {
-  let candidate = normalize(value ?? '')
+  const raw = value ?? ''
+  const says = [...raw.matchAll(SAY)]
+  let candidate = normalize(says.at(-1)?.[1] ?? raw.replace(/<\/?say>/giu, ''))
   if (!candidate) return fallback
 
   const mentions = [...candidate.matchAll(MENTION)]

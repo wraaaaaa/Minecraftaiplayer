@@ -25,8 +25,8 @@
       <a href="#central-chat">总聊天</a>
       <a href="#server">服务器</a>
       <a href="#model">大模型</a>
-      <a href="#chat">聊天与自主</a>
-      <a href="#autonomy">自主生存与任务</a>
+      <a href="#chat">聊天与陪伴</a>
+      <a href="#autonomy">陪伴模式与任务</a>
       <a href="#persona">提示词与玩家画像</a>
       <a href="#policy">行为安全</a>
       <a href="#mods">服务器模组</a>
@@ -142,14 +142,14 @@
       </section>
 
       <section id="chat" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与自主行为</h2></div><details><summary>空闲时会不会乱动或刷屏？</summary><p>空闲时间和最小间隔共同限制 AI 决策；动作还会经过环境、财产、危险源和真实后置条件检查。关闭“允许空闲 AI 决策与偶尔聊天”会停用模型驱动的空闲发展，但本地进食、防卫和安全挂机仍由下方总开关控制。</p></details></div>
-        <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>远距离且无对话语境时要求点名</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>允许空闲 AI 决策与偶尔聊天</label></div>
+        <div class="section-heading"><div><p class="eyebrow">SOCIAL & IDLE</p><h2>聊天与陪伴待机</h2></div><details><summary>空闲时会不会乱动或刷屏？</summary><p>默认“陪伴模式”不会在空闲时调用模型，也不会自主挖矿发育；Bot 会回到安全位置并进入零 Token 等待。本地进食、防卫和跟随保护仍会继续。</p></details></div>
+        <div class="toggle-row"><label class="switch"><input id="requireMention" type="checkbox"><span></span>远距离且无对话语境时要求点名</label><label class="switch"><input id="proactiveEnabled" type="checkbox"><span></span>生存实验模式允许空闲模型决策</label></div>
         <div class="form-grid three"><label>回复前缀<input id="replyPrefix" type="text"></label><label>聊天冷却（毫秒）<input id="cooldownMs" type="number" min="0"></label><label>进入空闲决策（毫秒）<input id="proactiveIdleMs" type="number" min="1000"></label><label>空闲决策最小间隔（毫秒）<input id="proactiveMinIntervalMs" type="number" min="1000"></label></div>
       </section>
 
       <section id="autonomy" class="panel autonomy-panel">
         <div class="section-heading">
-          <div><p class="eyebrow">AUTONOMY & TASKS</p><h2>自主生存与任务</h2><p class="muted">管理 Bot 如何识别指令、安排多人任务，并在没有指令时照顾自己。</p></div>
+          <div><p class="eyebrow">COMPANION & TASKS</p><h2>陪伴模式与任务</h2><p class="muted">管理 Bot 如何理解对话、可靠跟随、邀请路过玩家，并在无人召唤时零 Token 待机。</p></div>
           <details open><summary>任务优先级如何决定？</summary><p>安全反射始终最高；玩家任务全局串行执行。普通玩家之间先选择当前距离 Bot 最近的发令者，再处理该玩家更紧急、入队更早的任务。最高优先玩家的任务不受距离影响。</p></details>
         </div>
         <div class="autonomy-summary" role="note">
@@ -171,6 +171,7 @@
               <label class="switch"><input id="contextualAddressing" type="checkbox"><span></span>允许按语境和距离判断是否在叫 Bot</label>
             </div>
             <div class="form-grid two">
+              <label>运行定位<select id="autonomyMode"><option value="companion">陪伴模式（推荐）</option><option value="survival">自主生存实验模式</option></select><small>陪伴模式不启动后台自主发育模型循环。</small></label>
               <label>最高优先玩家<input id="ownerName" type="text" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" title="离线服仅按 3-16 位游戏名识别"><small>默认 wraaaaaa；其任务优先于其他玩家。</small></label>
               <label>收集同时到达指令（毫秒）<input id="commandArbitrationMs" type="number" min="0" max="5000"><small>短暂收集多人消息后再按优先级排序。</small></label>
               <label>近距离直接交流范围（格）<input id="directAddressDistance" type="number" min="1" max="64" step="0.5"><small>范围内可结合语气、上下文判断，无需点名。</small></label>
@@ -178,9 +179,12 @@
             </div>
           </article>
           <article class="autonomy-card">
-            <h3>生存阈值与安全挂机</h3>
-            <div class="toggle-row"><label class="switch"><input id="safeIdleEnabled" type="checkbox"><span></span>任务结束后寻找安全位置挂机</label></div>
+            <h3>陪伴邀请、背包与安全挂机</h3>
+            <div class="toggle-row"><label class="switch"><input id="safeIdleEnabled" type="checkbox"><span></span>任务结束后回安全位置挂机</label><label class="switch"><input id="autoInviteNearbyPlayers" type="checkbox"><span></span>主动邀请刚经过的玩家同行</label><label class="switch"><input id="discardWornTools" type="checkbox"><span></span>清理耗尽且无附魔的工具</label></div>
             <div class="form-grid three">
+              <label>邀请范围（格）<input id="inviteRadius" type="number" min="2" max="32" step="0.5"></label>
+              <label>同玩家邀请冷却（毫秒）<input id="inviteCooldownMs" type="number" min="10000" max="86400000"><small>默认 30 分钟，避免重复打扰。</small></label>
+              <label>丢弃工具剩余耐久<input id="wornToolRemainingDurability" type="number" min="0" max="16"><small>默认 1；附魔工具和盔甲不会自动丢弃。</small></label>
               <label>低生命阈值<input id="lowHealthThreshold" type="number" min="1" max="20" step="0.5"></label>
               <label>危险生命阈值<input id="criticalHealthThreshold" type="number" min="1" max="20" step="0.5"><small>不能高于低生命阈值。</small></label>
               <label>低于此饱食度进食<input id="eatBelowFood" type="number" min="1" max="20"></label>
@@ -196,7 +200,7 @@
             </div>
           </article>
           <article class="autonomy-card autonomy-capabilities">
-            <h3>允许的自主准备能力</h3>
+            <h3>可选的自主生存实验能力</h3>
             <div class="policy-grid">
               <label class="switch"><input id="autoGather" type="checkbox"><span></span>允许自主采集</label>
               <label class="switch"><input id="autoCraft" type="checkbox"><span></span>允许自主合成</label>
@@ -212,7 +216,7 @@
               <label class="switch"><input id="allowVerifiedWilderness" type="checkbox"><span></span>允许 Fabric 动态验证荒野</label>
               <label class="switch"><input id="allowTeleportCommand" type="checkbox"><span></span>已获管理员 TP 权限（默认关闭）</label>
             </div>
-            <p class="safety-note">人工坐标开发区已经取消。AI 根据结构化环境自行选择探索、采集和放置意图；Fabric 仍会对每个目标逐格验证天然性、玩家结构、容器、危险流体、碰撞和撤退路线，文字提示词不能绕过硬检查。</p>
+            <p class="safety-note">这些开关只在“自主生存实验模式”中驱动后台发展；默认陪伴模式不会自动采集、下矿或前往末地。玩家明确提出任务时，Agent 仍可调用获准的基础接口。建房使用一次客户端长技能，不再逐块请求模型。</p>
           </article>
         </div>
       </section>
@@ -270,7 +274,7 @@
       </section>
 
       <section id="mods" class="panel">
-        <div class="section-heading"><div><p class="eyebrow">MOD COMPATIBILITY</p><h2>服务器模组</h2></div><details><summary>以后服务器加新模组怎么办？</summary><p>把新客户端模组放进来源文件夹，然后点“立即同步”。系统会删除上次由它复制的旧版本、复制新版本并记录 SHA-256，不会删除项目桥或固定 Fabric API。</p></details></div>
+        <div class="section-heading"><div><p class="eyebrow">MOD COMPATIBILITY</p><h2>服务器模组</h2></div><details open><summary>能兼容未来任意新模组吗？</summary><p>不能无条件保证。同步器会自动接纳未来新增的有效 JAR、保留项目桥并生成兼容提示，但 Fabric/Java 版本、客户端依赖、Mixin、渲染与 HeadlessMC 冲突仍必须通过实际启动验证。请使用服主提供的同版本客户端包。</p></details></div>
         <div class="form-grid two"><label class="span-two">模组来源文件夹<input id="modsSource" type="text" placeholder="例如 D:\Minecraft\服务器客户端模组"></label><label class="switch"><input id="syncOnStart" type="checkbox"><span></span>每次启动客户端前自动同步</label><label>排除文件名规则（每行一个正则）<textarea id="excludePatterns" rows="4"></textarea></label></div>
         <div class="inline-actions"><button id="syncModsButton" class="button primary">立即同步模组</button><span id="modsSummary" class="muted"></span></div>
         <div id="modList" class="mod-list"></div>

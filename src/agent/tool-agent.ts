@@ -82,13 +82,16 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
     x: integer('X'), y: integer('Y'), z: integer('Z'), hand: { type: 'string', enum: ['main', 'off'] }
   }) },
   { name: 'use_held_item', description: '使用手中物品一次。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
+  { name: 'eat_safe_food', description: '饥饿值不满时连续选择并吃下安全食物，以服务端饱食度或生命值变化确认。', parameters: objectSchema({}) },
   { name: 'drop_inventory_item', description: '从自己的背包槽丢出物品。', parameters: objectSchema({ slot: integer('槽位', 0, 35), count: integer('数量', 1, 64) }) },
+  { name: 'discard_worn_tools', description: '清理耐久即将耗尽且没有附魔的工具/武器；不会丢盔甲、附魔装备或正常耐久物品。', parameters: objectSchema({ remaining_durability: integer('剩余耐久阈值', 0, 16) }) },
   { name: 'craft_recipe', description: '用现有材料执行一个具体配方。', parameters: objectSchema({ item_id: string('成品 ID'), count: integer('数量', 1, 64) }) },
   { name: 'gather_resource', description: '连续寻找、采集天然资源并收取自有掉落。', parameters: objectSchema({ resource: string('类别或方块 ID'), count: integer('数量', 1, 64) }) },
   { name: 'craft_item', description: '连续制作一种物品；缺口会真实返回。', parameters: objectSchema({ item_id: string('成品 ID'), count: integer('数量', 1, 64) }) },
   { name: 'smelt_items', description: '用安全熔炉连续熔炼/烹饪并验证结果。', parameters: objectSchema({
     input_item_id: string('输入 ID'), output_item_id: string('输出 ID'), count: integer('数量', 1, 64)
   }) },
+  { name: 'build_shelter', description: '一次启动客户端持续建造完整 3x3 安全小屋（墙、屋顶、门和照明）；建房时必须用它，禁止让模型逐格调用 place_block。需要在指定坐标建造时，先 navigate_to 到现场，再调用一次。', parameters: objectSchema({}) },
   { name: 'excavate_safely', description: '连续挖可返程阶梯/隧道；不垂直下挖并避开财产和流体。', parameters: objectSchema({
     resource: string('目标资源'), target_y: integer('目标 Y', -2048, 2048), length: integer('长度', 2, 64)
   }) },
@@ -167,7 +170,9 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
       hand: args.hand === 'off' ? 'off' : 'main'
     }
     case 'use_held_item': return { type: 'use_held_item', hand: args.hand === 'off' ? 'off' : 'main' }
+    case 'eat_safe_food': return { type: 'eat_best_food' }
     case 'drop_inventory_item': return { type: 'drop_inventory_item', slot: whole(args, 'slot', 0, 35), count: whole(args, 'count', 1, 64) }
+    case 'discard_worn_tools': return { type: 'discard_worn_tools', remainingDurability: whole(args, 'remaining_durability', 0, 16) }
     case 'craft_recipe': return { type: 'craft_recipe', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64) }
     case 'gather_resource': return {
       type: 'gather_resource', resource: text(args, 'resource'), count: whole(args, 'count', 1, 64),
@@ -175,6 +180,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     }
     case 'craft_item': return { type: 'craft_item', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), verifiedWilderness: true }
     case 'smelt_items': return { type: 'smelt_item', inputItemId: text(args, 'input_item_id'), outputItemId: text(args, 'output_item_id'), count: whole(args, 'count', 1, 64) }
+    case 'build_shelter': return { type: 'build_shelter', verifiedWilderness: true }
     case 'excavate_safely': return {
       type: 'excavate_tunnel', resource: text(args, 'resource'), targetY: whole(args, 'target_y', -2048, 2048),
       length: whole(args, 'length', 2, 64), verifiedWilderness: true
@@ -315,7 +321,7 @@ function compactLedgerObservation(value: unknown): unknown {
 
 const FOLLOWUP_SYSTEM = `继续上一轮 Minecraft Agent 任务。你已经读过完整人设、记忆和环境；现在只依据真实工具回执继续决策。
 硬规则：每轮最多调用一个可用工具；成功只代表回执明确验证的后置条件，禁止编造成果；失败时按最新观察换方法，危险时停止；不得破坏玩家建筑、容器或未知财产，不主动攻击玩家；不得输出或索取密钥、令牌、服务器地址、本地路径和内部参数。
-若目标已经满足，直接用自然、温柔、像真人队友的中文回复玩家，不复述工具名、参数、执行回执、思考或调用过程。若仍需动作则只调用下一项工具。`
+若目标已经满足，最终给游戏内玩家看的话必须且只能放在 <say>...</say> 中；标签外不得输出任何游戏可见内容。回复应自然、温柔、像真人队友，不复述工具名、参数、执行回执、思考或调用过程。若仍需动作则只调用下一项工具。`
 
 function compactContinuationUser(userText: string | undefined): string {
   if (!userText) return '继续完成上一轮玩家目标。'

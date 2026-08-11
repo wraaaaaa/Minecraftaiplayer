@@ -32,6 +32,17 @@ function safeManagedName(name) {
   return path.basename(name) === name && name.toLowerCase().endsWith('.jar')
 }
 
+function compatibilityHint(name) {
+  const lower = name.toLowerCase()
+  if (/(?:^|[-_.])(?:forge|neoforge|paper|spigot|bukkit)(?:[-_.]|$)/u.test(lower)) {
+    return { status: 'likely_incompatible_loader', note: '文件名显示它可能不是 Fabric 客户端模组。' }
+  }
+  if (/(?:server[-_.]?only|dedicated[-_.]?server)/u.test(lower)) {
+    return { status: 'likely_server_only', note: '文件名显示它可能只应安装在服务端。' }
+  }
+  return { status: 'copied_unverified', note: '已复制；最终兼容性由 Fabric 启动时的元数据、依赖和 Mixin 检查决定。' }
+}
+
 const configPath = await exists(localConfigFile) ? localConfigFile : exampleConfigFile
 const config = await readJson(configPath, { sourceDirectory: '', syncOnClientStart: true, excludeFilePatterns: [] })
 const sourceArgument = argument('--source')
@@ -63,8 +74,12 @@ const files = []
 for (const name of sourceNames) {
   const source = path.join(sourceDirectory, name)
   const target = path.join(targetDirectory, name)
+  const header = (await readFile(source)).subarray(0, 4)
+  if (header.length < 4 || header[0] !== 0x50 || header[1] !== 0x4B) {
+    throw new Error(`Invalid JAR/ZIP header: ${name}`)
+  }
   await copyFile(source, target)
-  files.push({ name, size: (await stat(target)).size, sha256: await sha256(target) })
+  files.push({ name, size: (await stat(target)).size, sha256: await sha256(target), compatibility: compatibilityHint(name) })
 }
 
 const manifest = {
@@ -72,9 +87,15 @@ const manifest = {
   sourceDirectory,
   syncedAt: new Date().toISOString(),
   excludedPatterns: config.excludeFilePatterns ?? [],
+  compatibilityGuarantee: 'best_effort_copy_and_fabric_runtime_validation',
+  compatibilityNotice: '不能保证任意未来模组兼容。客户端/服务端环境、Fabric 版本、Java 版本、依赖、Mixin 和 HeadlessMC 图形需求必须由实际启动验证。',
   files
 }
 const temporary = `${manifestFile}.tmp`
 await writeFile(temporary, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8')
 await rename(temporary, manifestFile)
-console.log(JSON.stringify({ ok: true, sourceDirectory, imported: files.length, excluded: excludedNames }))
+console.log(JSON.stringify({
+  ok: true, sourceDirectory, imported: files.length, excluded: excludedNames,
+  warnings: files.filter(file => file.compatibility.status !== 'copied_unverified').map(file => ({ name: file.name, ...file.compatibility })),
+  notice: manifest.compatibilityNotice
+}))
