@@ -18,6 +18,8 @@ import type { DiagnosticDocument } from '../diagnostics/diagnostic-store.js'
 import type { ProgressionDocument } from '../progression/progression-store.js'
 import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prompts/prompt-workspace.js'
 import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
+import { mergeManagedEnv } from './env-file.js'
+import { redactForWebUi } from './redaction.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -95,7 +97,7 @@ async function body(request: IncomingMessage): Promise<unknown> {
   for await (const chunk of request) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     size += buffer.length
-    if (size > MAX_BODY_BYTES) throw new Error('请求内容超过 1 MiB 限制')
+    if (size > MAX_BODY_BYTES) throw new Error('请求内容超过 2 MiB 限制')
     chunks.push(buffer)
   }
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown
@@ -211,16 +213,6 @@ async function processStatus(pidFile: string): Promise<{ running: boolean; pid?:
   } catch { return { running: false } }
 }
 
-function redactForWebUi(value: string): string {
-  return value
-    .replace(/\/login\s+\S+/giu, '/login [REDACTED]')
-    .replace(/\/register\s+\S+(?:\s+\S+)?/giu, '/register [REDACTED]')
-    .replace(/\bBearer\s+[A-Za-z0-9._~+\/-]+=*/giu, 'Bearer [REDACTED]')
-    .replace(/\b[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/gu, '[REDACTED_JWT]')
-    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/giu, 'sk-[REDACTED]')
-    .replace(/\b([A-Za-z0-9_-]*(?:api[_-]?key|password|token)|key)\b(["'\s:=]+)[^\s,"'}]+/giu, '$1$2[REDACTED]')
-}
-
 async function tail(file: string, lineCount = 30): Promise<string[]> {
   try { return (await readFile(file, 'utf8')).split(/\r?\n/u).filter(Boolean).slice(-lineCount).map(redactForWebUi) } catch { return [] }
 }
@@ -296,24 +288,17 @@ async function runPowerShell(script: string): Promise<string> {
 async function updateSecrets(value: unknown): Promise<void> {
   const candidate = object(value, 'secrets')
   const existing = await readFile(files.env, 'utf8').catch(() => '')
-  const values = new Map<string, string>()
-  for (const line of existing.split(/\r?\n/u)) {
-    const separator = line.indexOf('=')
-    if (separator > 0) values.set(line.slice(0, separator).trim(), line.slice(separator + 1))
-  }
   for (const key of secretKeys) {
     const supplied = candidate[key]
     if (supplied === undefined || supplied === '') continue
     if (supplied === null) {
-      values.delete(key)
       delete process.env[key]
       continue
     }
     if (typeof supplied !== 'string' || /[\r\n]/u.test(supplied)) throw new Error(`${key} 格式无效`)
-    values.set(key, supplied)
     process.env[key] = supplied
   }
-  const contents = `${secretKeys.map(key => `${key}=${values.get(key) ?? ''}`).join('\n')}\n`
+  const contents = mergeManagedEnv(existing, candidate as Record<string, string | null | undefined>, secretKeys)
   const temporary = `${files.env}.${process.pid}.tmp`
   await writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 })
   await rename(temporary, files.env)

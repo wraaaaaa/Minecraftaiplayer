@@ -32,6 +32,7 @@ export class MinecraftClient implements ActionExecutor {
   #proactiveHandler: ProactiveHandler | undefined
   #proactiveTimer: NodeJS.Timeout | undefined
   #endResolve: ((reason: string) => void) | undefined
+  #endedReason: string | undefined
 
   constructor(options: { config: BotConfig; persona: Persona; logger: Logger; memory: MemoryStore; policy: PolicyEngine; secrets: SecretGuard; easyAuthPassword?: string }) {
     this.#config = options.config
@@ -51,6 +52,7 @@ export class MinecraftClient implements ActionExecutor {
 
   async connect(): Promise<void> {
     this.#easyAuth.reset()
+    this.#endedReason = undefined
     const server = this.#config.server
     const bot = mineflayer.createBot({
       host: server.host,
@@ -79,7 +81,10 @@ export class MinecraftClient implements ActionExecutor {
     })
   }
 
-  waitForEnd(): Promise<string> { return new Promise((resolve) => { this.#endResolve = resolve }) }
+  waitForEnd(): Promise<string> {
+    if (this.#endedReason !== undefined) return Promise.resolve(this.#endedReason)
+    return new Promise((resolve) => { this.#endResolve = resolve })
+  }
 
   async close(reason = 'shutdown'): Promise<void> {
     if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
@@ -257,6 +262,7 @@ export class MinecraftClient implements ActionExecutor {
       if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
       this.#proactiveTimer = undefined
       this.#logger.warn('Minecraft 连接结束', { reason })
+      this.#endedReason = reason
       this.#endResolve?.(reason)
       this.#endResolve = undefined
     })

@@ -263,6 +263,17 @@ public final class AdvancedTaskController {
                 finish(client, this, true, "threat_no_longer_present");
                 return;
             }
+            if (target instanceof Mob mob) {
+                LivingEntity threatened = mob.getTarget();
+                boolean stillThreatening = protectPlayer.isBlank()
+                    ? threatened == player
+                    : threatened instanceof AbstractClientPlayer protectedPlayer
+                        && protectedPlayer.getGameProfile().name().equalsIgnoreCase(protectPlayer);
+                if (!stillThreatening) {
+                    finish(client, this, true, "threat_changed_target");
+                    return;
+                }
+            }
             if (player.getHealth() <= 6.0F) {
                 finish(client, this, false, "self_preservation_cancelled: low_health");
                 return;
@@ -278,7 +289,6 @@ public final class AdvancedTaskController {
             client.gameMode.attack(player, target);
             player.swing(InteractionHand.MAIN_HAND);
             lastAttackTick = tick;
-            if (protectPlayer.isBlank()) finish(client, this, true, "verified_hostile_attack_sent=" + target.getId());
         }
     }
 

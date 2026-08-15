@@ -153,7 +153,18 @@ if ([string]::IsNullOrWhiteSpace($env:MCAI_BRIDGE_TOKEN)) { throw 'Bridge sessio
 
 # The Minecraft JVM and every third-party client mod inherit this process environment.
 # Remove model credentials before Start-Process; only the Node controller is allowed to hold them.
-$modelSecretNames = @('DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', [string]$config.model.apiKeyEnv) | Select-Object -Unique
+$modelSecretNames = @(
+    'DEEPSEEK_API_KEY',
+    'ARK_API_KEY',
+    'OPENAI_API_KEY',
+    'MIMO_API_KEY',
+    'VOLCENGINE_TTS_APP_ID',
+    'VOLCENGINE_TTS_ACCESS_TOKEN',
+    'CUSTOM_TTS_API_KEY',
+    [string]$config.model.apiKeyEnv,
+    [string]$config.speech.apiKeyEnv,
+    [string]$config.speech.volcengineAppIdEnv
+) | Select-Object -Unique
 foreach ($secretName in $modelSecretNames) {
     if (-not [string]::IsNullOrWhiteSpace($secretName)) {
         [Environment]::SetEnvironmentVariable($secretName, $null, 'Process')

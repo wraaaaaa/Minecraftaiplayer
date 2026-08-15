@@ -161,6 +161,33 @@ test('OpenAI Responses 工具循环用 previous_response_id 回传 function_call
   } finally { await logger.flush(); await api.close() }
 })
 
+test('OpenAI 音频模型使用 Chat Completions 并发送纯 Base64 与显式格式', async () => {
+  const api = await mockApi({
+    choices: [{ finish_reason: 'tool_calls', message: { content: null, tool_calls: [{ id: 'audio-1', type: 'function', function: { name: 'observe_world', arguments: '{}' } }] } }]
+  })
+  const logger = new Logger({ file: path.join(tmpdir(), `minecraft-ai-openai-audio-${process.pid}.log`), level: 'error', console: false })
+  try {
+    const audioConfig = config('openai', api.baseUrl)
+    audioConfig.model = 'gpt-audio-1.5'
+    const provider = createLlmProvider(audioConfig, 'test-key', logger)
+    const result = await provider.toolTurn!({
+      system: 's', user: '听取这段录音后观察环境',
+      attachments: [{ type: 'audio', mimeType: 'audio/wav', dataBase64: 'UklGRg==' }],
+      tools: [{ name: 'observe_world', description: 'observe', parameters: { type: 'object', properties: {}, additionalProperties: false } }]
+    })
+    const received = await api.request
+    assert.equal(received.url, '/chat/completions')
+    assert.equal(received.body.max_completion_tokens, 4096)
+    assert.equal('reasoning_effort' in received.body, false)
+    const messages = received.body.messages as Array<Record<string, unknown>>
+    const content = messages[1]?.content as Array<Record<string, unknown>>
+    assert.deepEqual(content[1], { type: 'input_audio', input_audio: { data: 'UklGRg==', format: 'wav' } })
+    assert.equal(result.toolCalls[0]?.name, 'observe_world')
+    assert.equal(provider.capabilities?.audio, true)
+    assert.equal(provider.capabilities?.vision, false)
+  } finally { await logger.flush(); await api.close() }
+})
+
 test('小米 MiMo 使用官方 Chat Completions 参数、原生工具调用和用量统计', async () => {
   const api = await mockApi({
     model: 'mimo-v2.5',

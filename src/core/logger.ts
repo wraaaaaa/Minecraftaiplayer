@@ -18,6 +18,17 @@ function redactString(value: string, secrets: string[] = []): string {
     .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}\b/giu, 'Bearer [REDACTED]')
 }
 
+const SAFE_TOKEN_METRIC_KEYS = new Set([
+  'tokens', 'inputtokens', 'outputtokens', 'totaltokens', 'reasoningtokens',
+  'cachedinputtokens', 'cumulativetokens', 'maxtasktokens', 'maxoutputtokens'
+])
+
+function isSensitiveKey(key: string): boolean {
+  const compact = key.replace(/[_-]/gu, '').toLowerCase()
+  if (SAFE_TOKEN_METRIC_KEYS.has(compact)) return false
+  return /password|secret|token|api.?key|authorization/iu.test(key)
+}
+
 function sanitize(value: unknown, secrets: string[], seen = new WeakSet<object>()): unknown {
   if (typeof value === 'string') return redactString(value, secrets)
   if (value instanceof Error) return { name: value.name, message: redactString(value.message, secrets), stack: value.stack ? redactString(value.stack, secrets) : undefined }
@@ -25,7 +36,7 @@ function sanitize(value: unknown, secrets: string[], seen = new WeakSet<object>(
   if (value && typeof value === 'object') {
     if (seen.has(value)) return '[Circular]'
     seen.add(value)
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /password|secret|token|api.?key|authorization/iu.test(key) ? '[REDACTED]' : sanitize(item, secrets, seen)]))
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, isSensitiveKey(key) ? '[REDACTED]' : sanitize(item, secrets, seen)]))
   }
   return value
 }

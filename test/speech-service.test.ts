@@ -52,7 +52,7 @@ test('MiMo and multimodal Chat Audio responses are decoded from message.audio.da
   for (const provider of ['mimo', 'multimodal'] as const) {
     let headers: Record<string, string> = {}
     let body: Record<string, any> = {}
-    const speech = await synthesizeSpeech(config({ provider, protocol: provider === 'mimo' ? 'mimo_chat_audio' : 'openai_chat_audio', model: provider === 'mimo' ? 'mimo-v2.5-tts' : 'gpt-audio' }), '语音测试', {
+    const speech = await synthesizeSpeech(config({ provider, protocol: provider === 'mimo' ? 'mimo_chat_audio' : 'openai_chat_audio', model: provider === 'mimo' ? 'mimo-v2.5-tts' : 'gpt-audio-1.5' }), '语音测试', {
       environment: { TEST_TTS_KEY: 'secret' },
       fetchImpl: (async (_url, init) => {
         headers = init?.headers as Record<string, string>

@@ -30,14 +30,16 @@ dependencies {
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
 }
 
+def resourceVersion = version.toString()
 processResources {
-    inputs.property "version", project.version
-    filesMatching("fabric.mod.json") { expand "version": project.version }
+    inputs.property "version", resourceVersion
+    filesMatching("fabric.mod.json") { expand "version": resourceVersion }
 }
 
 tasks.withType(JavaCompile).configureEach {
     it.options.release = 25
     it.options.encoding = 'UTF-8'
+    it.options.compilerArgs.add('-Xlint:deprecation')
 }
 
 java {

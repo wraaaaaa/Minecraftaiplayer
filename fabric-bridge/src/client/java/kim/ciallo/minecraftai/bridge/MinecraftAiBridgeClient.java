@@ -54,6 +54,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private UUID activeSession;
     private boolean bridgeWasConnected;
     private MovementTarget movement;
+    private double movementBestDistance = Double.POSITIVE_INFINITY;
+    private long movementLastProgressTick;
+    private String movementTerminalStatus = "";
     private final LocalPathNavigator movementNavigator = new LocalPathNavigator();
     private final TraversalRecovery traversalRecovery = new TraversalRecovery();
     private BlockPos followPortal;
@@ -566,7 +569,6 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             action.addProperty("verifiedWilderness", true);
         } else if ("use_held_item".equals(type)) {
             action.addProperty("type", "use_item");
-            if ("off".equalsIgnoreCase(string(original, "hand"))) action.addProperty("type", "unsupported_offhand_use");
         }
         return action;
     }
@@ -702,6 +704,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             case "none" -> new ActionResult(true, "无需动作");
             case "stop" -> {
                 movement = null;
+                movementTerminalStatus = "";
                 movementNavigator.release(client);
                 traversalRecovery.reset(client);
                 cancelPendingNavigation(client, "stopped_by_command");
@@ -857,6 +860,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 SurvivalController.SafetyAssessment safety = SurvivalController.assessSafety(client);
                 if (!safety.safeToIdle()) yield new ActionResult(false, "当前位置不适合安全挂机：" + String.join(",", safety.reasons()));
                 movement = null;
+                movementTerminalStatus = "";
                 traversalRecovery.reset(client);
                 clearMovement(client);
                 yield new ActionResult(true, "已在安全位置停止移动并进入警戒等待");
@@ -1064,6 +1068,29 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         double dx = target.x() - player.getX();
         double dz = target.z() - player.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
+        if (target.playerName() == null && target.follow()) {
+            if (distance + 0.75D < movementBestDistance) {
+                movementBestDistance = distance;
+                movementLastProgressTick = tick;
+            }
+            long withoutProgress = tick - movementLastProgressTick;
+            if (withoutProgress >= 400L && !traversalRecovery.active()
+                && traversalRecovery.tick(client, player, new Vec3(target.x(), target.y(), target.z()), 8, tick)) {
+                movementNavigator.release(client);
+                clearMovement(client);
+                return;
+            }
+            if (withoutProgress >= 1_200L) {
+                movement = null;
+                movementNavigator.release(client);
+                traversalRecovery.reset(client);
+                clearMovement(client);
+                movementTerminalStatus = "home_route_stalled_safe_wait; best_distance="
+                    + Math.round(movementBestDistance * 10.0D) / 10.0D
+                    + "; no_progress_ticks=" + withoutProgress;
+                return;
+            }
+        }
         if (distance <= target.stopDistance()) {
             clearMovement(client);
             movementNavigator.release(client);
@@ -1102,11 +1129,14 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private boolean setMovement(MovementTarget target, LocalPlayer player) {
         movement = target;
+        movementTerminalStatus = "";
         movementNavigator.release(Minecraft.getInstance());
         traversalRecovery.reset(Minecraft.getInstance());
         double dx = target.x() - player.getX();
         double dz = target.z() - player.getZ();
         double distance = Math.sqrt(dx * dx + dz * dz);
+        movementBestDistance = distance;
+        movementLastProgressTick = tick;
         boolean routed = movementNavigator.drive(
             Minecraft.getInstance(), player, new Vec3(target.x(), target.y(), target.z()),
             target.stopDistance(), distance > 6.0D, tick
@@ -1170,7 +1200,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 ? primitives.navigationStatus()
                 : !advanced.activeType().isEmpty()
                     ? advanced.navigationStatus()
-                : movement == null ? "idle" : traversalRecovery.active() ? traversalRecovery.status() : movementNavigator.status());
+                : movement == null
+                    ? movementTerminalStatus.isEmpty() ? "idle" : movementTerminalStatus
+                    : traversalRecovery.active() ? traversalRecovery.status() : movementNavigator.status());
         event.addProperty("timeOfDay", client.level.getOverworldClockTime());
 
         ShelterController.HomeSnapshot home = shelter.homeSnapshot();

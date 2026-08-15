@@ -37,7 +37,6 @@ final class LocalPathNavigator {
     private static final int PLAN_RADIUS = 24;
     private static final int PLAN_VERTICAL_RADIUS = 6;
     private static final int MAX_EXPANDED_NODES = 6_000;
-    private static final long PERIODIC_REPLAN_TICKS = 80L;
     private static final long STUCK_REPLAN_TICKS = 18L;
 
     private List<BlockPos> path = List.of();
@@ -114,7 +113,6 @@ final class LocalPathNavigator {
             stuck = false;
         }
 
-        boolean periodic = tick - lastPlanTick >= PERIODIC_REPLAN_TICKS;
         boolean routeFinished = pathIndex >= path.size();
         boolean waypointInvalid = !routeFinished && !isStandable(client, player, path.get(pathIndex));
         if (routeFinished && consecutivePlanFailures > 0 && !goalChanged && tick - lastPlanTick < 10L) {
@@ -122,7 +120,12 @@ final class LocalPathNavigator {
             return false;
         }
         boolean collisionNeedsReplan = player.horizontalCollision && tick - lastPlanTick >= 4L;
-        if (goalChanged || routeFinished || periodic || stuck || waypointInvalid || collisionNeedsReplan) {
+        // Do not periodically discard a route that is still making progress. Long indoor
+        // routes often need more than four seconds; repeatedly replacing a valid path before
+        // it finished made static goals (notably return_home) oscillate between two corridors.
+        // Goal movement, an invalid waypoint, a collision, an actual stall, or completion are
+        // already sufficient and deterministic replan triggers.
+        if (goalChanged || routeFinished || stuck || waypointInvalid || collisionNeedsReplan) {
             if (!plan(client, player, goal, stopDistance, tick)) {
                 releaseControls(client);
                 status = "no_safe_route";

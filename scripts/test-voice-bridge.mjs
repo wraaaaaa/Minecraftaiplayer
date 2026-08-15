@@ -11,7 +11,12 @@ if (!process.argv.includes(CONFIRMATION)) {
   console.error('运行前必须停止 Node 控制器并保持 Minecraft/Fabric 客户端在线；测试会让 Bot 通过 Simple Voice Chat 发送约 0.6 秒的低音量提示音。')
   process.exitCode = 2
 } else {
-  await run()
+  try {
+    await run()
+  } catch (error) {
+    console.error(`语音桥测试失败：${error instanceof Error ? error.message : String(error)}`)
+    process.exitCode = 1
+  }
 }
 
 async function run() {
@@ -84,7 +89,9 @@ async function run() {
   })
 
   await new Promise((resolve, reject) => {
-    server.once('error', reject)
+    server.once('error', error => reject(error?.code === 'EADDRINUSE'
+      ? new Error(`本机桥端口 ${host}:${port} 正被 AI 控制器占用；请先运行 npm run stop:bot，只保留 Minecraft 客户端在线，再重试`)
+      : error))
     server.listen(port, host, resolve)
   })
   try {

@@ -41,6 +41,7 @@ function urgencyFor(message: string): number {
 function isImmediateStop(message: string): boolean {
   const normalized = message.trim()
   return /^(?:请)?(?:停止|停下|别动|取消(?:当前)?任务|stop|cancel)[！!。.?？\s]*$/iu.test(normalized)
+    || /^(?:请)?(?:停止|取消)(?:当前)?(?:任务|动作)?[，,、\s]*(?:并)?(?:站在|留在)?(?:原地|这里)(?:等待|待命|别动|不要动)?[！!。.?？\s]*$/iu.test(normalized)
     || /^(?:你)?(?:不用|不要|别|别再|停止|结束)(?:再)?(?:跟着|跟随|跟|尾随)(?:我)?(?:了|啦|吧)?[！!。.?？\s]*$/iu.test(normalized)
     || /^(?:你)?(?:不用|不要|别)(?:再)?跟我(?:了|啦|吧)?[！!。.?？\s]*$/iu.test(normalized)
 }
@@ -248,15 +249,19 @@ export class AgentController {
     if (!clean) throw new Error('管理指令不能为空')
     const ownerName = autonomyConfig(this.#config).ownerName
     const identity: PlayerIdentity = { name: ownerName, uuid: 'local-webui-admin' }
-    this.#cancellationEpoch++
     this.#proactiveEpoch++
     this.#lastInboundAt = Date.now()
     this.#latestWorld = world
     this.#manualHold = requestsPersistentHold(clean)
+    await this.#memory.recordPlayerMessage(identity, clean)
+    if (isImmediateStop(clean)) {
+      await this.#handleImmediateStop(identity, clean)
+      return
+    }
+    this.#cancellationEpoch++
     await this.#executor.execute({ type: 'stop' }).catch(() => ({ ok: false, detail: 'stop_failed' }))
     const cancelled = await this.#tasks.cancelRunning('preempted_by_webui_admin')
     const queued = await this.#tasks.enqueue({ issuer: identity, request: clean, urgency: 100, source: 'webui_admin' })
-    await this.#memory.recordPlayerMessage(identity, clean)
     await this.#diagnose({
       type: 'request', level: 'info', title: '收到 WebUI 最高权限指令', summary: clean,
       taskId: queued.id, playerName: identity.name,
@@ -291,14 +296,14 @@ export class AgentController {
     if (ownerThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
       this.#manualHold = false
       void this.#executor.execute({ type: 'gesture', gesture: 'afraid' })
-      await this.#executeProactive({ type: 'attack_entity', entityId: ownerThreat.id })
+      await this.#executeProactive({ type: 'attack_hostile', targetId: ownerThreat.id, protectPlayer: autonomy.ownerName })
       return
     }
     const directThreat = world.nearbyHostiles?.find(hostile => hostile.targetingBot)
     if (directThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
       this.#manualHold = false
       void this.#executor.execute({ type: 'gesture', gesture: 'afraid' })
-      await this.#executeProactive({ type: 'attack_entity', entityId: directThreat.id })
+      await this.#executeProactive({ type: 'attack_hostile', targetId: directThreat.id })
       return
     }
     if (this.#manualHold) {
@@ -505,17 +510,17 @@ export class AgentController {
       .map(player => player.name.toLowerCase()))
     const pending = this.#pendingCompanionInvite
     if (pending) {
-      const present = current.has(pending.identity.name.toLowerCase())
-      if (present) {
-        this.#nearbyPlayersLastTick = current
-        return false
-      }
       if (now >= pending.expiresAt) {
         this.#pendingCompanionInvite = undefined
         await this.#executor.execute({ type: 'stop' }).catch(() => ({ ok: false, detail: 'stop_failed' }))
         if (autonomy.safeIdleEnabled) await this.#executor.execute({ type: 'return_home' }).catch(() => ({ ok: false, detail: 'return_home_failed' }))
         this.#nearbyPlayersLastTick = current
         return true
+      }
+      const present = current.has(pending.identity.name.toLowerCase())
+      if (present) {
+        this.#nearbyPlayersLastTick = current
+        return false
       }
     }
     if (!autonomy.autoInviteNearbyPlayers || pending) {
@@ -565,6 +570,7 @@ export class AgentController {
       || (world.inWater === true && (world.air ?? 300) < 180)
     if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
       this.#standbyEngaged = false
+      if (!unsafe && world.navigationStatus?.startsWith('home_route_stalled_safe_wait')) return
       if (world.activePrimitive === 'return_home') return
       await this.#executeProactive({ type: 'return_home' })
       return
@@ -995,7 +1001,12 @@ export class AgentController {
     if (result.ok) {
       await this.#tasks.complete(stopTask.id, detail || '已停止当前动作')
       await this.#diagnose({ type: 'result', level: 'success', title: '停止请求已完成', summary: detail || '已停止当前动作', taskId: stopTask.id, playerName: identity.name })
-      await this.#bestEffortReply(identity, cancelled ? '好，我停下了，刚才那件事也不继续了。' : '好，我停下了，不再跟着你。')
+      const reply = cancelled
+        ? '好，我停下了，刚才那件事也不继续了。'
+        : /(?:跟着|跟随|尾随)/u.test(request)
+          ? '好，我停下了，不再跟着你。'
+          : '好，我停下了，会在这里等你。'
+      await this.#bestEffortReply(identity, reply)
     } else {
       await this.#markFailed(stopTask, detail || '停止动作失败')
       await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)

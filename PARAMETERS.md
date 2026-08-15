@@ -90,7 +90,7 @@ DeepSeek、豆包和 MiMo 使用 Chat Completions `tools`；OpenAI 使用 Respon
 | `enabled` | `false` | 是否把 Bot 的自然游戏回复异步合成为语音。关闭时零 TTS 请求。 |
 | `provider` | `volcengine` / `openai` / `mimo` / `multimodal` / `custom` | 选择内置供应商或自定义端点。 |
 | `protocol` | `volcengine_v1` / `openai_speech` / `openai_chat_audio` / `mimo_chat_audio` / `custom_binary` / `custom_json_base64` | 已知供应商会自动选择；仅 `custom` 直接使用此值。 |
-| `model` | `volcano_tts` | TTS/音频模型 ID。OpenAI 推荐 `gpt-4o-mini-tts`；MiMo 为 `mimo-v2.5-tts`；音频多模态可用 `gpt-audio`。 |
+| `model` | `volcano_tts` | TTS/音频模型 ID。OpenAI Speech API 使用 `gpt-4o-mini-tts`；MiMo 为 `mimo-v2.5-tts`；音频多模态可用 `gpt-audio-1.5`。 |
 | `apiKeyEnv` | `VOLCENGINE_TTS_ACCESS_TOKEN` | API 密钥所在环境变量名，必须是大写字母/数字/下划线；无鉴权的自定义接口可留空。 |
 | `baseUrl` | 火山在线 TTS 地址 | HTTPS API 地址；只有本机/局域网自定义服务允许 HTTP。不是 Minecraft 服务器地址。 |
 | `voice` | `BV001_streaming` | 音色 ID。必须以供应商控制台实际授权音色为准。 |
@@ -316,12 +316,12 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 
 | 名称 | 存储/来源 | 含义 |
 | --- | --- | --- |
-| `world.blockSurvey` | 运行时 `data/runtime-status.json`，由 Fabric 自动生成，不手工配置 | 半径 8、上下 5 格的附近方块摘要；含资源、人造启发式、最近坐标和保护分类，5 秒缓存。 |
+| `world.blockSurvey` / `nearbyBlocks` | 仅存在于 Fabric 状态流与 Node 控制器内存，不写入 `runtime-status.json` | Agent 决策使用的附近方块摘要；含资源、人造启发式、最近坐标和保护分类。完整观察不落盘，避免每秒反复写入大文件。 |
 | `inventory[].placeableBlockId` | 同上 | 该背包物品若是 `BlockItem`，对应可放置方块 ID；用于放置能力预检。 |
 | `place_block.itemId` | 动作参数，可省略 | 指定普通实心方块物品；省略时 Fabric 从安全白名单材料中选择。 |
 | `place_block.count` | 动作参数，默认 1 | 单次 1–16 个，每个都必须通过 Fabric 逐目标检查并由服务器确认。 |
 | `gather_resource.authorizedPlayer` | Node 内部临时字段，不写配置、不允许模型指定 | 仅对明确玩家命令豁免该发令人自身的荒野距离；其他玩家和主动采集不豁免。 |
-| `nearbyPlayers[].lookingAtBlock` | 运行时 `data/runtime-status.json`，Fabric 服务器侧射线检测 | 玩家眼睛前方 6 格内实际指向的方块 ID、坐标和距离；“挖掉这个方块”只使用此值。 |
+| `nearbyPlayers[].lookingAtBlock` | 仅存在于 Fabric 状态流与 Node 控制器内存，Fabric 客户端侧射线检测 | 玩家眼睛前方 6 格内实际指向的方块 ID、坐标和距离；“挖掉这个方块”只使用此值。轻量 WebUI 状态文件不会持久化该坐标。 |
 | `actions[]` | 单次模型 JSON，可省略 | 最多 12 个 `AgentAction`，按数组顺序逐步执行；不是持久化任务 DAG。 |
 | `drop_item.itemId/count/target` | 动作参数 | Bot 走到明确指定的附近玩家，使用正常背包 `THROW` 操作，并以自身背包数量减少作为完成条件。 |
 | `world.activePrimitive` | 运行时状态 | `movement` 表示异步路线仍在进行；主动心跳在它完成前不会执行 `wait_safe` 清掉按键。 |

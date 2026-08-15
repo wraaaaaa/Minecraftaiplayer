@@ -93,9 +93,18 @@ function attachmentContent(text: string, attachments: LlmInputAttachment[] | und
     ...attachments.map(attachment => attachment.type === 'image'
       ? { type: 'image_url', image_url: { url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } }
       : attachment.type === 'audio'
-        ? { type: 'input_audio', input_audio: { data: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } }
+        ? { type: 'input_audio', input_audio: { data: attachment.dataBase64, format: audioInputFormat(attachment.mimeType) } }
         : { type: 'video_url', video_url: { url: `data:${attachment.mimeType};base64,${attachment.dataBase64}` } })
   ]
+}
+
+function audioInputFormat(mimeType: string): string {
+  const normalized = mimeType.toLowerCase().split(';', 1)[0]?.trim()
+  if (normalized === 'audio/wav' || normalized === 'audio/x-wav' || normalized === 'audio/wave') return 'wav'
+  if (normalized === 'audio/mpeg' || normalized === 'audio/mp3') return 'mp3'
+  if (normalized === 'audio/flac') return 'flac'
+  if (normalized === 'audio/ogg' || normalized === 'audio/opus') return 'ogg'
+  return normalized?.replace(/^audio\//u, '') || 'wav'
 }
 
 export function detectModelCapabilities(config: BotConfig['model']): ModelCapabilities {
@@ -104,6 +113,8 @@ export function detectModelCapabilities(config: BotConfig['model']): ModelCapabi
   let detection: ModelCapabilities['detection'] = 'provider_model_registry'
   if (config.provider === 'mimo' && /^mimo-v2\.5(?:-pro)?(?:$|[-_])/u.test(model)) {
     detected = { vision: true, audio: true, video: true, webSearch: true }
+  } else if (config.provider === 'openai' && /(?:^|[-_.])audio(?:$|[-_.])/u.test(model)) {
+    detected = { vision: false, audio: true, video: false, webSearch: false }
   } else if (config.provider === 'openai' && /(?:gpt-4o|gpt-5(?:\.|-|$))/u.test(model)) {
     detected = { vision: true, audio: /(?:audio|realtime)/u.test(model), video: false, webSearch: true }
   } else if (config.provider === 'volcengine' && /(?:vision|doubao-seed-2\.1)/u.test(model)) {
@@ -161,9 +172,9 @@ async function postJson(url: string, apiKey: string, body: unknown, timeoutMs: n
 class ChatCompletionsProvider implements LlmProvider {
   readonly capabilities: ModelCapabilities
   readonly #options: ProviderOptions
-  readonly #provider: 'deepseek' | 'volcengine' | 'mimo'
+  readonly #provider: 'deepseek' | 'volcengine' | 'mimo' | 'openai'
 
-  constructor(provider: 'deepseek' | 'volcengine' | 'mimo', options: ProviderOptions, capabilities: ModelCapabilities) {
+  constructor(provider: 'deepseek' | 'volcengine' | 'mimo' | 'openai', options: ProviderOptions, capabilities: ModelCapabilities) {
     this.#provider = provider
     this.#options = options
     this.capabilities = capabilities
@@ -176,9 +187,11 @@ class ChatCompletionsProvider implements LlmProvider {
       model: this.#options.model,
       messages: [{ role: 'system', content: request.system }, { role: 'user', content: request.user }],
       stream: false,
-      response_format: { type: 'json_object' },
-      max_tokens: this.#options.maxOutputTokens
+      ...(this.#provider === 'openai'
+        ? { max_completion_tokens: this.#options.maxOutputTokens }
+        : { max_tokens: this.#options.maxOutputTokens })
     }
+    if (this.#provider !== 'openai') body.response_format = { type: 'json_object' }
     if (this.#provider === 'deepseek') {
       if (requested === 'none') body.thinking = { type: 'disabled' }
       else {
@@ -186,7 +199,7 @@ class ChatCompletionsProvider implements LlmProvider {
         body.thinking = { type: 'enabled' }
         body.reasoning_effort = effective
       }
-    } else {
+    } else if (this.#provider !== 'openai') {
       body.reasoning_effort = requested
     }
     if (effective !== requested) this.#options.logger.warn('供应商调整了推理强度', { provider: this.#provider, requested, effective })
@@ -241,7 +254,7 @@ class ChatCompletionsProvider implements LlmProvider {
       } })),
       parallel_tool_calls: false,
       stream: false,
-      ...(this.#provider === 'mimo'
+      ...(this.#provider === 'mimo' || this.#provider === 'openai'
         ? { max_completion_tokens: request.maxOutputTokens ?? this.#options.maxOutputTokens }
         : { max_tokens: request.maxOutputTokens ?? this.#options.maxOutputTokens })
     }
@@ -255,7 +268,7 @@ class ChatCompletionsProvider implements LlmProvider {
     } else if (this.#provider === 'mimo') {
       effective = requested === 'none' ? 'none' : 'high'
       body.thinking = { type: requested === 'none' ? 'disabled' : 'enabled' }
-    } else {
+    } else if (this.#provider !== 'openai') {
       body.reasoning_effort = requested
     }
     const endpoint = `${normalizeBaseUrl(this.#options.baseUrl)}/chat/completions`
@@ -382,6 +395,9 @@ export function createLlmProvider(config: BotConfig['model'], apiKey: string, lo
     return new MissingKeyProvider(config.apiKeyEnv, capabilities)
   }
   const options: ProviderOptions = { model: config.model, apiKey, baseUrl: config.baseUrl, effort: config.reasoningEffort, timeoutMs: config.timeoutMs, maxOutputTokens: config.maxOutputTokens ?? 4096, logger }
-  if (config.provider === 'openai') return new OpenAiResponsesProvider(options, capabilities)
+  if (config.provider === 'openai') {
+    if (/(?:^|[-_.])audio(?:$|[-_.])/u.test(config.model.toLowerCase())) return new ChatCompletionsProvider('openai', options, capabilities)
+    return new OpenAiResponsesProvider(options, capabilities)
+  }
   return new ChatCompletionsProvider(config.provider, options, capabilities)
 }

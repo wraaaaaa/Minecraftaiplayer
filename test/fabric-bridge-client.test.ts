@@ -117,7 +117,117 @@ test('Fabric 本机桥完成握手、状态同步和动作结果往返', async (
     socket.write(`${JSON.stringify({ type: 'action_result', id: action.id, ok: true, detail: '完成' })}\n`)
     assert.deepEqual(await resultPromise, { ok: true, detail: '完成' })
     socket.destroy()
+    await delay(20)
+    assert.equal(await Promise.race([
+      bridge.waitForEnd(),
+      delay(500).then(() => 'timeout')
+    ]), 'fabric bridge disconnected')
   } finally {
+    await bridge.close()
+    await logger.flush()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('Fabric 桥拒绝 hello 前的状态注入', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'minecraft-ai-fabric-auth-'))
+  const port = await unusedPort()
+  const config = {
+    server: {
+      adapter: 'fabric_bridge', connectionMode: 'direct', host: '你的域名.com', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
+      connectTimeoutMs: 2000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
+    },
+    easyAuth: { enabled: false, registerIfNeeded: false, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
+    model: { provider: 'deepseek', model: 'test', apiKeyEnv: 'TEST_KEY', baseUrl: 'https://example.invalid', reasoningEffort: 'low', timeoutMs: 1000 },
+    chat: { requireMention: true, replyPrefix: '', cooldownMs: 10, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
+    storage: { memoryFile: path.join(directory, 'memory.json'), experienceFile: path.join(directory, 'experience.json'), maxEvents: 10 },
+    policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json', promptsFile: 'config/prompts.json',
+    logging: { file: path.join(directory, 'bot.log'), level: 'error', console: false }
+  } satisfies BotConfig
+  const logger = new Logger(config.logging)
+  const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
+  await memory.load()
+  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), secrets: new SecretGuard([]), statusHandler: async () => {} })
+  try {
+    const connecting = bridge.connect()
+    const socket = await connectWithRetry(port)
+    socket.write(`${JSON.stringify({ type: 'state', connected: true, position: { x: 999, y: 99, z: 999 }, inventory: [], nearbyPlayers: [] })}\n`)
+    await assert.rejects(connecting, /hello 握手/u)
+    await delay(20)
+    assert.equal(bridge.snapshot().connected, false)
+    assert.equal(bridge.snapshot().position, undefined)
+    socket.destroy()
+  } finally {
+    await bridge.close()
+    await logger.flush()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('Fabric 桥在协议版本不兼容时立即拒绝连接', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'minecraft-ai-fabric-protocol-'))
+  const port = await unusedPort()
+  const config = {
+    server: {
+      adapter: 'fabric_bridge', connectionMode: 'direct', host: '你的域名.com', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
+      connectTimeoutMs: 5000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
+    },
+    easyAuth: { enabled: false, registerIfNeeded: false, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
+    model: { provider: 'deepseek', model: 'test', apiKeyEnv: 'TEST_KEY', baseUrl: 'https://example.invalid', reasoningEffort: 'low', timeoutMs: 1000 },
+    chat: { requireMention: true, replyPrefix: '', cooldownMs: 10, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
+    storage: { memoryFile: path.join(directory, 'memory.json'), experienceFile: path.join(directory, 'experience.json'), maxEvents: 10 },
+    policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json', promptsFile: 'config/prompts.json',
+    logging: { file: path.join(directory, 'bot.log'), level: 'error', console: false }
+  } satisfies BotConfig
+  const logger = new Logger(config.logging)
+  const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
+  await memory.load()
+  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), secrets: new SecretGuard([]), statusHandler: async () => {} })
+  try {
+    const startedAt = Date.now()
+    const connecting = bridge.connect()
+    const socket = await connectWithRetry(port)
+    socket.write(`${JSON.stringify({ type: 'hello', protocolVersion: 999, adapter: 'fabric-26.2' })}\n`)
+    await assert.rejects(connecting, /协议版本/u)
+    assert.ok(Date.now() - startedAt < 2000, '协议错误不应等待完整的连接超时')
+    socket.destroy()
+  } finally {
+    await bridge.close()
+    await logger.flush()
+    await rm(directory, { recursive: true, force: true })
+  }
+})
+
+test('Fabric 桥在主动关闭时会唤醒 waitForEnd', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'minecraft-ai-fabric-close-'))
+  const port = await unusedPort()
+  const config = {
+    server: {
+      adapter: 'fabric_bridge', connectionMode: 'direct', host: '你的域名.com', port: 25565, lanDiscoveryTimeoutMs: 8000, version: '26.2', username: 'CialloAI', auth: 'offline',
+      connectTimeoutMs: 2000, reconnectDelayMs: 100, bridgeHost: '127.0.0.1', bridgePort: port, actionTimeoutMs: 1000
+    },
+    easyAuth: { enabled: false, registerIfNeeded: false, passwordEnv: 'MINECRAFT_LOGIN_PASSWORD', loginDelayMs: 10 },
+    model: { provider: 'deepseek', model: 'test', apiKeyEnv: 'TEST_KEY', baseUrl: 'https://example.invalid', reasoningEffort: 'low', timeoutMs: 1000 },
+    chat: { requireMention: true, replyPrefix: '', cooldownMs: 10, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
+    storage: { memoryFile: path.join(directory, 'memory.json'), experienceFile: path.join(directory, 'experience.json'), maxEvents: 10 },
+    policyFile: 'config/behavior-rules.json', personaFile: 'config/persona.json', promptsFile: 'config/prompts.json',
+    logging: { file: path.join(directory, 'bot.log'), level: 'error', console: false }
+  } satisfies BotConfig
+  const logger = new Logger(config.logging)
+  const memory = new MemoryStore(config.storage.memoryFile, persona.name, config.storage.maxEvents)
+  await memory.load()
+  const bridge = new FabricBridgeClient({ config, persona, logger, memory, policy: new PolicyEngine(rules), secrets: new SecretGuard([]), statusHandler: async () => {} })
+  let socket: Socket | undefined
+  try {
+    const connecting = bridge.connect()
+    socket = await connectWithRetry(port)
+    socket.write(`${JSON.stringify({ type: 'hello', protocolVersion: 1, adapter: 'fabric-26.2' })}\n`)
+    await connecting
+    const ended = bridge.waitForEnd()
+    await bridge.close('test shutdown')
+    assert.equal(await Promise.race([ended, delay(500).then(() => 'timeout')]), 'test shutdown')
+  } finally {
+    socket?.destroy()
     await bridge.close()
     await logger.flush()
     await rm(directory, { recursive: true, force: true })

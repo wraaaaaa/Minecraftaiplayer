@@ -112,6 +112,7 @@ export class FabricBridgeClient implements ActionExecutor {
   #connectResolve: (() => void) | undefined
   #connectReject: ((error: Error) => void) | undefined
   #endResolve: ((reason: string) => void) | undefined
+  #endedReason: string | undefined
   #connected = false
   #closing = false
   readonly #recentPlayerChats = new Map<string, number>()
@@ -145,6 +146,7 @@ export class FabricBridgeClient implements ActionExecutor {
       throw new Error('Fabric 桥默认只允许监听本机回环地址')
     }
     this.#closing = false
+    this.#endedReason = undefined
     await new Promise<void>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#connectReject = undefined
@@ -168,12 +170,18 @@ export class FabricBridgeClient implements ActionExecutor {
     })
   }
 
-  waitForEnd(): Promise<string> { return new Promise((resolve) => { this.#endResolve = resolve }) }
+  waitForEnd(): Promise<string> {
+    if (this.#endedReason !== undefined) return Promise.resolve(this.#endedReason)
+    return new Promise((resolve) => { this.#endResolve = resolve })
+  }
 
   snapshot(): WorldState { return structuredClone(this.#world) }
 
   async close(reason = 'shutdown'): Promise<void> {
     this.#closing = true
+    this.#connectReject?.(new Error(`Fabric 桥已关闭：${reason}`))
+    this.#connectReject = undefined
+    this.#connectResolve = undefined
     this.#speech.close()
     if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
     this.#proactiveTimer = undefined
@@ -183,6 +191,7 @@ export class FabricBridgeClient implements ActionExecutor {
       if (!this.#server?.listening) return resolve()
       this.#server.close(() => resolve())
     })
+    this.#finishEnd(reason)
   }
 
   async chat(message: string): Promise<void> {
@@ -237,15 +246,21 @@ export class FabricBridgeClient implements ActionExecutor {
   }
 
   #handle(message: BridgeMessage): void {
+    if (!this.#connected && message.type !== 'hello') {
+      const error = new Error('Fabric 桥必须先完成 hello 握手')
+      this.#logger.warn('拒绝了握手前的 Fabric 桥消息', { type: message.type ?? 'missing' })
+      this.#rejectHandshake(error)
+      return
+    }
     switch (message.type) {
       case 'hello':
         if (this.#expectedToken && !this.#validToken(message.token)) {
           this.#logger.warn('拒绝了没有有效会话令牌的本机 Fabric 桥连接')
-          this.#socket?.destroy(new Error('Fabric 桥会话令牌无效'))
+          this.#rejectHandshake(new Error('Fabric 桥会话令牌无效'))
           return
         }
         if (message.protocolVersion !== 1) {
-          this.#socket?.destroy(new Error(`不支持的桥协议版本: ${message.protocolVersion}`))
+          this.#rejectHandshake(new Error(`不支持的桥协议版本: ${message.protocolVersion}`))
           return
         }
         this.#connected = true
@@ -562,6 +577,7 @@ export class FabricBridgeClient implements ActionExecutor {
   }
 
   #onSocketClose(): void {
+    const wasConnected = this.#connected
     this.#connected = false
     this.#socket = undefined
     this.#world = { connected: false, inventory: [], nearbyPlayers: [] }
@@ -569,11 +585,17 @@ export class FabricBridgeClient implements ActionExecutor {
     if (this.#proactiveTimer) clearInterval(this.#proactiveTimer)
     this.#proactiveTimer = undefined
     this.#failPending('Fabric 客户端连接已断开')
-    if (!this.#closing) {
+    if (wasConnected && !this.#closing) {
       this.#logger.warn('Fabric 客户端桥已断开')
-      this.#endResolve?.('fabric bridge disconnected')
-      this.#endResolve = undefined
+      this.#finishEnd('fabric bridge disconnected')
     }
+  }
+
+  #finishEnd(reason: string): void {
+    if (this.#endedReason !== undefined) return
+    this.#endedReason = reason
+    this.#endResolve?.(reason)
+    this.#endResolve = undefined
   }
 
   #failPending(detail: string): void {
@@ -582,6 +604,13 @@ export class FabricBridgeClient implements ActionExecutor {
       pending.resolve({ ok: false, detail })
     }
     this.#pending.clear()
+  }
+
+  #rejectHandshake(error: Error): void {
+    this.#connectReject?.(error)
+    this.#connectReject = undefined
+    this.#connectResolve = undefined
+    this.#socket?.destroy(error)
   }
 
   #validToken(candidate: string | undefined): boolean {

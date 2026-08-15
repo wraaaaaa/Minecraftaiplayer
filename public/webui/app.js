@@ -491,7 +491,7 @@ $('speechProvider').addEventListener('change', () => {
     volcengine: { protocol: 'volcengine_v1', model: 'volcano_tts', key: 'VOLCENGINE_TTS_ACCESS_TOKEN', url: 'https://openspeech.bytedance.com/api/v1/tts', voice: 'BV001_streaming', sampleRate: 24000 },
     openai: { protocol: 'openai_speech', model: 'gpt-4o-mini-tts', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1', voice: 'alloy', sampleRate: 24000 },
     mimo: { protocol: 'mimo_chat_audio', model: 'mimo-v2.5-tts', key: 'MIMO_API_KEY', url: 'https://api.xiaomimimo.com/v1', voice: '冰糖', sampleRate: 24000 },
-    multimodal: { protocol: 'openai_chat_audio', model: 'gpt-audio', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1', voice: 'alloy', sampleRate: 24000 },
+    multimodal: { protocol: 'openai_chat_audio', model: 'gpt-audio-1.5', key: 'OPENAI_API_KEY', url: 'https://api.openai.com/v1', voice: 'alloy', sampleRate: 24000 },
     custom: { protocol: 'custom_binary', model: 'custom-tts', key: 'CUSTOM_TTS_API_KEY', url: 'http://127.0.0.1:8080/v1/tts', voice: 'default', sampleRate: 24000 }
   }
   const preset = presets[value('speechProvider')]

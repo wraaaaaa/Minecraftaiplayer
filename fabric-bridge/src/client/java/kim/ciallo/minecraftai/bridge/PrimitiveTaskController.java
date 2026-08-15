@@ -612,6 +612,7 @@ public final class PrimitiveTaskController {
         private enum Phase { LOCATE, WAIT_SWAP, USE, VERIFY }
 
         private final String requestedItemId;
+        private final InteractionHand hand;
         private Phase phase = Phase.LOCATE;
         private String actualItemId;
         private int selectedSlot = -1;
@@ -630,6 +631,7 @@ public final class PrimitiveTaskController {
         UseItemTask(String id, JsonObject action, long startedTick) {
             super(id, "use_item", startedTick, USE_TIMEOUT_TICKS);
             requestedItemId = optionalId(action, "itemId");
+            hand = "off".equalsIgnoreCase(optionalString(action, "hand", "main")) ? InteractionHand.OFF_HAND : InteractionHand.MAIN_HAND;
         }
 
         @Override
@@ -664,7 +666,13 @@ public final class PrimitiveTaskController {
             }
 
             if (phase == Phase.LOCATE) {
-                selectedSlot = requestedItemId == null
+                if (hand == InteractionHand.OFF_HAND) {
+                    if (requestedItemId != null) {
+                        finish(client, this, false, "offhand use cannot select an inventory item; equip it to the offhand first");
+                        return;
+                    }
+                    phase = Phase.USE;
+                } else selectedSlot = requestedItemId == null
                     ? player.getInventory().getSelectedSlot()
                     : findHotbarItem(player, requestedItemId);
                 if (selectedSlot < 0 && requestedItemId != null) {
@@ -702,8 +710,8 @@ public final class PrimitiveTaskController {
             }
 
             if (phase == Phase.USE) {
-                selectHotbar(player, selectedSlot);
-                ItemStack stack = player.getInventory().getSelectedItem();
+                if (hand == InteractionHand.MAIN_HAND) selectHotbar(player, selectedSlot);
+                ItemStack stack = player.getItemInHand(hand);
                 if (stack.isEmpty()) {
                     finish(client, this, false, "selected item is empty");
                     return;
@@ -719,7 +727,7 @@ public final class PrimitiveTaskController {
                 beforeFood = player.getFoodData().getFoodLevel();
                 beforeHealth = player.getHealth();
                 consumable = stack.has(DataComponents.CONSUMABLE);
-                InteractionResult interaction = client.gameMode.useItem(player, InteractionHand.MAIN_HAND);
+                InteractionResult interaction = client.gameMode.useItem(player, hand);
                 if (!interaction.consumesAction() && !player.isUsingItem()) {
                     finish(client, this, false, "item use was rejected: " + actualItemId);
                     return;
@@ -730,7 +738,7 @@ public final class PrimitiveTaskController {
                 return;
             }
 
-            ItemStack selected = player.getInventory().getSelectedItem();
+            ItemStack selected = player.getItemInHand(hand);
             boolean itemCountChanged = inventoryCount(player, actualItemId) < beforeCount;
             boolean durabilityChanged = !selected.isEmpty()
                 && itemId(selected).equals(actualItemId)

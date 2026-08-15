@@ -27,6 +27,7 @@
     "stop:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-webui-background.ps1",
     "dashboard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-control-center.ps1",
     "audit": "node scripts/audit-repository.mjs",
+    "audit:dependencies": "npm audit --omit=dev --registry=https://registry.npmjs.org",
     "test:voice-bridge": "node scripts/test-voice-bridge.mjs --send-test-tone",
     "test": "tsx --test test/**/*.test.ts"
   },
@@ -39,5 +40,8 @@
     "@types/node": "24.13.3",
     "tsx": "4.23.5",
     "typescript": "7.0.2"
+  },
+  "overrides": {
+    "uuid": "11.1.1"
   }
 }

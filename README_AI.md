@@ -758,7 +758,7 @@ Node 会把 v2 和部分旧字段归一化成 `WorldState`，例如 `hostiles` -
 | `data/experience.json` | schema 1；失败任务、上下文、lesson、correction、tags | 同上 |
 | `data/tasks.json` | schema 1；顺序、状态、尝试、重排、结果/错误 | 同上 |
 | `data/autonomy-state.json` | Java 住所 version 1；家和门坐标 | 临时文件+替换，不创建 `.bak` |
-| `data/runtime-status.json` | Node 运行 phase 和最后 WorldState | Node 原子写入并有 `.bak`，不是业务备份 |
+| `data/runtime-status.json` | Node 运行 phase 与 WebUI 轻量 WorldState 摘要 | 最快每秒、无实质变化时每 30 秒心跳写入；不含背包明细、`nearbyBlocks` 或 `lookingAtBlock`，完整观察只驻留控制器内存；有 `.bak`，不是业务备份 |
 | `data/bridge-token.txt` | 本机桥凭据 | 无备份；可在完全停止后删除并重建 |
 | `data/*.pid.json` | 后台进程所有权 | 不应迁移到另一目录或机器 |
 | `data/agent-prompts/*.md` | 五份运行时全局提示词；WebUI/本地均可编辑 | 文档写入采用临时文件和上一代 `.bak` |
@@ -1673,7 +1673,7 @@ Java `ToolSelector`、`PrimitiveTaskController`、`SurvivalController` 不再排
 - `volcengine_v1`：POST 火山在线 TTS V1；Header `Authorization: Bearer;<access token>`；JSON 同时携带 AppID、cluster、voice_type、PCM encoding、sample_rate、唯一 reqid；只接受 code 3000 和 Base64 `data`。
 - `openai_speech`：POST `${baseUrl}/audio/speech`，请求 `response_format:pcm`，支持 model/voice/instructions/speed，响应为原始 PCM。
 - `mimo_chat_audio`：POST `${baseUrl}/chat/completions`，Header `api-key`；目标朗读文本必须放 assistant message，style 放 user message，音频 `format:pcm16`；读取 `choices[0].message.audio.data`。
-- `openai_chat_audio`：适配能输出音频的多模态 Chat Completions 模型，发送 `modalities:[text,audio]` 与 `audio:{voice,format:pcm16}`，读取同一 message audio 路径。当前示例为 `gpt-audio`；普通 GPT-5.6 文本/视觉模型不应误选此协议。
+- `openai_chat_audio`：适配能输出音频的多模态 Chat Completions 模型，发送 `modalities:[text,audio]` 与 `audio:{voice,format:pcm16}`，读取同一 message audio 路径。当前示例为 `gpt-audio-1.5`；普通 GPT-5.6 文本/视觉模型不应误选此协议。
 - `custom_binary`：自定义端点直接返回 PCM16 binary；`custom_json_base64` 按 `customAudioJsonPath` 读取 Base64。请求体固定携带 model/input/voice/style/speed/format/sample_rate；鉴权 Header、scheme 和 key env 可配置，`apiKeyEnv` 留空时不发送鉴权 Header。自定义接口不允许把密钥字面值写进 bot.json。
 
 中国网络默认推荐火山引擎或 MiMo；OpenAI 仅作为可选供应商，不得成为启动必需依赖。TTS 默认 `enabled:false`，旧配置无 `speech` 时由 `speechConfig()` 合并安全默认值。缺少任一语音密钥只会在第一条需要合成的回复上产生本地脱敏警告。
@@ -1699,3 +1699,37 @@ Java `ToolSelector`、`PrimitiveTaskController`、`SurvivalController` 不再排
 私有部署现场重新进服后，上游日志依次出现发送 secret 请求、收到 secret、语音服务端确认鉴权、确认连接检查。Headless 环境没有 OpenAL 扬声器和实体麦克风，上游因此打印对应警告，但 UDP 会话仍保持。停止 Node 控制器且保持 Fabric 客户端在线后运行 `npm run test:voice-bridge`，实际回传 `voice_playback_completed`，输入为 24 kHz、28,800 bytes 的 0.6 秒测试音；随后控制器和 WebUI 已恢复运行。该证据覆盖 Bot 端 PCM 上传、重采样、分帧、Opus 和已鉴权发送入口，不等价于另一名玩家已实际听见。
 
 没有用户提供火山 TTS AppID/Access Token、OpenAI/MiMo 音频配额或自定义接口，因此本轮不能花费/猜测凭据做云端真实合成。真实服务器上还必须由另一名安装 Simple Voice Chat 的玩家站在 Bot 听距内，确认文字出现后能听到 Bot 的语音、距离衰减正确、离开范围听不到、连续两句顺序正确、TTS 失败不阻塞跟随。完成前只能声称“协议、编译和 mock 链路已验证”，不能声称服务器内实际听见已验收。Simple Voice Chat 收音/语音识别仍未实现，本轮只解决声音生成与输出。
+
+## 32. 2026-08-12：全栈审计、竞态修复与长期运行收敛
+
+### 32.1 Fabric 桥状态机
+
+`FabricBridgeClient` 的传输边界现在明确分成 `listening -> tcp_connected -> authenticated -> ended`。只有正确的首个 `hello` 同时满足一次性桥令牌与 `protocolVersion=1` 后，`state/chat/action_result/voice_status` 才能进入业务层；握手前注入任何业务消息会拒绝连接。令牌或协议错误通过统一的 `#rejectHandshake` 同步拒绝 `connect()`，不会等满 `connectTimeoutMs`。断线原因会先存入实例，即使 socket 在 `waitForEnd()` 注册前已经关闭也能立即返回；主动 `close(reason)` 同时拒绝未完成连接、唤醒结束等待并清理动作 Promise。`MinecraftClient` 也缓存先到达的结束原因，消除“连接刚结束、上层稍后才等待”的竞态。
+
+安全意义：桥仍只监听 `127.0.0.1`，一次性令牌由私有运行目录生成；协议状态机防止同机其他进程抢在真实客户端前伪造世界、聊天或动作完成。升级协议时必须同步修改两端版本、消息 schema 和握手测试，不能为了兼容直接跳过认证。
+
+### 32.2 游戏连续任务
+
+外部动作必须按“已接单”和“物理后置条件已收敛”分开建模。`follow_player`、`attack_hostile`、`return_home` 等返回成功表示 Java 状态机已接管，不表示目标已在同一 Tick 达成。远处敌对生物锁定 Bot/主人时，Node 下发 `attack_hostile`；Java `DefendTask` 持续寻路、选择武器和近战，直到目标消失、死亡、更换目标或 Bot 低血量，避免旧逻辑每 15 秒原地执行一次超出攻击距离的 `attack_entity`。跟随仍由本地持续任务维护，不依赖模型逐步驱动。
+
+`LocalPathNavigator` 移除了每 80 Tick 无条件重算并丢弃有效路线的逻辑。回家任务保留路线进度；400 Tick 无进展进入本地恢复，1,200 Tick 仍失败则返回 `home_route_stalled_safe_wait` 并停止，Node 在当前位置安全时不会立刻重新排同一回家任务，不安全时才允许重试。副手 `use_held_item` 归一化为 `use_item`，Java 对 `OFF_HAND` 执行真实使用。WebUI/游戏内明确停止语句由本地高优先级路径取消任务与持续动作，零模型调用；普通“停止”与“解除跟随”分别生成符合当前状态的自然回复。
+
+### 32.3 状态落盘与日志边界
+
+Fabric 可以每秒上报数百个 `nearbyBlocks`、完整槽位和玩家凝视坐标，这些数据必须留在 `AgentController` 当前内存观察中。`RuntimeStatusStore.compactRuntimeWorld()` 只落盘连接、位置、生命/饥饿/空气、维度、最多 16 名附近玩家的身份与距离、最多 8 个威胁、环境/家/活动原语/导航摘要；`inventory=[]`，不包含 `nearbyBlocks` 或 `lookingAtBlock`。写入最快每秒一次，内容无实质变化时每 30 秒心跳；指纹排除 `sequence/observedAt`。若原子写入失败，会清空节流状态，下一次报告可以立刻重试。该文件只服务 WebUI 健康检查，不可作为记忆、背包或世界观察备份。
+
+Logger 的敏感键规则继续覆盖 password/secret/token/apiKey/authorization，但显式放行 `tokens/inputTokens/outputTokens/totalTokens/reasoningTokens/cachedInputTokens/cumulativeTokens/maxTaskTokens/maxOutputTokens` 等纯计量字段，使总聊天可以审计调用成本。`accessToken/session_token` 等认证字段仍被隐藏。WebUI JWT 识别要求 `eyJ` 起始的三段结构，不再把 Java 包名/类名误当 JWT；Java 堆栈因此可用于真实诊断。Headless Java 子进程会从继承环境中删除所有模型/TTS Key，只有 EasyAuth 密码按连接职责保留。
+
+### 32.4 配置与供应商兼容
+
+WebUI 保存密钥使用 `mergeManagedEnv()`：仅替换受管键，保留注释、未知变量、原顺序、UTF-8 BOM 与 CRLF/LF；空输入不会意外删除既有密钥。OpenAI 音频输入模型走 Chat Completions，发送纯 Base64 `input_audio.data` 与显式 `format`；普通文本/视觉模型继续走 Responses。当前显式音频模型示例为 `gpt-audio-1.5`，能力表只为真正支持音频输入的模型开启 audio。TTS 的 `openai_chat_audio` 是音频输出协议，与普通 GPT 文本模型不可互换。
+
+依赖锁定通过根级 npm `overrides` 把传递依赖 `uuid` 收敛到已修复版本；`npm run audit:dependencies` 显式使用 npm 官方审计端点，避免用户全局镜像不支持审计 API 导致误判。Fabric 构建启用 deprecation lint，已移除当前代码可控的废弃调用；构建仍必须使用项目要求的 Java 25。
+
+### 32.5 实服证据和交接顺序
+
+本轮私有部署现场确认：Bot 从旧的回家循环位置移动到首个家半径内；被 Pillager 击杀后自动点击重生并重新进入世界；管理员自然聊天只产生回复、不调用游戏动作；“停止当前任务，站在原地等待”立即执行且日志中没有模型轮次；Simple Voice Chat 完成鉴权，停 Node、保留 Fabric 在线后运行测试桥实际返回 `voice_playback_completed`（24 kHz、28,800 bytes）。这些证据不等价于穷举所有 Minecraft 动作，也不等价于另一名玩家已从扬声器听到测试音。
+
+新 Agent 接手时按以下顺序操作：先读本文件、`README.md`、`PARAMETERS.md` 和 `git status/log`；区分公共仓库与私有部署目录；先跑 Node 全量测试/类型检查/构建/依赖审计和 Java clean build；再同步源码/JAR到私有目录，但绝不覆盖 `.env`、真实 `config/bot.json`/`mods.json`、人设提示词、记忆、玩家画像、日志和 `.runtime`；最后重启实际控制器并检查 WebUI、`runtime-status.json` 大小和 Fabric 日志。公开提交前运行 `npm run audit -- --history`、敏感字符串/真实域名扫描、`git diff --check`、`git fsck --full`。公共文件只保留 `你的域名.com` 与示例密钥，私有部署继续保留用户真实值。
+
+仍需人工完成的外部验收：另一名玩家实际听见 TTS；中国大陆无 VPN 的纯净 Windows 下载/安装/调用各供应商；未来每个新增 mod 的真实客户端启动/进服；复杂地狱/水域/跨维度长时间跟随与全部物品交换组合。不得把这些边界写成已完成。

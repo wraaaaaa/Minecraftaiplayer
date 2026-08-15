@@ -309,7 +309,7 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
 test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止跟随回家', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-invite`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
@@ -341,6 +341,67 @@ test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止�
   await logger.flush()
 })
 
+test('远处敌对生物锁定 Bot 时启动持续防御寻路而不是原地挥击', async () => {
+  const suffix = `${process.pid}-${Date.now()}-continuous-defense`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, enabled: true, mode: 'companion', autoInviteNearbyPlayers: false }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const provider: LlmProvider = { complete: async () => { throw new Error('威胁响应不应调用模型') } }
+  const actions: AgentAction[] = []
+  const executor = { execute: async (action: AgentAction) => { actions.push(action); return { ok: true, detail: 'defense_engaged' } }, chat: async () => {} }
+  const controller = new AgentController({ config: testConfig, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
+
+  await controller.proactiveTick({
+    ...world,
+    nearbyPlayers: [],
+    nearbyHostiles: [{ id: '42', typeId: 'minecraft:pillager', distance: 14, targetingBot: true }]
+  })
+
+  assert.deepEqual(actions, [
+    { type: 'gesture', gesture: 'afraid' },
+    { type: 'attack_hostile', targetId: '42' }
+  ])
+  await logger.flush()
+})
+
+test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟随', async () => {
+  const suffix = `${process.pid}-${Date.now()}-companion-timeout`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  const actions: AgentAction[] = []
+  const controller = new AgentController({
+    config: testConfig, persona, prompts,
+    provider: { complete: async () => { throw new Error('邀请超时不应调用模型') } },
+    memory, experience, policy: new PolicyEngine(rules),
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async () => {} },
+    logger, tasks, secrets: new SecretGuard([])
+  })
+  const seenAt = Date.now()
+  const originalNow = Date.now
+  try {
+    await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+    Date.now = () => seenAt + 31_000
+    await controller.proactiveTick({ ...world, activePrimitive: 'follow_player', nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+  } finally {
+    Date.now = originalNow
+  }
+
+  assert.deepEqual(actions, [
+    { type: 'follow_player', target: 'Alice' },
+    { type: 'gesture', gesture: 'happy' },
+    { type: 'stop' },
+    { type: 'return_home' }
+  ])
+  await logger.flush()
+})
+
 test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-standby`
   const testConfig = structuredClone(config)
@@ -366,6 +427,12 @@ test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', a
     position: { x: 0, y: 64, z: 0 },
     home: { dimension: 'minecraft:overworld', x: 100, y: 64, z: 100, radius: 10, source: 'first_home' },
     activePrimitive: 'return_home'
+  })
+  await controller.proactiveTick({
+    ...safeWorld,
+    position: { x: 0, y: 64, z: 0 },
+    home: { dimension: 'minecraft:overworld', x: 100, y: 64, z: 100, radius: 10, source: 'first_home' },
+    navigationStatus: 'home_route_stalled_safe_wait; best_distance=80; no_progress_ticks=1200'
   })
   assert.equal(providerCalls, 0)
   assert.deepEqual(actions, [
@@ -433,6 +500,36 @@ test('明确停止指令绕过模型并立即取消正在思考的任务', async
   assert.deepEqual(actions, [{ type: 'stop' }])
   const saved = await tasks.load()
   assert.deepEqual(saved.tasks.map(task => task.status), ['failed', 'completed'])
+  await logger.flush()
+})
+
+test('WebUI 的停止并原地等待指令绕过模型且只执行一次停止', async () => {
+  const suffix = `${process.pid}-${Date.now()}-admin-immediate-stop`
+  const testConfig = structuredClone(config)
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, ownerName: 'wraaaaaa' }
+  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
+  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
+  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
+  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  let providerCalls = 0
+  const provider: LlmProvider = { complete: async () => {
+    providerCalls++
+    return { text: '{"reply":"不应调用","action":{"type":"none"}}', model: 'mock', requestedEffort: 'low', effectiveEffort: 'low' }
+  } }
+  const actions: AgentAction[] = []
+  const chats: string[] = []
+  const executor = {
+    execute: async (action: AgentAction) => { actions.push(action); return { ok: true, detail: 'stopped' } },
+    chat: async (message: string) => { chats.push(message) }
+  }
+  const controller = new AgentController({ config: testConfig, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
+
+  await controller.handleAdminMessage('停止当前任务，站在原地等待。', world)
+
+  assert.equal(providerCalls, 0)
+  assert.deepEqual(actions, [{ type: 'stop' }])
+  assert.deepEqual(chats, ['@wraaaaaa 好，我停下了，会在这里等你。'])
+  assert.equal((await tasks.load()).tasks[0]?.status, 'completed')
   await logger.flush()
 })
 

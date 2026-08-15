@@ -1216,7 +1216,6 @@ public final class ShelterController {
         return !(block instanceof FallingBlock)
             && !state.hasBlockEntity()
             && state.getFluidState().isEmpty()
-            && state.blocksMotion()
             && state.isCollisionShapeFullBlock(client.level, probe)
             && !state.is(BlockTags.LEAVES)
             && !dangerous(state);

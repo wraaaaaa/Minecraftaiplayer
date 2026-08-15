@@ -423,7 +423,7 @@ CialloAI 跟着我
    - 火山引擎：在页面秘密区填写 AppID 与 Access Token；`voice` 填控制台已授权的音色 ID，默认示例 `BV001_streaming` 只是示例音色。
    - OpenAI：使用 `gpt-4o-mini-tts`、`OPENAI_API_KEY` 和 `/v1` Base URL。
    - MiMo：使用 `mimo-v2.5-tts`、`MIMO_API_KEY`，内置中文音色可填 `冰糖`、`茉莉`、`苏打` 或 `白桦`。
-   - 音频多模态：用于支持 Chat Completions 音频输出的模型，如 `gpt-audio`；接口需返回 `choices[0].message.audio.data` 的 Base64 PCM16。
+   - 音频多模态：用于支持 Chat Completions 音频输出的模型，如 `gpt-audio-1.5`；接口需返回 `choices[0].message.audio.data` 的 Base64 PCM16。
    - 自定义：可选直接返回 PCM16 二进制，或 JSON Base64；需要鉴权时密钥只从 `.env` 环境变量读取，无鉴权的本机/局域网接口可把“密钥环境变量”留空。
 
 4. 保存设置并完整重启 Bot。之后 Bot 每次真正发给玩家的自然聊天会先以文字立即出现，再异步合成声音。内部思考、工具名、动作回执和完整错误永远不会被朗读。
@@ -474,7 +474,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `data/tasks.json` | 持久任务队列和全部终态 | 保存发令者、优先级、尝试次数、真实结果；同进程重连与进程重启均可恢复孤立任务 |
 | `data/autonomy-state.json` | 已验证住所位置 | Java 仅在门、光照、外壳和服务端状态全部确认后原子写入 |
 | `data/bridge-token.txt` | Node 与 Java 的临时本机会话令牌 | 启动控制器生成；被 Git 忽略，不交给模型或玩家 |
-| `data/runtime-status.json` | 当前游戏阶段、坐标、生命、背包等 | Fabric 每秒上报结构化状态，Node 原子落盘，WebUI 轮询读取 |
+| `data/runtime-status.json` | 当前游戏阶段、坐标、生命、附近玩家/威胁和寻路摘要 | Fabric 持续上报完整结构化状态；Node 仅按变化节流落盘 WebUI 所需轻量摘要，不保存背包明细和附近方块全集 |
 | `.runtime/minecraft/managed-mods.json` | 最近一次服务器 mod 同步清单 | 记录来源、时间、文件名、大小和 SHA-256，用于安全升级/删除 |
 | `.runtime/skin-pack/Minecraft-AI-Skin-Pack.zip` | 给其他玩家安装的离线皮肤包 | 含官方万用皮肤加载器和按 Bot 名称放置的本地皮肤 |
 | `logs/bot.log` | AI 控制器 JSONL 日志 | 每行一个结构化事件，递归脱敏 password/token/authorization |
@@ -720,7 +720,7 @@ npm run probe
 
 使用前确认 WebUI“自主能力与安全”中的“允许 Fabric 动态环境验证”已开启。AI 根据附近结构化状态决定去哪里，Fabric 在执行时逐目标判断；不再填写任何人工坐标范围。关闭此开关会直接拒绝采集、放置、开矿和建房。
 
-运行时会把 Bot 周围半径 8 格、上下 5 格的已加载方块摘要写入 `data/runtime-status.json` 的 `world.blockSurvey`。`resources` 是原木、石头、泥土和矿物等自然资源；`artificial` 是门、木板、楼梯、玻璃、箱子、工作台、灯等疑似人造内容；`classification` 为 `natural_terrain_likely`、`protected_structure_nearby` 或 `uncertain`。自动行为不靠图片或声音，仍完全使用这一结构化状态和正常客户端动作。
+运行时会通过本机 Fabric 桥把 Bot 周围已加载方块摘要持续交给 Node 控制器；`resources` 是原木、石头、泥土和矿物等自然资源，`artificial` 是门、木板、楼梯、玻璃、箱子、工作台、灯等疑似人造内容，分类用于辅助保护玩家建筑。完整方块观察只保留在当前进程内存，不写入 `data/runtime-status.json`；该文件只存 WebUI 健康检查需要的轻量摘要，以免 24 小时运行时产生大量磁盘写入。DeepSeek 等纯文本模型仍通过这种结构化状态和正常客户端动作游玩，不依赖画面。
 
 当前可真实执行：
 
@@ -738,6 +738,25 @@ npm run probe
 ## 兼容范围与许可证
 
 - 当前完整部署脚本针对 Windows/Windows Server；核心 Node 和 Java 代码可移植，但 Linux 无界面服务脚本尚未提供。
-- Simple Voice Chat `fabric-2.6.20+26.2` 已随服务器模组成功握手并请求语音 secret；Headless 环境没有 OpenAL 设备，日志显示 `Speaker unavailable`，因此当前只有兼容进服、没有收发语音能力。文本与结构化游戏控制不受影响。
+- Simple Voice Chat `fabric-2.6.20+26.2` 已随服务器模组完成鉴权；Bot 端测试音已实际通过 Fabric 桥、48 kHz 重采样/分帧、Opus 和语音客户端发送入口并收到 `voice_playback_completed`。Headless 环境没有实体麦克风/扬声器不影响发送合成语音，但仍需另一名玩家现场确认实际听见、距离衰减和连续播放；语音识别尚未实现。
 - 2026-08-04 的安装、下载和进服测试均在用户开启全局美国 VPN 的电脑完成，不能作为中国大陆无代理可用性的证明；“国内镜像路径已实现”与“无代理正式验收”必须区分。
 - 项目许可证尚未确定，暂不应把仓库内容视为已授予开源再分发许可。引入第三方内容前继续核对其许可证。
+
+## 2026-08-12 全项目复核摘要
+
+这次复核修复了几类会直接影响真实使用的问题：Fabric 桥现在只有完成令牌和协议握手后才接收世界状态，错误令牌/协议会立即失败，断线和主动关闭不会让控制器永久等待；WebUI 的“停止并原地等待”改为本地零 Token 指令，不再为简单停止额外调用两轮模型；被远处敌对生物锁定时会启动持续追近防御，而不是站在原地间隔挥击；回家长路径不再每 80 Tick 清空有效路线，长时间无进展时会恢复或安全停机；副手食物/物品可以正确使用。
+
+长期后台运行也做了专项收敛：传给 Agent 的完整世界观察仍保留在控制器内存，而 `data/runtime-status.json` 只保存总控页所需摘要，最快每秒写一次、无实质变化时只保留 30 秒心跳；子 Java 进程不再继承大模型和 TTS 密钥；日志会保留 Token 用量数字但继续隐藏认证令牌；WebUI 修改 `.env` 时保留未知变量、注释、顺序、BOM 和换行风格；JWT 脱敏只匹配真正的 `eyJ...` 结构，不再误删 Java 类名和堆栈。
+
+维护者每次交付至少运行：
+
+```powershell
+npm test
+npm run check
+npm run build
+npm run audit:dependencies
+cd fabric-bridge
+.\gradlew.bat clean build --warning-mode all
+```
+
+若 `npm run test:voice-bridge` 提示 `EADDRINUSE`，说明正式 Node 控制器仍占用本机桥端口；先只停止控制器、保持 Minecraft 客户端在线，再执行测试，结束后重新启动控制器。任意未来模组仍必须在目标 Minecraft/Fabric/Java 组合中实际启动和进服验证，复制成功不代表兼容成功。
