@@ -3,7 +3,6 @@ let dirty = false
 
 const AUTONOMY_DEFAULTS = Object.freeze({
   enabled: true,
-  mode: 'companion',
   ownerName: 'wraaaaaa',
   commandArbitrationMs: 350,
   contextualAddressing: true,
@@ -33,7 +32,6 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
-  longTermGoal: 'reach_end',
   firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 
@@ -213,7 +211,7 @@ function renderStatus(snapshot) {
   $('taskQueueSummary').textContent = snapshot.tasks ? `执行中 ${taskCounts.running || 0}，排队 ${taskCounts.queued || 0}，完成 ${taskCounts.completed || 0}，失败/拒绝 ${taskCounts.failed || 0}` : '尚无任务记录'
   const progression = snapshot.progression
   $('progressionSummary').textContent = progression
-    ? `${progression.stage || 'survive'} → ${progression.goal || 'reach_end'}；最近：${progression.lastAction || '等待'}${progression.lastResult ? `（${progression.lastResult.ok ? '成功' : '失败'}）` : ''}`
+    ? `${progression.stage || 'survive'}；最近：${progression.lastAction || '等待'}`${progression.lastResult ? `（${progression.lastResult.ok ? '成功' : '失败'}）` : ''}`
     : '尚未生成发育进度文件'
   $('modsSummary').textContent = snapshot.manifest.sourceDirectory ? `来源：${snapshot.manifest.sourceDirectory}` : '尚未设置模组来源'
   $('modList').replaceChildren(...mods.map(mod => {
@@ -279,7 +277,7 @@ function populate(snapshot) {
   set('speechVolcAppIdEnv', speech.volcengineAppIdEnv); set('speechVolcCluster', speech.volcengineCluster); set('speechCustomAuthHeader', speech.customAuthHeader); set('speechCustomAuthScheme', speech.customAuthScheme); set('speechCustomAudioJsonPath', speech.customAudioJsonPath)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
-  setChecked('autonomyEnabled', autonomy.enabled); set('autonomyMode', autonomy.mode); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
+  setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoInviteNearbyPlayers', autonomy.autoInviteNearbyPlayers); setNumber('inviteRadius', autonomy.inviteRadius); setNumber('inviteCooldownMs', autonomy.inviteCooldownMs); setChecked('discardWornTools', autonomy.discardWornTools); setNumber('wornToolRemainingDurability', autonomy.wornToolRemainingDurability); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
   for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand']) setChecked(id, autonomy[id])
@@ -320,12 +318,11 @@ function collect() {
   const criticalHealthThreshold = number('criticalHealthThreshold')
   if (criticalHealthThreshold > lowHealthThreshold) throw new Error('危险生命阈值不能高于低生命阈值')
   c.autonomy = {
-    enabled: checked('autonomyEnabled'), mode: value('autonomyMode'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
+    enabled: checked('autonomyEnabled'), ownerName, commandArbitrationMs: number('commandArbitrationMs'), contextualAddressing: checked('contextualAddressing'), directAddressDistance: number('directAddressDistance'), conversationWindowMs: number('conversationWindowMs'),
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
     safeIdleEnabled: checked('safeIdleEnabled'), autoInviteNearbyPlayers: checked('autoInviteNearbyPlayers'), inviteRadius: number('inviteRadius'), inviteCooldownMs: number('inviteCooldownMs'), discardWornTools: checked('discardWornTools'), wornToolRemainingDurability: number('wornToolRemainingDurability'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
     autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'),
-    longTermGoal: 'reach_end',
     firstHome: { enabled: checked('firstHomeEnabled'), dimension: value('firstHomeDimension'), x: number('firstHomeX'), y: number('firstHomeY'), z: number('firstHomeZ'), radius: number('firstHomeRadius') }
   }
   c.agentWorkspace = {

@@ -150,7 +150,6 @@ export function validateConfig(config: BotConfig): void {
   }
   if (typeof config.easyAuth?.registerIfNeeded !== 'boolean') throw new Error('easyAuth.registerIfNeeded 必须是布尔值')
   if (config.autonomy !== undefined) {
-    if (config.autonomy.mode !== undefined && !['companion', 'survival'].includes(config.autonomy.mode)) throw new Error('autonomy.mode 只能是 companion 或 survival')
     requireString(config.autonomy.ownerName, 'autonomy.ownerName')
     if (!/^[A-Za-z0-9_]{3,16}$/u.test(config.autonomy.ownerName)) throw new Error('autonomy.ownerName 必须是有效的 Minecraft 玩家名')
     for (const [name, value, minimum, maximum] of [
@@ -179,7 +178,6 @@ export function validateConfig(config: BotConfig): void {
     for (const name of ['autoInviteNearbyPlayers', 'discardWornTools'] as const) {
       if (config.autonomy[name] !== undefined && typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }
-    if (config.autonomy.longTermGoal !== undefined && config.autonomy.longTermGoal !== 'reach_end') throw new Error('autonomy.longTermGoal 当前只能是 reach_end')
     if (config.autonomy.firstHome !== undefined) {
       const home = config.autonomy.firstHome
       if (typeof home.enabled !== 'boolean') throw new Error('autonomy.firstHome.enabled 必须是布尔值')

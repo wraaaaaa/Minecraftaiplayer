@@ -103,7 +103,6 @@
   },
   "autonomy": {
     "enabled": true,
-    "mode": "companion",
     "ownerName": "wraaaaaa",
     "commandArbitrationMs": 350,
     "contextualAddressing": true,
@@ -133,7 +132,6 @@
     "protectOwner": true,
     "allowVerifiedWilderness": true,
     "allowTeleportCommand": false,
-    "longTermGoal": "reach_end",
     "firstHome": {
       "enabled": true,
       "dimension": "minecraft:overworld",

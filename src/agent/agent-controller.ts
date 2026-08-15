@@ -12,7 +12,7 @@ import type { ProgressionStore } from '../progression/progression-store.js'
 import type { TaskRecord, TaskStore } from '../tasks/task-store.js'
 import { assessAction } from './capability-assessor.js'
 import { parseAgentDecision } from './decision.js'
-import { planSurvivalProgression } from './autonomous-development.js'
+import { planAutonomousDevelopment } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt, buildToolAgentGoal } from './prompt.js'
 import type { WorldState } from './world-state.js'
 import { extractDeclaredBotAlias, type PromptWorkspace } from '../prompts/prompt-workspace.js'
@@ -314,57 +314,25 @@ export class AgentController {
       if (!survivalEmergency) return
       this.#manualHold = false
     }
-    if (autonomy.mode === 'companion') {
-      const invited = await this.#maybeInvitePassingPlayer(world, autonomy)
-      if (invited) return
-    }
+    const invited = await this.#maybeInvitePassingPlayer(world, autonomy)
+    if (invited) return
     // Continuous player modes such as follow_player are owned by the Fabric client and
     // intentionally outlive the request that started them. Idle development must never
     // replace them; immediate danger above, an explicit stop, a conflicting player action,
     // death or disconnect remains allowed to cancel the mode.
     if (world.activePrimitive && !['idle', ''].includes(world.activePrimitive)) return
-    if (autonomy.mode === 'companion') {
-      await this.#runCompanionStandby(world, autonomy)
-      return
-    }
-    if (this.#provider.toolTurn) {
-      const now = Date.now()
-      const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
-      if (now - this.#lastProactiveAt < developmentIntervalMs) return
-      this.#lastProactiveAt = now
-      const epoch = this.#proactiveEpoch
-      this.#proactiveActionRunning = true
-      try {
-        const system = `${await this.#systemPrompt(undefined, true)}\n\n${AGENT_V2_SYSTEM_RULES}\n你现在处于空闲自主发展模式。长期目标是生存、持续发展并最终进入末地。不要与玩家财产交互；玩家任务会立即抢占本轮。`
-        const agent = new ToolAgent({
-          provider: this.#provider,
-          executor: this.#executor,
-          authorize: action => this.#policy.authorize(action),
-          maxSteps: this.#config.model.autonomousAgentMaxSteps ?? 16,
-          onStep: event => this.#diagnose({
-            type: event.ok ? 'step' : 'failure', level: event.ok ? 'info' : 'warning',
-            title: event.ok ? '自主 Agent 原子工具已返回' : '自主 Agent 工具失败并重新规划',
-            summary: event.tool, detail: `${event.arguments}\n${event.detail}`,
-            metadata: { source: 'model-tool-loop', step: event.step, tool: event.tool, ok: event.ok }
-          })
-        })
-        const result = await agent.run({
-          system: this.#secrets.sanitizeForModel(system),
-          goal: this.#secrets.sanitizeForModel('根据随请求附带的 currentWorld 自主推进生存发育；每次只做一个可验证里程碑。不要在目标文本中复述完整世界状态。'),
-          initialWorld: world,
-          cancelled: () => epoch !== this.#proactiveEpoch
-        })
-        await this.#diagnose({
-          type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'warning',
-          title: result.ok ? '自主 Agent 本轮结束' : '自主 Agent 本轮未完成',
-          summary: `工具步数 ${result.steps}`, detail: result.detail,
-          metadata: { source: 'model-tool-loop', steps: result.steps, model: result.model ?? 'unknown' }
-        })
-      } catch (error) {
-        await this.#diagnose({ type: 'failure', level: 'warning', title: '自主 Agent 本轮异常', summary: '等待下一轮重试', detail: error instanceof Error ? error.message : String(error) })
-      } finally {
-        this.#proactiveActionRunning = false
-      }
+    await this.#runUnifiedIdle(world, autonomy)
+    return
+  }
+
+  async #runUnifiedIdle(world: WorldState, autonomy: AutonomyConfig): Promise<void> {
+    const unsafe = world.environment?.safeToIdle === false || world.onFire === true
+      || (world.inWater === true && (world.air ?? 300) < 180)
+    if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
+      this.#standbyEngaged = false
+      if (!unsafe && world.navigationStatus?.startsWith('home_route_stalled_safe_wait')) return
+      if (world.activePrimitive === 'return_home') return
+      await this.#executeProactive({ type: 'return_home' })
       return
     }
     if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false)) {
@@ -384,7 +352,7 @@ export class AgentController {
     const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
     if (now - this.#lastProactiveAt >= developmentIntervalMs) {
       const progression = await this.#progression?.load()
-      const planned = planSurvivalProgression(this.#config, world, progression)
+      const planned = planAutonomousDevelopment(this.#config, world, progression)
       if (planned) {
         this.#lastProactiveAt = now
         await this.#progression?.notePlan(planned.stage, planned.action.type, planned.reason)
@@ -425,9 +393,20 @@ export class AgentController {
         }
       }
     }
-    if (autonomy.safeIdleEnabled) {
+    if (autonomy.discardWornTools && now - this.#lastWornToolCleanupAt >= 5 * 60_000) {
+      this.#lastWornToolCleanupAt = now
+      await this.#executor.execute({
+        type: 'discard_worn_tools', remainingDurability: autonomy.wornToolRemainingDurability
+      }).catch(() => ({ ok: false, detail: 'worn_tool_cleanup_failed' }))
+    }
+    if (autonomy.safeIdleEnabled && !this.#standbyEngaged) {
       const waiting = await this.#executeProactive({ type: 'wait_safe' })
       if (!waiting.ok) return
+      this.#standbyEngaged = true
+      await this.#diagnose({
+        type: 'result', level: 'success', title: '空闲待机已进入零 Token 安全等待', summary: '安全位置等待玩家召唤',
+        detail: waiting.detail, metadata: { source: 'autonomous-idle', tokenCost: 0 }
+      })
     }
     if (!this.#config.chat.proactiveEnabled || now - this.#lastInboundAt < this.#config.chat.proactiveIdleMs || now - this.#lastProactiveAt < this.#config.chat.proactiveMinIntervalMs) return
     this.#lastProactiveAt = now
@@ -563,38 +542,6 @@ export class AgentController {
       detail: followed.detail, metadata: { source: 'companion-local', distance: candidate.distance, tokenCost: 0 }
     })
     return true
-  }
-
-  async #runCompanionStandby(world: WorldState, autonomy: AutonomyConfig): Promise<void> {
-    const unsafe = world.environment?.safeToIdle === false || world.onFire === true
-      || (world.inWater === true && (world.air ?? 300) < 180)
-    if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
-      this.#standbyEngaged = false
-      if (!unsafe && world.navigationStatus?.startsWith('home_route_stalled_safe_wait')) return
-      if (world.activePrimitive === 'return_home') return
-      await this.#executeProactive({ type: 'return_home' })
-      return
-    }
-    if (autonomy.safeIdleEnabled && unsafe && !world.home) {
-      this.#standbyEngaged = false
-      await this.#executeProactive({ type: 'seek_shelter' })
-      return
-    }
-    const now = Date.now()
-    if (autonomy.discardWornTools && now - this.#lastWornToolCleanupAt >= 5 * 60_000) {
-      this.#lastWornToolCleanupAt = now
-      await this.#executor.execute({
-        type: 'discard_worn_tools', remainingDurability: autonomy.wornToolRemainingDurability
-      }).catch(() => ({ ok: false, detail: 'worn_tool_cleanup_failed' }))
-    }
-    if (!autonomy.safeIdleEnabled || this.#standbyEngaged) return
-    const waiting = await this.#executor.execute({ type: 'wait_safe' })
-    if (!waiting.ok) return
-    this.#standbyEngaged = true
-    await this.#diagnose({
-      type: 'result', level: 'success', title: '陪伴模式已进入零 Token 待机', summary: '安全位置等待玩家召唤',
-      detail: waiting.detail, metadata: { source: 'companion-local', tokenCost: 0 }
-    })
   }
 
   async #executeAutonomousAction(action: AgentAction): Promise<{ ok: boolean; detail: string }> {

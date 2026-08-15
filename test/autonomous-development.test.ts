@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { planAutonomousDevelopment, planSurvivalProgression } from '../src/agent/autonomous-development.js'
+import { planAutonomousDevelopment } from '../src/agent/autonomous-development.js'
 import { DEFAULT_AUTONOMY_CONFIG, type BotConfig } from '../src/config/types.js'
 import type { WorldState } from '../src/agent/world-state.js'
 
@@ -19,8 +19,8 @@ function surveyed(inventory: WorldState['inventory'] = []): WorldState {
 }
 
 test('自主发展先把已有原木合成木板，再按扫描结果采集短缺资源', () => {
-  assert.deepEqual(planAutonomousDevelopment(config, surveyed([{ name: '原木', itemId: 'minecraft:oak_log', count: 1 }])), { type: 'craft_item', itemId: 'minecraft:oak_planks', count: 4 })
-  assert.deepEqual(planAutonomousDevelopment(config, surveyed()), { type: 'gather_resource', resource: 'wood', count: 2 })
+  assert.deepEqual(planAutonomousDevelopment(config, surveyed([{ name: '原木', itemId: 'minecraft:oak_log', count: 1 }]))?.action, { type: 'craft_item', itemId: 'minecraft:oak_planks', count: 4 })
+  assert.deepEqual(planAutonomousDevelopment(config, surveyed())?.action, { type: 'gather_resource', resource: 'wood', count: 2 })
 })
 
 test('自主发展不会把附近玩家工作台误认为自己的工作台', () => {
@@ -29,7 +29,7 @@ test('自主发展不会把附近玩家工作台误认为自己的工作台', ()
     { name: '木棍', itemId: 'minecraft:stick', count: 4 }
   ])
   world.blockSurvey!.artificial.push({ blockId: 'minecraft:crafting_table', category: 'other', count: 1, nearestDistance: 2 })
-  assert.deepEqual(planAutonomousDevelopment(config, world), {
+  assert.deepEqual(planAutonomousDevelopment(config, world)?.action, {
     type: 'craft_item', itemId: 'minecraft:crafting_table', count: 1
   })
 })
@@ -40,7 +40,7 @@ test('自有方块账本中的工作台可供后续制作使用', () => {
     { name: '木棍', itemId: 'minecraft:stick', count: 4 }
   ])
   world.blockSurvey!.owned = [{ blockId: 'minecraft:crafting_table', category: 'other', count: 1, nearestDistance: 2 }]
-  assert.deepEqual(planAutonomousDevelopment(config, world), {
+  assert.deepEqual(planAutonomousDevelopment(config, world)?.action, {
     type: 'craft_item', itemId: 'minecraft:wooden_pickaxe', count: 1
   })
 })
@@ -58,7 +58,7 @@ test('Fabric FOOD 组件标记的模组熟食计入自主储备', () => {
     { blockId: 'minecraft:crafting_table', category: 'other', count: 1, nearestDistance: 2 },
     { blockId: 'minecraft:furnace', category: 'other', count: 1, nearestDistance: 2 }
   ]
-  assert.deepEqual(planAutonomousDevelopment(config, world), {
+  assert.deepEqual(planAutonomousDevelopment(config, world)?.action, {
     type: 'craft_item', itemId: 'minecraft:stone_pickaxe', count: 1
   })
 })
@@ -68,19 +68,18 @@ test('自主发展会把背包工作台放进逐目标验证的荒野工作点',
     { name: '工作台', itemId: 'minecraft:crafting_table', placeableBlockId: 'minecraft:crafting_table', count: 1 },
     { name: '橡木木板', itemId: 'minecraft:oak_planks', count: 3 },
     { name: '木棍', itemId: 'minecraft:stick', count: 4 }
-  ])), { type: 'place_block', itemId: 'minecraft:crafting_table', count: 1 })
+  ]))?.action, { type: 'place_block', itemId: 'minecraft:crafting_table', count: 1 })
 })
 
 test('废弃的人工开发区坐标不再限制自主发展', () => {
   const world = surveyed(); world.position = { x: 100, y: 64, z: 100 }; world.blockSurvey!.center = world.position
-  assert.deepEqual(planAutonomousDevelopment(config, world), { type: 'gather_resource', resource: 'wood', count: 2 })
+  assert.deepEqual(planAutonomousDevelopment(config, world)?.action, { type: 'gather_resource', resource: 'wood', count: 2 })
 })
 
 test('动态荒野验证发现玩家结构后先离开，不会无限重试同一制作动作', () => {
   const world = surveyed([{ name: '木板', itemId: 'minecraft:oak_planks', count: 16 }])
-  const planned = planSurvivalProgression(config, world, {
+  const planned = planAutonomousDevelopment(config, world, {
     schemaVersion: 1,
-    goal: 'reach_end',
     stage: 'stone_age',
     updatedAt: new Date().toISOString(),
     milestones: {},
@@ -109,5 +108,5 @@ test('基础石器和照明齐备后在验证荒野建造持久住所', () => {
     { blockId: 'minecraft:crafting_table', category: 'other', count: 1, nearestDistance: 2 },
     { blockId: 'minecraft:furnace', category: 'other', count: 1, nearestDistance: 2 }
   ]
-  assert.deepEqual(planAutonomousDevelopment(config, world), { type: 'build_shelter' })
+  assert.deepEqual(planAutonomousDevelopment(config, world)?.action, { type: 'build_shelter' })
 })

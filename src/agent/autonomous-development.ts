@@ -21,11 +21,6 @@ function hasSurveyed(world: WorldState, category: string): boolean {
   return world.blockSurvey?.resources.some(entry => entry.category === category && entry.count > 0) ?? false
 }
 
-function hasNearbyBlock(world: WorldState, predicate: (id: string) => boolean): boolean {
-  return [...(world.blockSurvey?.resources ?? []), ...(world.blockSurvey?.artificial ?? []), ...(world.blockSurvey?.owned ?? []), ...(world.blockSurvey?.other ?? [])]
-    .some(entry => predicate(entry.blockId) && entry.count > 0)
-}
-
 function hasNearbyOwnedBlock(world: WorldState, predicate: (id: string) => boolean): boolean {
   return world.blockSurvey?.owned?.some(entry => predicate(entry.blockId) && entry.count > 0) ?? false
 }
@@ -122,10 +117,11 @@ function bedWoolStack(world: WorldState): { itemId: string; count: number } | un
 }
 
 /**
- * Chooses one deterministic, observable step toward reaching the End.
- * The LLM may explain player requests, but survival progression never depends on model luck.
+ * Chooses one deterministic, observable step toward durable self-sufficiency.
+ * The AI keeps itself fed, sheltered and equipped on its own, but it never pushes
+ * toward the End as an autonomous goal; every tool remains available when a player asks.
  */
-export function planSurvivalProgression(
+export function planAutonomousDevelopment(
   config: BotConfig,
   world: WorldState,
   progression?: ProgressionDocument
@@ -145,9 +141,6 @@ export function planSurvivalProgression(
   const iron = count(world, id => id === 'minecraft:iron_ingot')
   const diamonds = count(world, id => id === 'minecraft:diamond')
   const wool = count(world, id => id.endsWith('_wool'))
-  const blazeRods = count(world, id => id === 'minecraft:blaze_rod')
-  const pearls = count(world, id => id === 'minecraft:ender_pearl')
-  const eyes = count(world, id => id === 'minecraft:ender_eye')
   const hasTable = count(world, id => id === 'minecraft:crafting_table') > 0
     || hasNearbyOwnedBlock(world, id => id === 'minecraft:crafting_table')
   const hasFurnace = count(world, id => id === 'minecraft:furnace') > 0
@@ -159,7 +152,7 @@ export function planSurvivalProgression(
 
   // Survival always pre-empts progression. Hunger below 20 is actionable by design.
   if (world.dimension === 'minecraft:the_end' && food < 20 && readyFood === 0 && autonomy.autoDimensionTravel) {
-    return plan('complete', '末地没有可获取的普通食物，先经中央出口返回主世界补给', { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
+    return plan('survive', '末地没有可获取的普通食物，先经中央出口返回主世界补给', { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
   }
   if (food < 20 && readyFood > 0) return plan('survive', `饥饿值 ${food}/20，立即进食`, { type: 'eat_best_food' })
   if (food < 20 && raw && hasNearbyOwnedBlock(world, id => id === 'minecraft:furnace') && fuel > 0 && autonomy.autoSmelt) {
@@ -201,39 +194,35 @@ export function planSurvivalProgression(
   }
 
   if (world.dimension === 'minecraft:the_end') {
-    return plan('complete', '已经抵达末地，长期发育目标完成并进入安全待命', { type: 'wait_safe' })
+    // The End is not an autonomous goal; if the AI is already there it just holds a safe position.
+    return undefined
   }
 
   if (world.dimension === 'minecraft:the_nether') {
     if (readyFood < 8 && raw && !hasNearbyOwnedBlock(world, id => id === 'minecraft:furnace')) {
       if (count(world, id => id === 'minecraft:furnace') > 0) {
-        return plan('nether', '在下界安全工作点放置自有熔炉用于烹饪食物', { type: 'place_block', itemId: 'minecraft:furnace', count: 1 })
+        return plan('survive', '在下界安全工作点放置自有熔炉用于烹饪食物', { type: 'place_block', itemId: 'minecraft:furnace', count: 1 })
       }
       if (cobble >= 8) {
-        return plan('nether', '制作下界烹饪食物所需的熔炉', { type: 'craft_item', itemId: 'minecraft:furnace', count: 1 })
+        return plan('survive', '制作下界烹饪食物所需的熔炉', { type: 'craft_item', itemId: 'minecraft:furnace', count: 1 })
       }
-      return plan('nether', '采集黑石用于制作下界食物熔炉', { type: 'gather_resource', resource: 'minecraft:blackstone', count: 8 - cobble })
+      return plan('survive', '采集黑石用于制作下界食物熔炉', { type: 'gather_resource', resource: 'minecraft:blackstone', count: 8 - cobble })
     }
     if (readyFood < 8 && raw && hasNearbyOwnedBlock(world, id => id === 'minecraft:furnace') && fuel > 0 && autonomy.autoSmelt) {
-      return plan('nether', '把下界狩猎获得的生食烹饪成熟食', {
+      return plan('survive', '把下界狩猎获得的生食烹饪成熟食', {
         type: 'smelt_item', inputItemId: raw, count: Math.min(8 - readyFood, count(world, id => id === raw))
       })
     }
     if (readyFood < 8 && progression?.lastAction === 'hunt_entity' && /no_safe_(?:loaded_hunt_target|route_to_hunt_(?:target|drop))/iu.test(lastFailure)) {
-      return plan('nether', '下界食物储备不足且当前没有可狩猎目标，继续沿安全路线搜索疣猪兽', {
+      return plan('survive', '下界食物储备不足且当前没有可狩猎目标，继续沿安全路线搜索疣猪兽', {
         type: 'explore_frontier', purpose: 'food', radius: 64
       })
     }
     if (readyFood < 8 && autonomy.autoHunt) {
-      return plan('nether', '下界行动前补充食物掉落物储备', { type: 'hunt_entity', purpose: 'food', count: 8 - readyFood })
+      return plan('survive', '下界行动前补充食物掉落物储备', { type: 'hunt_entity', purpose: 'food', count: 8 - readyFood })
     }
-    if (blazeRods < 7 && progression?.lastAction === 'hunt_entity' && /no_safe_(?:loaded_hunt_target|route_to_hunt_(?:target|drop))/iu.test(lastFailure)) {
-      return plan('nether', '当前没有已加载的烈焰人，沿安全路线继续寻找下界要塞活动区域', {
-        type: 'explore_frontier', purpose: 'portal', radius: 96
-      })
-    }
-    if (blazeRods < 7) return plan('nether', '在下界获取足够烈焰棒用于末影之眼', { type: 'hunt_entity', purpose: 'blaze_rod', count: 7 - blazeRods })
-    return plan('nether', '烈焰棒足够，返回主世界继续寻找末影珍珠和要塞', { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
+    // Nether self-sufficiency stops at food; the AI no longer farms blaze rods to reach the End.
+    return undefined
   }
 
   // Resource decisions require the Fabric block/structure survey. Waiting for the
@@ -389,28 +378,7 @@ export function planSurvivalProgression(
     return resourcePlan(world, progression, 'enchanting', 'coal', 'coal_ore', 4, 32)
   }
 
-  const flint = count(world, id => id === 'minecraft:flint')
-  if (blazeRods < 7 && count(world, id => id === 'minecraft:flint_and_steel') === 0) {
-    if (flint === 0) {
-      if (hasNearbyBlock(world, id => id === 'minecraft:gravel')) return plan('nether', '采集砂砾获取点火下界门所需燧石', { type: 'gather_resource', resource: 'minecraft:gravel', count: 4 })
-      return plan('nether', '寻找砂砾和熔岩地形以准备下界门', { type: 'explore_frontier', purpose: 'portal', radius: 64 })
-    }
-    if (iron >= 1) return plan('nether', '制作点燃下界门所需打火石', { type: 'craft_item', itemId: 'minecraft:flint_and_steel', count: 1 })
-  }
-  const netherPortalNearby = hasNearbyBlock(world, id => id === 'minecraft:nether_portal')
-  if (blazeRods < 7 && !netherPortalNearby && obsidian >= 14
-    && count(world, id => id === 'minecraft:flint_and_steel') > 0) {
-    return plan('nether', '在经验证的荒野工作点建造并点燃完整下界门', { type: 'build_nether_portal' })
-  }
-  if (blazeRods < 7 && autonomy.autoDimensionTravel) return plan('nether', '装备与资源已满足，进入下界获取烈焰棒', { type: 'travel_to_dimension', dimension: 'minecraft:the_nether' })
-  if (pearls < 12 && autonomy.autoHunt) return plan('stronghold', '获取定位并激活末地传送门所需末影珍珠', { type: 'hunt_entity', purpose: 'ender_pearl', count: 12 - pearls })
-  if (eyes < 12 && pearls > 0 && blazeRods > 0) return plan('stronghold', '合成末影之眼用于寻找和激活要塞传送门', { type: 'craft_item', itemId: 'minecraft:ender_eye', count: Math.min(12 - eyes, pearls) })
-  if (eyes >= 12 && autonomy.autoDimensionTravel) return plan('end', '材料与装备齐备，寻找、激活并进入末地传送门', { type: 'travel_to_dimension', dimension: 'minecraft:the_end' })
-
-  return plan('stronghold', '当前加载范围缺少下一阶段目标，按持久化探索前沿搜索村庄、传送门或资源', { type: 'explore_frontier', purpose: 'resource', radius: 96 })
-}
-
-/** Backwards-compatible action-only view used by older tests and callers. */
-export function planAutonomousDevelopment(config: BotConfig, world: WorldState): AgentAction | undefined {
-  return planSurvivalProgression(config, world)?.action
+  // Self-sufficiency is complete: hold a safe position and let companion behaviours
+  // (follow, protect, chat) take over. No autonomous Nether portal or stronghold hunt.
+  return undefined
 }

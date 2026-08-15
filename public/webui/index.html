@@ -211,7 +211,7 @@
               <label class="switch"><input id="contextualAddressing" type="checkbox"><span></span>允许按语境和距离判断是否在叫 Bot</label>
             </div>
             <div class="form-grid two">
-              <label>运行定位<select id="autonomyMode"><option value="companion">陪伴模式（推荐）</option><option value="survival">自主生存实验模式</option></select><small>陪伴模式不启动后台自主发育模型循环。</small></label>
+              <label>运行定位<span>陪伴型自主玩家（自给自足，不追求通关末地）。</span><small>空闲时本地确定性发育；玩家指令可调用全部工具。</small></label>
               <label>最高优先玩家<input id="ownerName" type="text" minlength="3" maxlength="16" pattern="[A-Za-z0-9_]{3,16}" title="离线服仅按 3-16 位游戏名识别"><small>默认 wraaaaaa；其任务优先于其他玩家。</small></label>
               <label>收集同时到达指令（毫秒）<input id="commandArbitrationMs" type="number" min="0" max="5000"><small>短暂收集多人消息后再按优先级排序。</small></label>
               <label>近距离直接交流范围（格）<input id="directAddressDistance" type="number" min="1" max="64" step="0.5"><small>范围内可结合语气、上下文判断，无需点名。</small></label>

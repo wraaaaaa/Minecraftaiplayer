@@ -249,7 +249,6 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
   const testConfig = structuredClone(config)
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
-    mode: 'survival',
     autoInviteNearbyPlayers: false,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -16, minY: 60, minZ: -16, maxX: 16, maxY: 90, maxZ: 16 }
   }
@@ -272,7 +271,7 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
 
   await Promise.all([controller.proactiveTick(unsafeNight), controller.proactiveTick(unsafeNight)])
 
-  assert.deepEqual(actions, [{ type: 'wait_safe' }])
+  assert.deepEqual(actions, [{ type: 'discard_worn_tools', remainingDurability: 1 }, { type: 'wait_safe' }])
   await logger.flush()
 })
 
@@ -282,7 +281,6 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
   testConfig.chat = { ...testConfig.chat, proactiveEnabled: true, proactiveIdleMs: 0, proactiveMinIntervalMs: 0 }
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
-    mode: 'survival',
     autoInviteNearbyPlayers: false,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
   }
@@ -298,6 +296,7 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
   await controller.proactiveTick({ ...world, nearbyPlayers: [], environment: { isNight: false, safeToIdle: true } })
 
   assert.deepEqual(actions, [
+    { type: 'discard_worn_tools', remainingDurability: 1 },
     { type: 'wait_safe' },
     { type: 'prepare_for', purpose: 'mining' },
     { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa', verifiedWilderness: true },
@@ -309,7 +308,7 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
 test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止跟随回家', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-invite`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
@@ -344,7 +343,7 @@ test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止�
 test('远处敌对生物锁定 Bot 时启动持续防御寻路而不是原地挥击', async () => {
   const suffix = `${process.pid}-${Date.now()}-continuous-defense`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, enabled: true, mode: 'companion', autoInviteNearbyPlayers: false }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, enabled: true, autoInviteNearbyPlayers: false }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
@@ -370,7 +369,7 @@ test('远处敌对生物锁定 Bot 时启动持续防御寻路而不是原地挥
 test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟随', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-timeout`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
@@ -405,7 +404,7 @@ test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟�
 test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-standby`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, mode: 'companion', autoInviteNearbyPlayers: false, commandArbitrationMs: 0 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, commandArbitrationMs: 0 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))

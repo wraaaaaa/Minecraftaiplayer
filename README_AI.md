@@ -164,7 +164,7 @@ npm test
 | 建造住所 | 在动态验证的安全环境建固定 3x3 小屋，放门、火把、墙和屋顶，逐块确认 | 需要现成材料；不自动合成门/火把；中途失败不会回滚已放方块 |
 | 寻找住所/睡觉 | 优先持久家与自有床；长期规划取得三份同色羊毛、制作/放床，夜间真实睡觉并以 `isSleeping()` 确认重生点 | 固定 3x3 住所，不是建筑生成器；床白天不会伪报睡眠 |
 | 水下/安全挂机 | 水节点寻路；空气低于 75% 搜索可呼吸水面，无出口时尝试破坏天然冰/雪；只有安全评估通过才挂机 | 新冰下自救已编译部署但尚待现场复测；岩浆/火灾逃生仍以停止高风险动作和现有反射为主 |
-| 空闲自发展 | 持久 `progression.json` 目标 `reach_end`，确定性推进食物、住所、床、全套装备、矿物、附魔、下界、要塞和末地；玩家任务/危险抢占 | 单个长期原语断线后由 Node 重试，不是任意依赖 DAG；完整端到端实服旅程未完成 |
+| 空闲自发展 | 持久 `progression.json` 确定性推进食物、住所、床、全套装备、矿物、附魔（自给自足）；不再推进下界、要塞和末地；玩家任务/危险抢占 | 单个长期原语断线后由 Node 重试，不是任意依赖 DAG；完整端到端实服旅程未完成 |
 | 记忆 | `memory.json` 统一保存原始事件；按玩家 UUID/名称隔离，自动加载对应 `USER.md`，达到预算阈值时压缩旧事件 | 压缩依赖当前模型；模型失败时保持原事件，不会冒险删除 |
 | 经验/进化 | 失败写入经验；重复失败可研究公开资料并更新托管工具经验与声明式补丁 | 不是训练模型；不允许自改可执行代码、硬规则或秘密，补丁仍须通过原有能力/策略/Fabric 验证 |
 | WebUI 总聊天 | 聚合记忆中的玩家/Bot 对话与 `data/diagnostics.json` 的结构化决策、步骤、后置条件和完整脱敏错误；独立 4 秒刷新和三种筛选 | 明确只展示可验证决策摘要，不提供或伪造模型隐藏思维链；诊断文件不是长期记忆输入 |
@@ -228,7 +228,7 @@ Node.js AI 控制器
 | `src/agent/addressing.ts` | 点名、强制前缀、距离和会话延续判定 |
 | `src/agent/capability-assessor.ts` | 执行前条件与危险任务装备门槛 |
 | `src/agent/decision.ts` | 模型 `chat/action` 意图、JSON 解析、动作白名单和参数归一化；显式聊天强制无工具 |
-| `src/agent/autonomous-development.ts` | `reach_end` 确定性阶段规划：生存、食物/烹饪、住所/床、全套工具护甲、矿物、交易、附魔、下界、要塞和末地 |
+| `src/agent/autonomous-development.ts` | 自给自足确定性阶段规划：生存、食物/烹饪、住所/床、全套工具护甲、矿物、交易、附魔 |
 | `src/agent/prompt.ts` | 旧 `prompts.json` 兼容组装；新部署由 PromptWorkspace 动态构建 |
 | `src/agent/world-state.ts` | Node 内部规范化世界状态类型 |
 | `src/tasks/task-store.ts` | 持久任务队列、原子仲裁、恢复和终态 |
@@ -1592,19 +1592,19 @@ Token 收缩只删除重复和限长历史，不删除硬规则、当前玩家�
 
 ## 30. 2026-08-11：默认陪伴模式、零 Token 待机和低层连续动作交接
 
-本节是当前行为真值，优先于前面带日期的自主生存历史快照。产品定位已由“无人时持续发育直到末地”调整为“玩家出现时陪伴、跟随和聊天的队友”。自主生存实现没有从仓库物理删除，因为玩家明确任务和后续研究仍会复用这些工具；但它只在 `autonomy.mode:"survival"` 下进入空闲模型循环，默认 `companion` 不会启动。不要再把 `longTermGoal:reach_end`、`autoMine` 等保留字段解释成陪伴模式会自动执行。
+本节是当前行为真值，优先于前面带日期的自主生存历史快照。产品定位已由“无人时持续发育直到末地”调整为“玩家出现时陪伴、跟随和聊天的队友，空闲时本地自给自足”。采集、合成、建造、附魔、跨维度等自主工具没有从仓库删除，玩家明确任务仍会复用；`autonomy.mode` 与 `longTermGoal` 字段已删除，不再有 `survival`/`companion` 二分，空闲也不再以 `reach_end` 为目标。
 
 ### 30.1 配置和状态机
 
 `AutonomyConfig` 新增：
 
-- `mode: "companion" | "survival"`，默认 `companion`。
+- 不再有 `mode` 字段：统一为单一陪伴型自主玩家（保留全部自主能力，但不追求通关末地）。
 - `autoInviteNearbyPlayers:true`、`inviteRadius:7`、`inviteCooldownMs:1800000`。
 - `discardWornTools:true`、`wornToolRemainingDurability:1`。
 
 定义、默认值和旧配置归一化位于 `src/config/types.ts`，边界校验位于 `src/config/load-config.ts`；WebUI 的读写映射在 `public/webui/app.js`。旧私有 `bot.json` 没有这些字段时会用默认值，不需要人工迁移才能启动。`config/bot.example.json` 同时把 `chat.proactiveEnabled` 改为 false。
 
-`AgentController.#runProactiveTick` 在处理本地危险后先调用 `#maybeInvitePassingPlayer`。若为 companion 且不存在任务/持续动作，则进入 `#runCompanionStandby`，不会构造 `ToolAgent`，因此模型 API 调用为零。待机规则：已有 home 且不在区域内就执行一次 `return_home`；没有 home 但真实状态不安全才 `seek_shelter`；安全后只执行一次 `wait_safe` 并设置 `#standbyEngaged`，后续 Tick 直接返回。每五分钟可执行一次完全本地的近乎报废工具清理。玩家消息、受击/危险和新任务会清除待机标志。
+`AgentController.#runProactiveTick` 在处理本地危险后先调用 `#maybeInvitePassingPlayer`。若不存在任务/持续动作，则进入 `#runUnifiedIdle`，不会构造 `ToolAgent`，因此空闲模型 API 调用为零。统一待机规则：已有 home 且不在区域内就执行一次 `return_home`；夜间/不安全时若有 home 则 `seek_shelter`、无 home 且材料足够则 `build_shelter`；随后用确定性 `planAutonomousDevelopment` 做一步自给自足（不再推进末地）；每五分钟清理一次近乎报废工具；最后执行一次 `wait_safe` 并设置 `#standbyEngaged`。玩家消息、受击/危险和新任务会清除待机标志。
 
 路过邀请以“上个 Tick 不在半径、本 Tick 新进入”为触发，不会反复扫描同一个站在旁边的玩家。程序先启动 `follow_player`，再以固定自然句式询问并执行 `gesture:happy`，不调用模型。`#pendingCompanionInvite` 记录玩家和到期时间；接受/拒绝口语由本地正则识别，拒绝无需再次叫 Bot 名。拒绝会 `stop -> return_home`；接受保留持续跟随并执行两次蹲下。按玩家名维护冷却，玩家主动说话也会登记为已接触，避免 Bot 刚回复又发邀请。
 

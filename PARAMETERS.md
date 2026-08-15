@@ -184,7 +184,7 @@ WebUI“总聊天”底部的文本栏调用本机 `POST /api/admin/command`，�
 
 玩家任务使用分层工具循环：模型每轮只选择一个原子接口或连续技能；技能内部由 Fabric 快速执行多 Tick 动作，完成/失败后才把增量观察交回模型。玩家任务的第一个工具选择会先触发一次本地自然开工回应和两次蹲下，不增加 API 调用；纯聊天不会触发。`follow_player_continuously` 映射为长期 `follow_player` 客户端状态，只需调用一次，第一次无路或普通玩家短暂离开实体加载范围不会清除它。停止、冲突任务、紧急安全动作、死亡或断线可以结束；跨维度和真正离线时只能在最后已知位置等待，不能承诺物理意义上的永不丢失。
 
-默认 `autonomy.mode:"companion"` 时，空闲路径不会创建 Tool Agent，也不会推进末地目标；只用本地状态机回家、安全等待、清理近乎报废的普通工具以及邀请刚进入半径的玩家。只有手工切换为 `survival` 才恢复实验性的空闲发育循环。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
+统一模式下，空闲路径不会创建 Tool Agent、也不会把“通关末地”当目标；它先回家/安全等待、清理近乎报废的普通工具、邀请刚进入半径的玩家，再用本地确定性步骤自给自足（食物、工具、住所、装备、附魔）。旧版一次性 JSON 规划器只作不支持 `toolTurn` 的兼容路径，DeepSeek、豆包、MiMo 和 OpenAI 默认不会进入。
 
 Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘要 1500 字、事件 6×240 字、全局摘要 1200 字、经验 4 条；首轮/后续世界附近方块 16/6，实体各最多 8。工具模式首轮不重复发送 `TOOLS.md` 的接口目录，但仍发送规则、身份、SOUL、MEMORY、当前 USER、安全/研究内容、AI 学习段和运行时 JSON Schema；续轮 system/user 压缩常量也在 `src/agent/tool-agent.ts`。若未来需要改这些常量，位置是 `src/agent/prompt.ts`、`src/agent/tool-agent.ts` 与 `src/prompts/prompt-workspace.ts`，改后必须重新测真实供应商 usage。
 
@@ -211,7 +211,7 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 - `data/admin-inbox/`：WebUI 最高优先级管理指令的跨进程收件箱；一条一文件，状态后缀为 `pending/processing/done/error`。它是本机运行数据，不能提交 Git。
 - `data/diagnostics.json`：WebUI“总聊天”的本机诊断时间线，含结构化计划、动作参数、能力/策略结果、真实后置条件和完整脱敏错误；固定最多 1000 条，原子写入并保留 `diagnostics.json.bak`。它不是模型隐藏思维链，也不参与长期记忆提示。
 - `data/autonomy-state.json`：Java 客户端确认建成住所后原子写入维度、室内位置、门位置和更新时间。
-- `data/progression.json`：长期目标固定为 `reach_end`；保存已经进入的最高阶段、最近一步、原因、服务端结果、各动作里程碑和按资源隔离的失败计数。临时进食或补做工作台不会把最高阶段倒退。
+- `data/progression.json`：保存已经进入的最高自给自足阶段、最近一步、原因、服务端结果、各动作里程碑和按资源隔离的失败计数。临时进食或补做工作台不会把最高阶段倒退。
 - `data/owned-blocks.json`：Fabric 按维度、整数坐标和方块 ID 保存 Bot 实际放置的工作台、熔炉、床、附魔台、住所/传送门构件和开路垫脚块。使用前会与当前服务端方块核对；玩家设施不能仅凭“附近存在”被当作自己的。
 - 上述文件都位于 `data`，应与记忆/经验一起备份。迁移前先停止旧 Bot 和客户端，复制 `tasks.json`、`autonomy-state.json`、`progression.json`、`owned-blocks.json`，并确认新配置四个 `storage.*File` 指向复制后的文件。不要迁移桥令牌、PID 或 `runtime-status.json`。
 - `tasks.json`、`progression.json` 由 Node 原子写入并保留 `.bak`；`autonomy-state.json` 和 `owned-blocks.json` 由 Java 使用临时文件原子替换。Java 文件应另做外部备份。
@@ -219,7 +219,6 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 | `autonomy` 字段 | 默认值 | 位置与效果 |
 | --- | --- | --- |
 | `enabled` | `true` | 本地进食/防卫、寻找住所和安全挂机的总开关；不会关闭玩家明确命令，也不会关闭启动时的任务恢复。 |
-| `mode` | `companion` | `companion`：空闲零模型调用，只陪伴、回家和待机；`survival`：启用未完成端到端验收的实验性自主发育。 |
 | `ownerName` | `wraaaaaa` | 离线服最高优先玩家名；其任务始终先于其他玩家。EasyAuth 必须保护该名称，避免冒用。 |
 | `commandArbitrationMs` | `350` | 同时收集多人消息的短窗口；窗口后普通玩家按当前距离从近到远选人，同一玩家内部按紧急度再按先入先出。 |
 | `contextualAddressing` | `true` | 结合命令语气、最近对话和距离判断是否在叫 Bot；近距离自然交流不要求每次点名。显式 `!` 或 Bot 名始终视为点名。 |
@@ -243,7 +242,6 @@ Tool Agent 上下文限量不是 WebUI 可调参数：事实 12 条、玩家摘�
 | `protectOwner` | `true` | 怪物把 `ownerName` 设为攻击目标时保护主人；紧跟其他玩家期间也临时保护当前跟随目标。 |
 | `allowVerifiedWilderness` | `true` | 是否允许 Java 通过自然地形、玩家结构、玩家距离、方块实体、危险源和逐目标后置条件授权采集/放置/开矿/建造；关闭时直接拒绝世界修改。 |
 | `allowTeleportCommand` | `false` | 只有服务器管理员已经给 Bot `/tp`/`/teleport` 权限后才改为 `true`。启动脚本把它映射为 `MCAI_TP_COMMAND_ENABLED`；只允许把 Bot 自己传到一个普通玩家名，坐标、选择器和其他命令全部拒绝。 |
-| `longTermGoal` | `reach_end` | 仅 `survival` 实验模式使用的长期目标；陪伴模式不会在空闲时推进它。 |
 | `firstHome.enabled` | `true` | 是否启用固定第一个家/安全位置。它只表示回家目的区域，不代表已建房。 |
 | `firstHome.dimension` | `minecraft:overworld` | 固定第一个家所在维度；可选主世界、下界、末地完整 ID。 |
 | `firstHome.x/y/z` | `1226 / 65 / 199` | 固定第一个家的中心坐标，可在 WebUI“自主生存与任务”修改。 |
@@ -297,7 +295,7 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 - Bot 日志：`logs/bot.log`；日志参数：`config/bot.json` 的 `logging`。
 - Minecraft 日志：`.runtime/minecraft/logs/latest.log`。
 - 实时状态：`data/runtime-status.json`。
-- 持久任务：`data/tasks.json`；住所：`data/autonomy-state.json`；末地发育检查点：`data/progression.json`；自有方块：`data/owned-blocks.json`；总聊天诊断：`data/diagnostics.json`；桥会话令牌：`data/bridge-token.txt`。
+- 持久任务：`data/tasks.json`；住所：`data/autonomy-state.json`；自给自足发育检查点：`data/progression.json`；自有方块：`data/owned-blocks.json`；总聊天诊断：`data/diagnostics.json`；桥会话令牌：`data/bridge-token.txt`。
 - 进程记录：`data/bot.pid.json`、`data/minecraft-client.pid.json`。
 - 一键部署并打开：`Install-and-Open-Control-Center.cmd`。
 - 只打开 WebUI：`Open-WebUI.cmd`。

@@ -5,10 +5,9 @@ import test from 'node:test'
 import { readFile } from 'node:fs/promises'
 import { ProgressionStore } from '../src/progression/progression-store.js'
 
-test('长期末地发育阶段和失败回退计数可原子持久化', async () => {
+test('长期自给自足发育阶段和失败回退计数可原子持久化', async () => {
   const file = path.join(tmpdir(), `mcai-progression-${process.pid}-${Date.now()}.json`)
   const store = new ProgressionStore(file)
-  assert.equal((await store.load()).goal, 'reach_end')
   await store.notePlan('iron_age', 'gather_resource', '补充铁矿')
   await store.noteResult('gather_resource', false, '当前加载范围没有铁矿')
   await store.noteResult('gather_resource', false, '需要开矿道')

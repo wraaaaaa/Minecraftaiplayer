@@ -120,8 +120,6 @@ export interface BotConfig {
   }
   autonomy?: {
     enabled: boolean
-    /** Companion mode never asks the model to invent idle survival goals. */
-    mode?: 'companion' | 'survival'
     ownerName: string
     commandArbitrationMs: number
     contextualAddressing: boolean
@@ -151,7 +149,6 @@ export interface BotConfig {
     protectOwner?: boolean
     allowVerifiedWilderness?: boolean
     allowTeleportCommand?: boolean
-    longTermGoal?: 'reach_end'
     firstHome?: {
       enabled: boolean
       dimension: string
@@ -211,7 +208,6 @@ export function speechConfig(config: BotConfig): SpeechConfig {
 
 export interface AutonomyConfig {
   enabled: boolean
-  mode: 'companion' | 'survival'
   ownerName: string
   commandArbitrationMs: number
   contextualAddressing: boolean
@@ -241,7 +237,6 @@ export interface AutonomyConfig {
   protectOwner: boolean
   allowVerifiedWilderness: boolean
   allowTeleportCommand: boolean
-  longTermGoal: 'reach_end'
   firstHome: {
     enabled: boolean
     dimension: string
@@ -265,7 +260,6 @@ export interface AutonomyConfig {
 
 export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   enabled: true,
-  mode: 'companion',
   ownerName: 'wraaaaaa',
   commandArbitrationMs: 350,
   contextualAddressing: true,
@@ -295,7 +289,6 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
-  longTermGoal: 'reach_end',
   firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 

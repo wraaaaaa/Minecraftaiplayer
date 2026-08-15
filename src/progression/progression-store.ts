@@ -7,10 +7,6 @@ export type ProgressionStage =
   | 'iron_age'
   | 'diamond_age'
   | 'enchanting'
-  | 'nether'
-  | 'stronghold'
-  | 'end'
-  | 'complete'
 
 export interface ProgressionFailure {
   count: number
@@ -20,7 +16,6 @@ export interface ProgressionFailure {
 
 export interface ProgressionDocument {
   schemaVersion: 1
-  goal: 'reach_end'
   stage: ProgressionStage
   updatedAt: string
   lastAction?: string
@@ -31,14 +26,12 @@ export interface ProgressionDocument {
 }
 
 const STAGE_ORDER: readonly ProgressionStage[] = [
-  'survive', 'wood_age', 'stone_age', 'iron_age', 'diamond_age',
-  'enchanting', 'nether', 'stronghold', 'end', 'complete'
+  'survive', 'wood_age', 'stone_age', 'iron_age', 'diamond_age', 'enchanting'
 ]
 
 function initialDocument(): ProgressionDocument {
   return {
     schemaVersion: 1,
-    goal: 'reach_end',
     stage: 'survive',
     updatedAt: new Date().toISOString(),
     milestones: {},
