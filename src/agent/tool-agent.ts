@@ -84,6 +84,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'step_on_block', description: '走到压力板/绊线方块上并站立以触发它（踩踏板开门等）。', parameters: objectSchema({
     x: integer('X'), y: integer('Y'), z: integer('Z')
   }) },
+  { name: 'unequip_armor', description: '把身上穿着的盔甲脱下放进背包（方便接收玩家给的新装备）。', parameters: objectSchema({}) },
   { name: 'use_held_item', description: '使用手中物品一次。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
   { name: 'eat_safe_food', description: '饥饿值不满时连续选择并吃下安全食物，以服务端饱食度或生命值变化确认。', parameters: objectSchema({}) },
   { name: 'drop_inventory_item', description: '从自己的背包槽丢出物品。', parameters: objectSchema({ slot: integer('槽位', 0, 35), count: integer('数量', 1, 64) }) },
@@ -102,7 +103,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'collect_own_drops', description: '连续拾取本任务登记的自有掉落。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), radius: integer('半径', 2, 32) }) },
   { name: 'give_item_to_player', description: '接近玩家并交付自身物品。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), player: string('玩家名') }) },
   { name: 'accept_items_from_player', description: '接近明确玩家并拾取其身边刚丢出的物品；以背包真实增量确认。', parameters: objectSchema({ player: string('玩家名'), item_id: string('物品 ID，可填 any'), count: integer('数量', 1, 64), radius: integer('玩家周围搜索半径', 1, 6) }) },
-  { name: 'equip_for', description: '按用途穿戴当前最佳装备。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
+  { name: 'equip_for', description: '穿装备/穿戴：按用途从背包穿上当前最好的盔甲和主手工具；general 即普通穿戴。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
   { name: 'hunt_for', description: '连续狩猎合法目标并收取掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('数量', 1, 64) }) },
   { name: 'send_server_command', description: '仅尝试 tp/teleport 到玩家；无权限后改用寻路。', parameters: objectSchema({ command: string('不带 / 的命令') }) },
   { name: 'stop_all_actions', description: '立即停止动作并释放按键。', parameters: objectSchema({}) },
@@ -175,6 +176,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     case 'step_on_block': return {
       type: 'step_on_block', x: whole(args, 'x', -30_000_000, 30_000_000), y: whole(args, 'y', -2048, 2048), z: whole(args, 'z', -30_000_000, 30_000_000)
     }
+    case 'unequip_armor': return { type: 'unequip_armor' }
     case 'use_held_item': return { type: 'use_held_item', hand: args.hand === 'off' ? 'off' : 'main' }
     case 'eat_safe_food': return { type: 'eat_best_food' }
     case 'drop_inventory_item': return { type: 'drop_inventory_item', slot: whole(args, 'slot', 0, 35), count: whole(args, 'count', 1, 64) }
@@ -437,6 +439,7 @@ export class ToolAgent {
     const executionLedger: LedgerEntry[] = []
     const taskStartY = input.initialWorld.position?.y
     let descended = false
+    let passiveWaitStreak = 0
     const guideCache = new Map<string, string>()
     const tools = this.#searchGuide ? [...AGENT_TOOLS, GUIDE_SEARCH_TOOL] : [...AGENT_TOOLS]
     const user = [
@@ -561,10 +564,12 @@ export class ToolAgent {
           if (operation === 'observe') {
             ok = true
             detail = 'fresh_world_snapshot'
+            passiveWaitStreak++
           } else if ('waitTicks' in operation) {
             await delay(operation.waitTicks * 50)
             ok = true
             detail = `waited_ticks=${operation.waitTicks}`
+            passiveWaitStreak++
           } else if ('returnToStart' in operation) {
             const outcome = await returnToStart()
             ok = outcome.ok
@@ -576,6 +581,7 @@ export class ToolAgent {
             detail = detail.slice(0, 4_000)
             ok = detail !== 'online_research_unavailable'
           } else {
+            passiveWaitStreak = 0
             const policy = this.#authorize(operation)
             if (!policy.allowed) detail = `policy_denied: ${policy.reason}`
             else {
@@ -595,6 +601,9 @@ export class ToolAgent {
         executionLedger.push({ step: executedSteps, tool: call.name, ok, detail, observation })
         results.push({ callId: call.id, output: JSON.stringify({ ok, detail, observationDelta: observation }) })
         await this.#onStep?.({ step: executedSteps, tool: call.name, arguments: call.arguments, ok, detail, world })
+        if (passiveWaitStreak >= 3) {
+          return result(false, '唔，我在这儿傻等也不是办法，先停下来想想，等条件合适了再继续喵。', 'agent_passive_wait_streak_exhausted')
+        }
       }
       toolResults = results
     }

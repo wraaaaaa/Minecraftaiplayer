@@ -269,3 +269,25 @@ test('DeepSeek 空工具响应只降级重试一次且计入 API 与 Token 预�
   assert.equal(result.usage.totalTokens, 500 + 256 + 230)
   assert.equal(result.ok, true)
 })
+
+test('模型连续空转观察与等待会提前停止，不会耗尽 API 预算', async () => {
+  let providerCalls = 0
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('unexpected') },
+    toolTurn: async () => {
+      providerCalls++
+      const passive = providerCalls % 2 === 1
+        ? { id: `observe-${providerCalls}`, name: 'observe_world', arguments: '{}' }
+        : { id: `wait-${providerCalls}`, name: 'wait_ticks', arguments: '{"ticks":20}' }
+      return { text: '', toolCalls: [passive], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+    }
+  }
+  const result = await new ToolAgent({
+    provider,
+    executor: { execute: async () => ({ ok: true, detail: 'ok' }), chat: async () => {}, snapshot: () => initial },
+    authorize: () => ({ allowed: true, reason: 'test' }), maxSteps: 20, maxApiCalls: 20
+  }).run({ system: 'system', goal: '穿装备', initialWorld: initial })
+  assert.equal(result.ok, false)
+  assert.match(result.detail, /agent_passive_wait_streak_exhausted/u)
+  assert.ok(providerCalls < 8, `提前停止而非耗尽预算，实际调用 ${providerCalls}`)
+})

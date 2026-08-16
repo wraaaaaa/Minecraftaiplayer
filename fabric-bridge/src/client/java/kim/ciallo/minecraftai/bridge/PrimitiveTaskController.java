@@ -138,6 +138,7 @@ public final class PrimitiveTaskController {
         try {
             task = switch (type) {
                 case "equip_best", "prepare_for" -> new EquipTask(id, type, action, tick);
+                case "unequip_armor" -> new UnequipArmorTask(id, tick);
                 case "use_item" -> new UseItemTask(id, action, tick);
                 case "collect_own_drops" -> createCollectTask(id, action, client);
                 case "gather_resource" -> createGatherTask(id, action, client);
@@ -605,6 +606,52 @@ public final class PrimitiveTaskController {
             notes.add("best_held_swapped_from_inventory_" + heldSourceSlot + "_to_hotbar_" + expectedHeldSlot);
             phase = Phase.WAIT_HELD_SWAP;
             phaseStartedTick = tick;
+        }
+    }
+
+    /** Removes worn armor into the backpack so a player can hand over replacements. */
+    private final class UnequipArmorTask extends PrimitiveTask {
+        private int armorIndex;
+        private long phaseStartedTick;
+        private EquipmentSlot pendingSlot;
+        private int unequipped;
+
+        UnequipArmorTask(String id, long startedTick) {
+            super(id, "unequip_armor", startedTick, EQUIP_TIMEOUT_TICKS);
+        }
+
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+                finish(client, this, false, "unequip requires the normal inventory menu with an empty cursor");
+                return;
+            }
+            if (pendingSlot != null) {
+                if (player.getItemBySlot(pendingSlot).isEmpty()) {
+                    unequipped++;
+                    pendingSlot = null;
+                } else if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
+                    finish(client, this, false, "server did not confirm unequip for " + pendingSlot.getSerializedName());
+                    return;
+                } else {
+                    return;
+                }
+            }
+            while (armorIndex < ARMOR_SLOTS.size()) {
+                EquipmentSlot slot = ARMOR_SLOTS.get(armorIndex);
+                armorIndex++;
+                if (player.getItemBySlot(slot).isEmpty()) continue;
+                if (player.getInventory().getFreeSlot() < 0) {
+                    finish(client, this, false, "inventory full; cannot unequip " + slot.getSerializedName());
+                    return;
+                }
+                client.gameMode.handleContainerInput(0, armorMenuSlot(slot), 0, ContainerInput.QUICK_MOVE, player);
+                pendingSlot = slot;
+                phaseStartedTick = tick;
+                return;
+            }
+            finish(client, this, true, "unequipped_armor=" + unequipped);
         }
     }
 

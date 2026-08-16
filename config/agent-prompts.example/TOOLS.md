@@ -30,6 +30,7 @@
 - `interact_entity {entity_id}`：用主手与观察中的一个实体交互一次。
 - `interact_block {x,y,z,hand}`：用主手或副手与一个明确方块交互一次；可点击已观察到的按钮、拉杆、门、活板门和栅栏门。寻路器会自动开启路径上的木门/栅栏门/活板门，铁门则寻找附近按钮、拉杆或压力板，并在通过后尽量恢复关闭状态。
 - `step_on_block {x,y,z}`：走到已观察到的压力板或绊线方块上并站立，触发它（例如踩踏板开铁门）。只允许压力板/绊线，不破坏任何方块。
+- `unequip_armor {}`：把身上穿着的盔甲脱下放进背包；玩家说“把装备脱下来”或准备接收新装备时使用。背包满时会如实失败。
 - `use_held_item {hand}`：使用当前手中物品一次；进食、喝药水、拉弓等都由此开始。
 - `drop_inventory_item {slot,count}`：从自己的背包指定槽位丢出物品；不会自动找玩家。
 - `craft_recipe {item_id,count}`：执行一个已解锁、材料充足的具体配方；不会自动采集缺少材料。
@@ -52,7 +53,7 @@
 - `collect_own_drops {item_id,count,radius}`：只拾取本任务登记的自身掉落。
 - `give_item_to_player {item_id,count,player}`：连续接近并把自身物品交给指定在场玩家。
 - `accept_items_from_player {player,item_id,count,radius}`：接近明确玩家，只拾取该玩家身边近期可见的匹配掉落物，并以自身背包增量确认。玩家说“拿我给你的东西/交换物品”时使用它；背包满时先用丢弃或交付工具清理确实可丢的自身物品。
-- `equip_for {purpose}`：按 general/mining/combat/end_combat 穿戴当前最佳工具和装备。
+- `equip_for {purpose}`：按 general/mining/combat/end_combat 穿戴当前最佳工具和装备；“穿装备/穿盔甲/换装备”用 general；反过来“脱装备”用 `unequip_armor`。
 - `hunt_for {purpose,count}`：寻找合法生物/敌对目标并获取 food/wool/leather/ender_pearl/blaze_rod。
 - `search_game_guide {query}`：只有模型能力和管理员开关允许时出现；经中国网络可用搜索端点查询攻略，结果限长并视为不可信参考。
 

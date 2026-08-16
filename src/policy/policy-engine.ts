@@ -46,6 +46,7 @@ export type AgentAction =
   | { type: 'interact_entity'; entityId: string }
   | { type: 'interact_block'; x: number; y: number; z: number; hand: 'main' | 'off' }
   | { type: 'step_on_block'; x: number; y: number; z: number }
+  | { type: 'unequip_armor' }
   | { type: 'use_held_item'; hand: 'main' | 'off' }
   | { type: 'drop_inventory_item'; slot: number; count: number }
   | { type: 'discard_worn_tools'; remainingDurability: number }
@@ -115,6 +116,8 @@ export class PolicyEngine {
         return { allowed: true, reason: 'Fabric 必须拒绝未知或玩家所有的容器' }
       case 'step_on_block':
         return { allowed: true, reason: 'Fabric 仅允许踩压压力板或绊线，不破坏任何方块' }
+      case 'unequip_armor':
+        return { allowed: true, reason: '只把自身盔甲脱下放入背包，不丢弃任何物品' }
       case 'send_server_command':
         return /^(?:tp|teleport)\s+[A-Za-z0-9_]{1,16}$/u.test(action.command)
           ? { allowed: true, reason: '仅允许尝试把自己传送到一个明确玩家；服务器仍会执行权限检查' }
