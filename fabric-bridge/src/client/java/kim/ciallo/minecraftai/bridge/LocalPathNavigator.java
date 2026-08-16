@@ -156,6 +156,31 @@ final class LocalPathNavigator {
         BarrierInteraction closedBarrier = closedOpenableBarrier(client, waypoint);
         if (closedBarrier != null) {
             BlockPos interactionTarget = closedBarrier.interactionTarget();
+            if (closedBarrier.standOn()) {
+                // Pressure plates and tripwires open the barrier by being stepped on, not by a
+                // useItemOn click. Walk onto the actuator and hold there until the barrier opens.
+                Vec3 targetCenter = standingCenter(client, player, interactionTarget);
+                double dx = targetCenter.x - player.getX();
+                double dz = targetCenter.z - player.getZ();
+                double distance = Math.sqrt(dx * dx + dz * dz);
+                if (distance > 0.35D) {
+                    if (player.horizontalCollision && tick - barrierInteractionTick >= 6L) {
+                        path = List.of();
+                        pathIndex = 0;
+                        status = "actuator_blocked_replan";
+                        return true;
+                    }
+                    lookAt(player, targetCenter.x, targetCenter.y, targetCenter.z, false);
+                    client.options.keyUp.setDown(true);
+                    if (targetCenter.y > player.getY() + 0.2D && (player.onGround() || player.isInWater())) {
+                        client.options.keyJump.setDown(true);
+                    }
+                    status = "stepping_onto_actuator";
+                    return true;
+                }
+                status = "waiting_on_actuator";
+                return true;
+            }
             if (client.gameMode == null || !player.isWithinBlockInteractionRange(interactionTarget, 0.0D)) {
                 path = List.of();
                 pathIndex = 0;
@@ -425,11 +450,14 @@ final class LocalPathNavigator {
         for (BlockPos cursor : List.of(position, position.above())) {
             BlockState state = client.level.getBlockState(cursor);
             if (!state.hasProperty(BlockStateProperties.OPEN) || state.getValue(BlockStateProperties.OPEN)) continue;
-            if (state.getBlock() instanceof FenceGateBlock) return new BarrierInteraction(cursor, cursor, true);
+            if (state.getBlock() instanceof FenceGateBlock) return new BarrierInteraction(cursor, cursor, true, false);
             if (state.getBlock() instanceof DoorBlock door) {
-                if (door.type().canOpenByHand()) return new BarrierInteraction(cursor, cursor, true);
+                if (door.type().canOpenByHand()) return new BarrierInteraction(cursor, cursor, true, false);
                 BlockPos actuator = nearbyActuator(client, cursor);
-                if (actuator != null) return new BarrierInteraction(cursor, actuator, isLever(client.level.getBlockState(actuator)));
+                if (actuator != null) {
+                    BlockState actuatorState = client.level.getBlockState(actuator);
+                    return new BarrierInteraction(cursor, actuator, isLever(actuatorState), isStandOnActuator(actuatorState));
+                }
             }
         }
         return null;
@@ -469,7 +497,7 @@ final class LocalPathNavigator {
         for (BlockPos cursor : BlockPos.betweenClosed(barrier.offset(-3, -2, -3), barrier.offset(3, 3, 3))) {
             if (!client.level.isLoaded(cursor)) continue;
             BlockState state = client.level.getBlockState(cursor);
-            if (!isButton(state) && !isLever(state)) continue;
+            if (!isButton(state) && !isLever(state) && !isStandOnActuator(state)) continue;
             if (state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED)) continue;
             return cursor.immutable();
         }
@@ -484,7 +512,12 @@ final class LocalPathNavigator {
         return BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString().equals("minecraft:lever");
     }
 
-    private record BarrierInteraction(BlockPos barrier, BlockPos interactionTarget, boolean closeAfterPassing) { }
+    private static boolean isStandOnActuator(BlockState state) {
+        String id = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+        return id.endsWith("_pressure_plate") || id.equals("minecraft:tripwire");
+    }
+
+    private record BarrierInteraction(BlockPos barrier, BlockPos interactionTarget, boolean closeAfterPassing, boolean standOn) { }
 
     /** Returns the actual collision-surface height, including slabs and snow layers. */
     private static double standingY(Minecraft client, BlockPos position) {
@@ -508,7 +541,7 @@ final class LocalPathNavigator {
         return best;
     }
 
-    private static Vec3 standingCenter(Minecraft client, LocalPlayer player, BlockPos position) {
+    static Vec3 standingCenter(Minecraft client, LocalPlayer player, BlockPos position) {
         double y = standingY(client, position);
         if (!Double.isFinite(y)) y = position.getY();
         return new Vec3(position.getX() + 0.5D, y, position.getZ() + 0.5D);

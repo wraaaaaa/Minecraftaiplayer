@@ -38,7 +38,7 @@ export interface WorldState {
     z: number
     distance: number
     resourceCategory?: string
-    interactable?: 'button' | 'lever' | 'door' | 'gate' | 'portal'
+    interactable?: 'button' | 'lever' | 'pressure_plate' | 'trapdoor' | 'tripwire' | 'door' | 'gate' | 'portal'
     classification: 'natural_resource' | 'protected_likely' | 'bot_owned' | 'unclassified'
     blockEntity: boolean
     replaceable: boolean

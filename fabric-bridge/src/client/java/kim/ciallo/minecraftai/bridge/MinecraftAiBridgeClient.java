@@ -30,6 +30,7 @@ import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -69,6 +70,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private long airRescueBreakStarted;
     private PendingSurvivalAction pendingSurvivalAction;
     private PendingNavigation pendingNavigation;
+    private PendingStepOn pendingStepOn;
     private String activeGesture = "";
     private int gestureStartedTick;
     private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
@@ -126,6 +128,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             clearMovement(client);
             cancelPendingSurvivalAction("bridge_disconnected");
             cancelPendingNavigation(client, "bridge_disconnected");
+            cancelPendingStepOn(client, "bridge_disconnected");
             primitives.cancel(client, "bridge_disconnected");
             advanced.cancel(client, "bridge_disconnected");
             shelter.cancel(client, "bridge_disconnected");
@@ -150,6 +153,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             traversalRecovery.reset(client);
             cancelPendingSurvivalAction("world_disconnected");
             cancelPendingNavigation(client, "world_disconnected");
+            cancelPendingStepOn(client, "world_disconnected");
             primitives.cancel(client, "world_disconnected");
             advanced.cancel(client, "world_disconnected");
             shelter.cancel(client, "world_disconnected");
@@ -211,6 +215,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         drainAdvancedResults();
         drainShelterResults();
         resolvePendingNavigation(client, player);
+        resolvePendingStepOn(client, player);
         tickGesture(client);
         if (tick % 20 == 0) bridge.send(buildState(client, player));
     }
@@ -389,6 +394,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             shelter.cancel(client, "bot_died");
             cancelPendingSurvivalAction("bot_died");
             cancelPendingNavigation(client, "bot_died");
+            cancelPendingStepOn(client, "bot_died");
             drainPrimitiveResults();
             drainAdvancedResults();
             drainShelterResults();
@@ -473,6 +479,31 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     continue;
                 }
                 pendingNavigation = new PendingNavigation(id, x, y, z, stopDistance, tick);
+                continue;
+            }
+            if ("step_on_block".equals(actionType)) {
+                if (pendingNavigation != null || pendingStepOn != null || pendingSurvivalAction != null
+                    || !primitives.activeType().isEmpty() || !advanced.activeType().isEmpty() || !shelter.activeType().isEmpty()) {
+                    sendActionResult(id, false, "busy: active task is " + activeTaskType());
+                    continue;
+                }
+                BlockPos target = new BlockPos((int) number(action, "x", Integer.MIN_VALUE), (int) number(action, "y", Integer.MIN_VALUE), (int) number(action, "z", Integer.MIN_VALUE));
+                if (!client.level.isLoaded(target)) {
+                    sendActionResult(id, false, "step_on_block target is unloaded");
+                    continue;
+                }
+                BlockState state = client.level.getBlockState(target);
+                String blockId = BuiltInRegistries.BLOCK.getKey(state.getBlock()).toString();
+                if (!blockId.endsWith("_pressure_plate") && !blockId.equals("minecraft:tripwire")) {
+                    sendActionResult(id, false, "step_on_block requires a pressure plate or tripwire; got " + blockId);
+                    continue;
+                }
+                Vec3 center = LocalPathNavigator.standingCenter(client, player, target);
+                if (!setMovement(new MovementTarget(null, center.x, center.y, center.z, false, 0.22), player)) {
+                    sendActionResult(id, false, "no collision-safe route onto pressure plate");
+                    continue;
+                }
+                pendingStepOn = new PendingStepOn(id, target, tick);
                 continue;
             }
             if (isSurvivalAction(actionType)) {
@@ -689,6 +720,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private String activeTaskType() {
         if (pendingNavigation != null) return "navigate_to";
+        if (pendingStepOn != null) return "step_on_block";
         if (pendingSurvivalAction != null) return pendingSurvivalAction.type();
         if (!primitives.activeType().isEmpty()) return primitives.activeType();
         if (!advanced.activeType().isEmpty()) return advanced.activeType();
@@ -708,6 +740,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 movementNavigator.release(client);
                 traversalRecovery.reset(client);
                 cancelPendingNavigation(client, "stopped_by_command");
+                cancelPendingStepOn(client, "stopped_by_command");
                 cancelPendingSurvivalAction("stopped_by_command");
                 primitives.cancel(client, "stopped_by_command");
                 advanced.cancel(client, "stopped_by_command");
@@ -906,6 +939,46 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         PendingNavigation pending = pendingNavigation;
         if (pending == null) return;
         pendingNavigation = null;
+        movement = null;
+        movementNavigator.release(client);
+        traversalRecovery.reset(client);
+        clearMovement(client);
+        sendActionResult(pending.id(), false, detail);
+    }
+
+    private void resolvePendingStepOn(Minecraft client, LocalPlayer player) {
+        PendingStepOn pending = pendingStepOn;
+        if (pending == null) return;
+        BlockState state = client.level.getBlockState(pending.block());
+        boolean powered = state.hasProperty(BlockStateProperties.POWERED) && state.getValue(BlockStateProperties.POWERED)
+            || state.hasProperty(BlockStateProperties.POWER) && state.getValue(BlockStateProperties.POWER) > 0;
+        double dx = player.getX() - (pending.block().getX() + 0.5D);
+        double dz = player.getZ() - (pending.block().getZ() + 0.5D);
+        double horizontal = Math.sqrt(dx * dx + dz * dz);
+        boolean standing = horizontal <= 0.55D && Math.abs(player.getY() - (pending.block().getY() + 0.0625D)) <= 0.7D;
+        if (powered && standing) {
+            pendingStepOn = null;
+            movement = null;
+            movementNavigator.release(client);
+            traversalRecovery.reset(client);
+            clearMovement(client);
+            sendActionResult(pending.id(), true, "stepped_on_actuator; block=" + BuiltInRegistries.BLOCK.getKey(state.getBlock()) + "; powered=true");
+            return;
+        }
+        if (tick - pending.startedTick() > 240L) {
+            pendingStepOn = null;
+            movement = null;
+            movementNavigator.release(client);
+            traversalRecovery.reset(client);
+            clearMovement(client);
+            sendActionResult(pending.id(), false, "step_on_timeout; horizontal=" + horizontal + "; powered=" + powered);
+        }
+    }
+
+    private void cancelPendingStepOn(Minecraft client, String detail) {
+        PendingStepOn pending = pendingStepOn;
+        if (pending == null) return;
+        pendingStepOn = null;
         movement = null;
         movementNavigator.release(client);
         traversalRecovery.reset(client);
@@ -1324,4 +1397,5 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         float baselineHealth
     ) { }
     private record PendingNavigation(String id, double x, double y, double z, double stopDistance, int startedTick) { }
+    private record PendingStepOn(String id, BlockPos block, int startedTick) { }
 }

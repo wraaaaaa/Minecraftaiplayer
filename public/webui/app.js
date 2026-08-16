@@ -38,7 +38,7 @@ const AUTONOMY_DEFAULTS = Object.freeze({
 const WORKSPACE_DEFAULTS = Object.freeze({
   promptDirectory: 'data/agent-prompts', playerProfilesDirectory: 'data/player-profiles', contextBudgetChars: 48000,
   compressionTriggerRatio: 0.72, retainRecentEvents: 16,
-  selfImprovement: Object.freeze({ enabled: true, allowPromptEdits: true, allowBehaviorPatches: true, minimumRepeatedFailures: 3, researchProvider: 'baidu', researchEndpoint: 'https://www.baidu.com/s', researchTimeoutMs: 12000 })
+  selfImprovement: Object.freeze({ enabled: true, allowPromptEdits: true, allowBehaviorPatches: true, allowSkillLearning: true, minimumRepeatedFailures: 3, minimumStepsForSkill: 2, researchProvider: 'baidu', researchEndpoint: 'https://www.baidu.com/s', researchTimeoutMs: 12000 })
 })
 
 const SPEECH_DEFAULTS = Object.freeze({
@@ -255,8 +255,10 @@ function renderPlayerProfiles(snapshot) {
     select.value = profiles.some(profile => profile.id === current) ? current : profiles[0].id
     set('playerProfileContent', profiles.find(profile => profile.id === select.value)?.content || '')
   }
-  $('behaviorPatchView').textContent = snapshot.behaviorPatches?.patches?.length
-    ? JSON.stringify(snapshot.behaviorPatches.patches, null, 2) : '暂无补丁'
+  const patchCount = snapshot.behaviorPatches?.patches?.length || 0
+  const skillCount = snapshot.behaviorPatches?.skills?.length || 0
+  $('behaviorPatchView').textContent = (patchCount || skillCount)
+    ? JSON.stringify({ patches: snapshot.behaviorPatches?.patches ?? [], skills: snapshot.behaviorPatches?.skills ?? [] }, null, 2) : '暂无补丁'
 }
 
 function populate(snapshot) {
@@ -285,7 +287,7 @@ function populate(snapshot) {
   setChecked('firstHomeEnabled', firstHome.enabled); set('firstHomeDimension', firstHome.dimension); setNumber('firstHomeX', firstHome.x); setNumber('firstHomeY', firstHome.y); setNumber('firstHomeZ', firstHome.z); setNumber('firstHomeRadius', firstHome.radius)
   const workspace = { ...WORKSPACE_DEFAULTS, ...(c.agentWorkspace || {}), selfImprovement: { ...WORKSPACE_DEFAULTS.selfImprovement, ...(c.agentWorkspace?.selfImprovement || {}) } }
   set('promptDirectory', workspace.promptDirectory); set('playerProfilesDirectory', workspace.playerProfilesDirectory); setNumber('contextBudgetChars', workspace.contextBudgetChars); setNumber('compressionTriggerRatio', workspace.compressionTriggerRatio); setNumber('retainRecentEvents', workspace.retainRecentEvents)
-  setChecked('selfImprovementEnabled', workspace.selfImprovement.enabled); setChecked('allowPromptEdits', workspace.selfImprovement.allowPromptEdits); setChecked('allowBehaviorPatches', workspace.selfImprovement.allowBehaviorPatches); setNumber('minimumRepeatedFailures', workspace.selfImprovement.minimumRepeatedFailures); set('researchProvider', workspace.selfImprovement.researchProvider); set('researchEndpoint', workspace.selfImprovement.researchEndpoint); setNumber('researchTimeoutMs', workspace.selfImprovement.researchTimeoutMs)
+  setChecked('selfImprovementEnabled', workspace.selfImprovement.enabled); setChecked('allowPromptEdits', workspace.selfImprovement.allowPromptEdits); setChecked('allowBehaviorPatches', workspace.selfImprovement.allowBehaviorPatches); setChecked('allowSkillLearning', workspace.selfImprovement.allowSkillLearning); setNumber('minimumRepeatedFailures', workspace.selfImprovement.minimumRepeatedFailures); setNumber('minimumStepsForSkill', workspace.selfImprovement.minimumStepsForSkill); set('researchProvider', workspace.selfImprovement.researchProvider); set('researchEndpoint', workspace.selfImprovement.researchEndpoint); setNumber('researchTimeoutMs', workspace.selfImprovement.researchTimeoutMs)
   set('memoryFile', c.storage.memoryFile); set('experienceFile', c.storage.experienceFile); set('taskFile', c.storage.taskFile ?? 'data/tasks.json'); set('autonomyFile', c.storage.autonomyFile ?? 'data/autonomy-state.json'); set('progressionFile', c.storage.progressionFile ?? 'data/progression.json'); set('ownedBlocksFile', c.storage.ownedBlocksFile ?? 'data/owned-blocks.json'); setNumber('maxEvents', c.storage.maxEvents); set('logFile', c.logging.file); set('logLevel', c.logging.level); setChecked('logConsole', c.logging.console)
   set('personaName', snapshot.persona.name); set('personaDescription', snapshot.persona.description); set('speakingStyle', snapshot.persona.speakingStyle); set('personaGoals', snapshot.persona.goals.join('\n')); set('personaBoundaries', snapshot.persona.boundaries.join('\n'))
   set('promptIdentity', snapshot.prompts.identity); set('promptCapabilities', snapshot.prompts.capabilityRules.join('\n')); set('promptMemory', snapshot.prompts.memoryRules.join('\n')); set('promptContract', snapshot.prompts.actionContract); set('promptProactive', snapshot.prompts.proactiveInstruction)
@@ -327,7 +329,7 @@ function collect() {
   }
   c.agentWorkspace = {
     promptDirectory: value('promptDirectory').trim(), playerProfilesDirectory: value('playerProfilesDirectory').trim(), contextBudgetChars: number('contextBudgetChars'), compressionTriggerRatio: number('compressionTriggerRatio'), retainRecentEvents: number('retainRecentEvents'),
-    selfImprovement: { enabled: checked('selfImprovementEnabled'), allowPromptEdits: checked('allowPromptEdits'), allowBehaviorPatches: checked('allowBehaviorPatches'), minimumRepeatedFailures: number('minimumRepeatedFailures'), researchProvider: value('researchProvider'), researchEndpoint: value('researchEndpoint').trim(), researchTimeoutMs: number('researchTimeoutMs') }
+    selfImprovement: { enabled: checked('selfImprovementEnabled'), allowPromptEdits: checked('allowPromptEdits'), allowBehaviorPatches: checked('allowBehaviorPatches'), allowSkillLearning: checked('allowSkillLearning'), minimumRepeatedFailures: number('minimumRepeatedFailures'), minimumStepsForSkill: number('minimumStepsForSkill'), researchProvider: value('researchProvider'), researchEndpoint: value('researchEndpoint').trim(), researchTimeoutMs: number('researchTimeoutMs') }
   }
   Object.assign(c.storage, { memoryFile: value('memoryFile').trim(), experienceFile: value('experienceFile').trim(), taskFile: value('taskFile').trim(), autonomyFile: value('autonomyFile').trim(), progressionFile: value('progressionFile').trim(), ownedBlocksFile: value('ownedBlocksFile').trim(), maxEvents: number('maxEvents') })
   Object.assign(c.logging, { file: value('logFile').trim(), level: value('logLevel'), console: checked('logConsole') })

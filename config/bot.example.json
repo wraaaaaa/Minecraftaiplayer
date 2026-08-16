@@ -102,7 +102,9 @@
       "enabled": true,
       "allowPromptEdits": true,
       "allowBehaviorPatches": true,
+      "allowSkillLearning": true,
       "minimumRepeatedFailures": 3,
+      "minimumStepsForSkill": 2,
       "researchProvider": "baidu",
       "researchEndpoint": "https://www.baidu.com/s",
       "researchTimeoutMs": 12000

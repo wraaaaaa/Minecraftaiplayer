@@ -33,7 +33,9 @@ test('SearXNG 研究只发送清洗后的查询并把结果作为限长文本返
         enabled: true,
         allowPromptEdits: false,
         allowBehaviorPatches: false,
+        allowSkillLearning: false,
         minimumRepeatedFailures: 3,
+        minimumStepsForSkill: 2,
         researchProvider: 'searxng',
         researchEndpoint: `http://127.0.0.1:${address.port}/search`,
         researchTimeoutMs: 1000
@@ -82,7 +84,9 @@ test('重复失败达到阈值后只写受限提示词托管区和声明式补�
         enabled: true,
         allowPromptEdits: true,
         allowBehaviorPatches: true,
+        allowSkillLearning: true,
         minimumRepeatedFailures: 2,
+        minimumStepsForSkill: 2,
         researchProvider: 'disabled',
         researchEndpoint: '',
         researchTimeoutMs: 1000
@@ -109,6 +113,105 @@ test('重复失败达到阈值后只写受限提示词托管区和声明式补�
     const patches = await workspace.readBehaviorPatches()
     assert.equal(patches.patches.length, 1)
     assert.equal(patches.patches[0]!.actionType, 'excavate_tunnel')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('成功任务只提炼白名单工具的声明式技能，非法工具名和泄密内容会被拒绝', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'mcai-skill-'))
+  try {
+    const workspace = new PromptWorkspace({
+      promptDirectory: path.join(root, 'prompts'),
+      playerProfilesDirectory: path.join(root, 'profiles'),
+      exampleDirectory: path.resolve('config/agent-prompts.example'),
+      allowedRoot: root
+    })
+    const provider: LlmProvider = {
+      complete: async () => ({
+        text: JSON.stringify({
+          name: '踩踏板开铁门',
+          description: '走到压力板上站立触发它来开门',
+          whenToUse: '寻路器没有按钮或拉杆可点时',
+          steps: [
+            { tool: 'step_on_block', argsHint: '目标压力板坐标', expect: 'powered=true' },
+            { tool: 'navigate_to', argsHint: '门后坐标', expect: 'navigation_reached' }
+          ]
+        }),
+        model: 'test',
+        requestedEffort: 'none',
+        effectiveEffort: 'none'
+      })
+    }
+    const manager = new SelfImprovementManager({
+      config: {
+        enabled: true,
+        allowPromptEdits: false,
+        allowBehaviorPatches: false,
+        allowSkillLearning: true,
+        minimumRepeatedFailures: 2,
+        minimumStepsForSkill: 2,
+        researchProvider: 'disabled',
+        researchEndpoint: '',
+        researchTimeoutMs: 1000
+      },
+      provider,
+      workspace,
+      secrets: new SecretGuard([]),
+      file: path.join(root, 'self-improvement.json')
+    })
+    const learned = await manager.learnFromSuccess({
+      task: '踩压力板开铁门然后进门',
+      steps: [
+        { tool: 'navigate_to', args: JSON.stringify({ x: 10, y: 65, z: 10 }) },
+        { tool: 'step_on_block', args: JSON.stringify({ x: 11, y: 65, z: 10 }) },
+        { tool: 'navigate_to', args: JSON.stringify({ x: 12, y: 65, z: 10 }) }
+      ]
+    })
+    assert.equal(learned.status, 'learned')
+    const skills = await workspace.readLearnedSkills()
+    assert.equal(skills.length, 1)
+    assert.equal(skills[0]!.name, '踩踏板开铁门')
+    assert.deepEqual(skills[0]!.steps.map(step => step.tool), ['step_on_block', 'navigate_to'])
+
+    const illegal = new SelfImprovementManager({
+      config: {
+        enabled: true,
+        allowPromptEdits: false,
+        allowBehaviorPatches: false,
+        allowSkillLearning: true,
+        minimumRepeatedFailures: 2,
+        minimumStepsForSkill: 2,
+        researchProvider: 'disabled',
+        researchEndpoint: '',
+        researchTimeoutMs: 1000
+      },
+      provider: {
+        complete: async () => ({
+          text: JSON.stringify({
+            name: '危险技能',
+            description: '尝试写入可执行脚本',
+            whenToUse: '任何时候',
+            steps: [{ tool: 'execute_shell', argsHint: 'powershell 下载并运行', expect: '已执行' }]
+          }),
+          model: 'test',
+          requestedEffort: 'none',
+          effectiveEffort: 'none'
+        })
+      },
+      workspace,
+      secrets: new SecretGuard([]),
+      file: path.join(root, 'self-improvement-illegal.json')
+    })
+    const rejected = await illegal.learnFromSuccess({
+      task: '执行任意命令',
+      steps: [
+        { tool: 'navigate_to', args: '{}' },
+        { tool: 'interact_block', args: '{}' }
+      ]
+    })
+    assert.equal(rejected.status, 'rejected')
+    assert.equal((await workspace.readLearnedSkills()).length, 1)
   } finally {
     await rm(root, { recursive: true, force: true })
   }

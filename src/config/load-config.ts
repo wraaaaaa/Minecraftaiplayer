@@ -135,10 +135,11 @@ export function validateConfig(config: BotConfig): void {
   if (!Number.isFinite(workspace.compressionTriggerRatio) || workspace.compressionTriggerRatio < 0.5 || workspace.compressionTriggerRatio > 0.95) throw new Error('agentWorkspace.compressionTriggerRatio 必须在 0.5-0.95 之间')
   if (!Number.isInteger(workspace.retainRecentEvents) || workspace.retainRecentEvents < 4 || workspace.retainRecentEvents > 64) throw new Error('agentWorkspace.retainRecentEvents 必须是 4-64 的整数')
   const improvement = workspace.selfImprovement
-  for (const key of ['enabled', 'allowPromptEdits', 'allowBehaviorPatches'] as const) {
+  for (const key of ['enabled', 'allowPromptEdits', 'allowBehaviorPatches', 'allowSkillLearning'] as const) {
     if (typeof improvement[key] !== 'boolean') throw new Error(`agentWorkspace.selfImprovement.${key} 必须是布尔值`)
   }
   if (!Number.isInteger(improvement.minimumRepeatedFailures) || improvement.minimumRepeatedFailures < 2 || improvement.minimumRepeatedFailures > 10) throw new Error('minimumRepeatedFailures 必须是 2-10 的整数')
+  if (!Number.isInteger(improvement.minimumStepsForSkill) || improvement.minimumStepsForSkill < 1 || improvement.minimumStepsForSkill > 12) throw new Error('minimumStepsForSkill 必须是 1-12 的整数')
   if (!['baidu', 'searxng', 'disabled'].includes(improvement.researchProvider)) throw new Error('researchProvider 只能是 baidu、searxng 或 disabled')
   if (!Number.isInteger(improvement.researchTimeoutMs) || improvement.researchTimeoutMs < 1000 || improvement.researchTimeoutMs > 60_000) throw new Error('researchTimeoutMs 必须是 1000-60000 的整数')
   if (improvement.researchProvider !== 'disabled') {

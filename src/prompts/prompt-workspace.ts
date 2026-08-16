@@ -26,10 +26,27 @@ export interface BehaviorPatch {
   enabled: boolean
 }
 
+export interface LearnedSkillStep {
+  tool: string
+  argsHint: string
+  expect: string
+}
+
+export interface LearnedSkill {
+  id: string
+  name: string
+  description: string
+  whenToUse: string
+  steps: LearnedSkillStep[]
+  createdAt: string
+  enabled: boolean
+}
+
 interface BehaviorPatchDocument {
   schemaVersion: 1
   updatedAt: string
   patches: BehaviorPatch[]
+  skills?: LearnedSkill[]
 }
 
 function inside(root: string, candidate: string): boolean {
@@ -288,10 +305,27 @@ export class PromptWorkspace {
     await atomicText(path.join(this.#root, 'behavior-patches.json'), `${JSON.stringify(document, null, 2)}\n`)
   }
 
+  async readLearnedSkills(): Promise<LearnedSkill[]> {
+    return (await this.readBehaviorPatches()).skills ?? []
+  }
+
+  async addLearnedSkill(skill: LearnedSkill): Promise<void> {
+    const document = await this.readBehaviorPatches()
+    const skills = document.skills ?? []
+    const existing = skills.findIndex(item => item.name.trim().toLowerCase() === skill.name.trim().toLowerCase())
+    if (existing >= 0) skills[existing] = skill
+    else skills.push(skill)
+    document.skills = skills.slice(-60)
+    document.updatedAt = new Date().toISOString()
+    await atomicText(path.join(this.#root, 'behavior-patches.json'), `${JSON.stringify(document, null, 2)}\n`)
+  }
+
   async buildSystemPrompt(persona: Persona, identity?: PlayerIdentity, options: { toolAgent?: boolean } = {}): Promise<string> {
     const documents = await this.readDocuments()
     const profile = identity ? await this.ensurePlayerProfile(identity) : undefined
-    const patches = (await this.readBehaviorPatches()).patches.filter(patch => patch.enabled).slice(-20)
+    const patchDocument = await this.readBehaviorPatches()
+    const patches = patchDocument.patches.filter(patch => patch.enabled).slice(-20)
+    const skills = (patchDocument.skills ?? []).filter(skill => skill.enabled).slice(-20)
     const substitute = (value: string) => value
       .replaceAll('{{name}}', persona.name)
       .replaceAll('{{description}}', persona.description)
@@ -305,7 +339,8 @@ export class PromptWorkspace {
       substitute(options.toolAgent ? compactToolsDocument(documents['TOOLS.md']) : documents['TOOLS.md']),
       substitute(documents['MEMORY.md']),
       profile ? `# 当前玩家专属 USER.md\n\n${profile.content}` : '',
-      patches.length > 0 ? `# 已验证的声明式行为补丁\n\n${JSON.stringify(patches, null, 2)}` : ''
+      patches.length > 0 ? `# 已验证的声明式行为补丁\n\n${JSON.stringify(patches, null, 2)}` : '',
+      skills.length > 0 ? `# 已学会的可复用技能配方\n\n${JSON.stringify(skills, null, 2)}` : ''
     ].filter(Boolean).join('\n\n---\n\n')
   }
 }

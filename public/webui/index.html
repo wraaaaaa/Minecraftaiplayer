@@ -283,6 +283,7 @@
             <label>触发压缩比例<input id="compressionTriggerRatio" type="number" min="0.5" max="0.95" step="0.01"></label>
             <label>原样保留最近事件<input id="retainRecentEvents" type="number" min="4" max="64"></label>
             <label>重复失败达到次数<input id="minimumRepeatedFailures" type="number" min="2" max="10"></label>
+            <label>技能提炼最少步骤<input id="minimumStepsForSkill" type="number" min="1" max="12"></label>
             <label>研究来源<select id="researchProvider"><option value="baidu">百度（中国大陆默认）</option><option value="searxng">自建 SearXNG</option><option value="disabled">禁用联网研究</option></select></label>
             <label class="span-two">研究端点<input id="researchEndpoint" type="url"><small>百度默认 https://www.baidu.com/s；SearXNG 可使用本机或局域网 HTTP。</small></label>
             <label>研究超时（毫秒）<input id="researchTimeoutMs" type="number" min="1000" max="60000"></label>
@@ -291,8 +292,9 @@
             <label class="switch"><input id="selfImprovementEnabled" type="checkbox"><span></span>启用重复失败研究与自我改进</label>
             <label class="switch"><input id="allowPromptEdits" type="checkbox"><span></span>允许 AI 更新 TOOLS.md 托管区</label>
             <label class="switch"><input id="allowBehaviorPatches" type="checkbox"><span></span>允许声明式行为补丁</label>
+            <label class="switch"><input id="allowSkillLearning" type="checkbox"><span></span>允许从成功任务提炼技能配方</label>
           </div>
-          <p class="safety-note">AI 无权自动修改 rules.md、IDENTITY.md、SOUL.md、密钥、连接配置、启动脚本或可执行源码；“非关键代码”以经过校验、可关闭、可回滚的 behavior-patches.json 声明式策略实现。</p>
+          <p class="safety-note">AI 无权自动修改 rules.md、IDENTITY.md、SOUL.md、密钥、连接配置、启动脚本或可执行源码；“非关键代码”以经过校验、可关闭、可回滚的 behavior-patches.json 声明式策略实现；技能配方也只能组合白名单内已有工具，不能发明新工具或绕过安全规则。</p>
           <h3>当前声明式行为补丁</h3><pre id="behaviorPatchView">暂无补丁</pre>
         </div>
         <div class="autonomy-card player-profile-editor">

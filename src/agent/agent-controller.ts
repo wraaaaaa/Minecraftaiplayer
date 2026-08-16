@@ -818,6 +818,7 @@ export class AgentController {
       const researchEnabled = this.#provider.capabilities?.webSearch === true
         && (multimodal?.onlineResearchEnabled ?? true)
       let acknowledged = false
+      const successSteps: Array<{ tool: string; args: string }> = []
       const agent = new ToolAgent({
         provider: this.#provider,
         executor: this.#executor,
@@ -854,6 +855,7 @@ export class AgentController {
         },
         onStep: async event => {
           this.#latestWorld = event.world
+          if (event.ok) successSteps.push({ tool: event.tool, args: event.arguments })
           await this.#diagnose({
             type: event.ok ? 'step' : 'failure', level: event.ok ? 'info' : 'warning',
             title: event.ok ? `Agent 工具步骤 ${event.step} 已确认` : `Agent 工具步骤 ${event.step} 失败，交回模型重规划`,
@@ -900,6 +902,7 @@ export class AgentController {
           totalTokens: result.usage.totalTokens, reasoningTokens: result.usage.reasoningTokens ?? 0, cachedInputTokens: result.usage.cachedInputTokens ?? 0
         }
       })
+      if (result.steps > 0) void this.#learnFromSuccess(message, successSteps)
       const reply = naturalGameText(result.reply, result.steps > 0 ? '嗯，这一轮弄好了。' : '嗯，我在听。', identity.name)
       if (result.steps > 0) void this.#executor.execute({ type: 'gesture', gesture: 'happy' })
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
@@ -1040,6 +1043,26 @@ export class AgentController {
       await this.#diagnose({
         type: 'self_improvement', level: 'warning', title: '自我改进本轮已跳过', summary: action.type,
         detail: error instanceof Error ? error.message : String(error), metadata: { action: action.type }
+      })
+    }
+  }
+
+  async #learnFromSuccess(task: string, steps: Array<{ tool: string; args: string }>): Promise<void> {
+    if (!this.#selfImprovement) return
+    try {
+      const outcome = await this.#selfImprovement.learnFromSuccess({ task, steps })
+      if (outcome.status !== 'learned' && outcome.status !== 'rejected') return
+      await this.#diagnose({
+        type: 'self_improvement', level: outcome.status === 'learned' ? 'success' : 'warning',
+        title: outcome.status === 'learned' ? 'AI 已提炼可复用技能配方' : '技能配方未通过安全校验',
+        summary: outcome.status === 'learned' ? `新技能「${outcome.guidance ?? ''}」已写入可回滚技能区。` : '本轮技能提炼被沙箱拒绝。',
+        ...(outcome.guidance ? { detail: `技能：${outcome.guidance}` } : {}),
+        metadata: { count: outcome.count ?? 0 }
+      })
+    } catch (error) {
+      await this.#diagnose({
+        type: 'self_improvement', level: 'warning', title: '技能提炼本轮已跳过', summary: '未影响已完成的玩家任务。',
+        detail: error instanceof Error ? error.message : String(error)
       })
     }
   }

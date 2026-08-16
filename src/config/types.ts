@@ -112,7 +112,9 @@ export interface BotConfig {
       enabled: boolean
       allowPromptEdits: boolean
       allowBehaviorPatches: boolean
+      allowSkillLearning: boolean
       minimumRepeatedFailures: number
+      minimumStepsForSkill: number
       researchProvider: 'baidu' | 'searxng' | 'disabled'
       researchEndpoint: string
       researchTimeoutMs: number
@@ -330,7 +332,9 @@ export interface AgentWorkspaceConfig {
     enabled: boolean
     allowPromptEdits: boolean
     allowBehaviorPatches: boolean
+    allowSkillLearning: boolean
     minimumRepeatedFailures: number
+    minimumStepsForSkill: number
     researchProvider: 'baidu' | 'searxng' | 'disabled'
     researchEndpoint: string
     researchTimeoutMs: number
@@ -347,7 +351,9 @@ export const DEFAULT_AGENT_WORKSPACE_CONFIG: Readonly<AgentWorkspaceConfig> = Ob
     enabled: true,
     allowPromptEdits: true,
     allowBehaviorPatches: true,
+    allowSkillLearning: true,
     minimumRepeatedFailures: 3,
+    minimumStepsForSkill: 2,
     researchProvider: 'baidu',
     researchEndpoint: 'https://www.baidu.com/s',
     researchTimeoutMs: 12_000

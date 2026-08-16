@@ -535,7 +535,7 @@ export class FabricBridgeClient implements ActionExecutor {
     const socket = this.#socket
     if (!this.#connected || !socket || socket.destroyed) return Promise.resolve({ ok: false, detail: 'Fabric 客户端桥未连接' })
     const id = randomUUID()
-    const longRunning = ['navigate_to', 'break_block_at', 'place_block_at', 'craft_recipe', 'use_held_item',
+    const longRunning = ['navigate_to', 'step_on_block', 'break_block_at', 'place_block_at', 'craft_recipe', 'use_held_item',
       'equip_best', 'prepare_for', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
       'accept_items', 'return_home',
       'attack_hostile', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',

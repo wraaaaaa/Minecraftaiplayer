@@ -3,8 +3,9 @@ import type { AgentWorkspaceConfig } from '../config/types.js'
 import { AtomicJsonFile } from '../core/atomic-json-file.js'
 import type { LlmProvider } from '../llm/types.js'
 import type { AgentAction } from '../policy/policy-engine.js'
-import type { PromptDocumentName, PromptWorkspace } from '../prompts/prompt-workspace.js'
+import type { LearnedSkill, PromptDocumentName, PromptWorkspace } from '../prompts/prompt-workspace.js'
 import type { SecretGuard } from '../security/secret-guard.js'
+import { AGENT_TOOLS } from '../agent/tool-agent.js'
 
 interface FailureRecord {
   signature: string
@@ -21,6 +22,12 @@ interface ImprovementDocument {
   schemaVersion: 1
   updatedAt: string
   failures: Record<string, FailureRecord>
+  lastSkillAt?: string
+}
+
+export interface SuccessStep {
+  tool: string
+  args: string
 }
 
 export interface ImprovementOutcome {
@@ -189,5 +196,64 @@ export class SelfImprovementManager {
 
   async ownerEdit(document: PromptDocumentName, content: string): Promise<void> {
     await this.#workspace.writeDocuments({ [document]: content })
+  }
+
+  async learnFromSuccess(input: { task: string; steps: SuccessStep[] }): Promise<ImprovementOutcome> {
+    if (!this.#config.enabled || !this.#config.allowSkillLearning) return { status: 'disabled' }
+    const successful = input.steps.filter(step => {
+      if (typeof step.tool !== 'string' || typeof step.args !== 'string') return false
+      const clean = step.tool.trim().toLowerCase()
+      return clean && clean !== 'observe_world' && clean !== 'wait_ticks' && clean !== 'stop_all_actions'
+    })
+    if (successful.length < this.#config.minimumStepsForSkill) return { status: 'threshold_pending', count: successful.length }
+    const document = await this.#file.load()
+    if (document.lastSkillAt && Date.now() - Date.parse(document.lastSkillAt) < 30 * 60_000) return { status: 'cooldown' }
+
+    const allowedTools = new Set([...AGENT_TOOLS.map(tool => tool.name), 'search_game_guide'])
+    const safeTask = this.#secrets.sanitizeForModel(input.task).replace(/\s+/gu, ' ').trim().slice(0, 1_000)
+    const safeSteps = successful.slice(-24).map(step => ({
+      tool: step.tool,
+      args: this.#secrets.sanitizeForModel(step.args).replace(/\s+/gu, ' ').trim().slice(0, 600)
+    })).filter(step => step.args && !step.args.includes('[REDACTED]'))
+    if (!safeTask || safeSteps.length === 0) return { status: 'rejected' }
+
+    const response = await this.#provider.complete({
+      system: [
+        '你是 Minecraft AI 的受限技能提炼器，只输出 JSON。',
+        '依据一次真实成功的任务过程，提炼一个“声明式技能配方”：把已成功执行的工具序列概括为可复用的步骤模板。',
+        '硬边界：步骤里的 tool 只能使用白名单内已有工具名；不得发明新工具、不得包含代码/命令/密钥/本地路径/服务器地址、不得绕过任何安全规则。',
+        `白名单工具：${[...allowedTools].join('、')}`,
+        '输出：{"name":"技能名(<=48字)","description":"做什么(<=160字)","whenToUse":"何时用(<=160字)","steps":[{"tool":"白名单工具名","argsHint":"参数要点(<=160字)","expect":"成功判据(<=160字)"}]}'
+      ].join('\n'),
+      user: JSON.stringify({ task: safeTask, successSteps: safeSteps })
+    })
+    const parsed = parseJsonObject(response.text)
+    const name = typeof parsed.name === 'string' ? parsed.name.replace(/\s+/gu, ' ').trim().slice(0, 48) : ''
+    const description = typeof parsed.description === 'string' ? parsed.description.replace(/\s+/gu, ' ').trim().slice(0, 160) : ''
+    const whenToUse = typeof parsed.whenToUse === 'string' ? parsed.whenToUse.replace(/\s+/gu, ' ').trim().slice(0, 160) : ''
+    const steps = Array.isArray(parsed.steps)
+      ? parsed.steps.slice(0, 8).flatMap(item => {
+          if (!item || typeof item !== 'object') return []
+          const tool = typeof (item as Record<string, unknown>).tool === 'string' ? (item as Record<string, unknown>).tool as string : ''
+          if (!allowedTools.has(tool.trim().toLowerCase())) return []
+          const argsHint = typeof (item as Record<string, unknown>).argsHint === 'string' ? (item as Record<string, unknown>).argsHint as string : ''
+          const expect = typeof (item as Record<string, unknown>).expect === 'string' ? (item as Record<string, unknown>).expect as string : ''
+          return [{ tool: tool.trim().toLowerCase(), argsHint: argsHint.replace(/\s+/gu, ' ').trim().slice(0, 160), expect: expect.replace(/\s+/gu, ' ').trim().slice(0, 160) }]
+        })
+      : []
+    if (!name || !description || steps.length === 0) {
+      await this.#file.update(value => { value.lastSkillAt = now(); value.updatedAt = now() })
+      return { status: 'rejected' }
+    }
+    const combined = `${name}\n${description}\n${whenToUse}\n${steps.map(step => `${step.tool} ${step.argsHint} ${step.expect}`).join('\n')}`
+    const safeSkill = this.#secrets.sanitizeForPersistence(combined)
+    if (safeSkill.includes('[REDACTED]') || !safeLearning(safeSkill)) {
+      await this.#file.update(value => { value.lastSkillAt = now(); value.updatedAt = now() })
+      return { status: 'rejected' }
+    }
+    const skill: LearnedSkill = { id: randomUUID(), name, description, whenToUse, steps, createdAt: now(), enabled: true }
+    await this.#workspace.addLearnedSkill(skill)
+    await this.#file.update(value => { value.lastSkillAt = now(); value.updatedAt = now() })
+    return { status: 'learned', signature: skill.id, count: steps.length, guidance: skill.name }
   }
 }

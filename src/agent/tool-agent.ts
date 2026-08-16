@@ -81,6 +81,9 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'interact_block', description: '与精确方块交互；未知归属容器会拒绝。', parameters: objectSchema({
     x: integer('X'), y: integer('Y'), z: integer('Z'), hand: { type: 'string', enum: ['main', 'off'] }
   }) },
+  { name: 'step_on_block', description: '走到压力板/绊线方块上并站立以触发它（踩踏板开门等）。', parameters: objectSchema({
+    x: integer('X'), y: integer('Y'), z: integer('Z')
+  }) },
   { name: 'use_held_item', description: '使用手中物品一次。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
   { name: 'eat_safe_food', description: '饥饿值不满时连续选择并吃下安全食物，以服务端饱食度或生命值变化确认。', parameters: objectSchema({}) },
   { name: 'drop_inventory_item', description: '从自己的背包槽丢出物品。', parameters: objectSchema({ slot: integer('槽位', 0, 35), count: integer('数量', 1, 64) }) },
@@ -168,6 +171,9 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     case 'interact_block': return {
       type: 'interact_block', x: whole(args, 'x', -30_000_000, 30_000_000), y: whole(args, 'y', -2048, 2048), z: whole(args, 'z', -30_000_000, 30_000_000),
       hand: args.hand === 'off' ? 'off' : 'main'
+    }
+    case 'step_on_block': return {
+      type: 'step_on_block', x: whole(args, 'x', -30_000_000, 30_000_000), y: whole(args, 'y', -2048, 2048), z: whole(args, 'z', -30_000_000, 30_000_000)
     }
     case 'use_held_item': return { type: 'use_held_item', hand: args.hand === 'off' ? 'off' : 'main' }
     case 'eat_safe_food': return { type: 'eat_best_food' }

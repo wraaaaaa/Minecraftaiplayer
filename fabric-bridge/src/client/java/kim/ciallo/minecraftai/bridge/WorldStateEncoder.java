@@ -490,6 +490,9 @@ public final class WorldStateEncoder {
         String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
         if (path.endsWith("_button")) return "button";
         if (path.equals("lever")) return "lever";
+        if (path.endsWith("_pressure_plate")) return "pressure_plate";
+        if (path.endsWith("_trapdoor")) return "trapdoor";
+        if (path.equals("tripwire")) return "tripwire";
         if (path.endsWith("_door")) return "door";
         if (path.endsWith("_fence_gate")) return "gate";
         if (path.endsWith("_portal") || path.equals("end_portal")) return "portal";
