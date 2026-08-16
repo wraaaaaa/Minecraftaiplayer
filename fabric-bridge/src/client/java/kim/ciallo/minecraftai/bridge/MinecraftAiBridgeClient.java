@@ -793,7 +793,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     goal = fix.segmentGoal(player, 22.0D);
                 }
                 boolean continuousFollow = "follow_player".equals(string(action, "type"));
-                if (!setMovement(new MovementTarget(targetName, goal.x, goal.y, goal.z, continuousFollow, 2.0), player)) {
+                if (!setMovement(new MovementTarget(targetName, goal.x, goal.y, goal.z, continuousFollow, 3.0), player)) {
                     yield new ActionResult(false, "no collision-safe loaded route to player " + targetName);
                 }
                 yield new ActionResult(true, continuousFollow
@@ -1040,10 +1040,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 double segmentDistance = Math.sqrt(
                     Math.pow(target.x() - player.getX(), 2.0D) + Math.pow(target.z() - player.getZ(), 2.0D)
                 );
-                if (followPortal == null && (segmentDistance <= 2.0D || tick % 40 == 0)) {
+                if (followPortal == null && (segmentDistance <= 3.0D || tick % 40 == 0)) {
                     OwnerLocator.Fix fix = OwnerLocator.locate(client, player, ownerName);
                     if (fix == null) {
-                        if (segmentDistance <= 2.0D) {
+                        if (segmentDistance <= 3.0D) {
                             movementNavigator.release(client);
                             traversalRecovery.reset(client);
                             clearMovement(client);
@@ -1110,7 +1110,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             player,
             new Vec3(target.x(), target.y(), target.z()),
             target.stopDistance(),
-            distance > 6.0D,
+            target.follow() ? distance > target.stopDistance() + 0.6D : distance > 6.0D,
             tick
         );
         if (!routed && movementNavigator.consecutivePlanFailures() >= 8
