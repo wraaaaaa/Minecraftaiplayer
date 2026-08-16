@@ -47,6 +47,7 @@ export type AgentAction =
   | { type: 'interact_block'; x: number; y: number; z: number; hand: 'main' | 'off' }
   | { type: 'step_on_block'; x: number; y: number; z: number }
   | { type: 'unequip_armor' }
+  | { type: 'make_inventory_room'; freeSlots: number }
   | { type: 'use_held_item'; hand: 'main' | 'off' }
   | { type: 'drop_inventory_item'; slot: number; count: number }
   | { type: 'discard_worn_tools'; remainingDurability: number }
@@ -118,6 +119,8 @@ export class PolicyEngine {
         return { allowed: true, reason: 'Fabric 仅允许踩压压力板或绊线，不破坏任何方块' }
       case 'unequip_armor':
         return { allowed: true, reason: '只把自身盔甲脱下放入背包，不丢弃任何物品' }
+      case 'make_inventory_room':
+        return { allowed: true, reason: '只丢弃已耗尽工具、腐坏食物和多余填充方块，绝不丢附魔/贵重/食物' }
       case 'send_server_command':
         return /^(?:tp|teleport)\s+[A-Za-z0-9_]{1,16}$/u.test(action.command)
           ? { allowed: true, reason: '仅允许尝试把自己传送到一个明确玩家；服务器仍会执行权限检查' }

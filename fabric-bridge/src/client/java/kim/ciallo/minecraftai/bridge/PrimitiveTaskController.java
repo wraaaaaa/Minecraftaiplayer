@@ -139,6 +139,7 @@ public final class PrimitiveTaskController {
             task = switch (type) {
                 case "equip_best", "prepare_for" -> new EquipTask(id, type, action, tick);
                 case "unequip_armor" -> new UnequipArmorTask(id, tick);
+                case "make_inventory_room" -> new MakeInventoryRoomTask(id, action, tick);
                 case "use_item" -> new UseItemTask(id, action, tick);
                 case "collect_own_drops" -> createCollectTask(id, action, client);
                 case "gather_resource" -> createGatherTask(id, action, client);
@@ -652,6 +653,61 @@ public final class PrimitiveTaskController {
                 return;
             }
             finish(client, this, true, "unequipped_armor=" + unequipped);
+        }
+    }
+
+    /**
+     * Frees backpack slots by throwing away the lowest-priority stacks. Used proactively when
+     * the backpack is full and the model still needs to pick up items.
+     */
+    private final class MakeInventoryRoomTask extends PrimitiveTask {
+        private final int wantedFreeSlots;
+        private int pendingSlot = -1;
+        private long phaseStartedTick;
+        private int discardedStacks;
+        private int discardedItems;
+
+        MakeInventoryRoomTask(String id, JsonObject action, long startedTick) {
+            super(id, "make_inventory_room", startedTick, DROP_TIMEOUT_TICKS);
+            wantedFreeSlots = Math.max(1, Math.min(4, integer(action, "freeSlots", 1, 4, 1)));
+        }
+
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+                finish(client, this, false, "make_inventory_room requires the normal inventory menu with an empty cursor");
+                return;
+            }
+            if (pendingSlot >= 0) {
+                ItemStack stack = player.getInventory().getItem(pendingSlot);
+                if (stack.isEmpty()) {
+                    discardedStacks++;
+                    pendingSlot = -1;
+                } else if (tick - phaseStartedTick > CLICK_CONFIRM_TICKS) {
+                    finish(client, this, false, "server did not confirm discard from slot " + pendingSlot);
+                    return;
+                } else {
+                    return;
+                }
+            }
+            if (InventoryCleanup.freeSlots(player) >= wantedFreeSlots) {
+                finish(client, this, true, "inventory_room_ready; free_slots=" + InventoryCleanup.freeSlots(player)
+                    + "; discarded_stacks=" + discardedStacks + "; discarded_items=" + discardedItems);
+                return;
+            }
+            int slot = InventoryCleanup.discardableSlot(player);
+            if (slot < 0) {
+                finish(client, this, false, "no_discardable_item_found; free_slots=" + InventoryCleanup.freeSlots(player)
+                    + "; wanted=" + wantedFreeSlots);
+                return;
+            }
+            ItemStack stack = player.getInventory().getItem(slot);
+            discardedItems += stack.getCount();
+            int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
+            client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+            pendingSlot = slot;
+            phaseStartedTick = tick;
         }
     }
 

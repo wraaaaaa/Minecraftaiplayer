@@ -118,6 +118,7 @@ public final class WorldStateEncoder {
         root.add("physical", physical);
 
         root.addProperty("selectedHotbarSlot", player.getInventory().getSelectedSlot());
+        root.addProperty("freeSlots", InventoryCleanup.freeSlots(player));
         root.add("inventory", inventory(player));
         root.add("equipment", equipment(player));
         JsonObject ownerWaypoint = ownerWaypoint(client, player);
@@ -185,9 +186,22 @@ public final class WorldStateEncoder {
             encoded.addProperty("slot", slot);
             encoded.addProperty("hotbar", Inventory.isHotbarSlot(slot));
             encoded.addProperty("selected", slot == player.getInventory().getSelectedSlot());
+            String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+            int countInInventory = inventoryCountOf(player, itemId);
+            encoded.addProperty("discardReason", InventoryCleanup.discardReason(stack, countInInventory));
             output.add(encoded);
         }
         return output;
+    }
+
+    private static int inventoryCountOf(LocalPlayer player, String itemId) {
+        int total = 0;
+        for (ItemStack stack : player.getInventory().getNonEquipmentItems()) {
+            if (!stack.isEmpty() && BuiltInRegistries.ITEM.getKey(stack.getItem()).toString().equals(itemId)) {
+                total += stack.getCount();
+            }
+        }
+        return total;
     }
 
     private static JsonArray equipment(LocalPlayer player) {

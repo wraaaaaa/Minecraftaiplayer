@@ -85,6 +85,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
     x: integer('X'), y: integer('Y'), z: integer('Z')
   }) },
   { name: 'unequip_armor', description: '把身上穿着的盔甲脱下放进背包（方便接收玩家给的新装备）。', parameters: objectSchema({}) },
+  { name: 'make_inventory_room', description: '背包装满时腾出空间：丢弃已用尽的工具、腐坏食物和多余的填充方块（绝不丢附魔、贵重物品或正常食物）。', parameters: objectSchema({ free_slots: integer('要腾出的空格数', 1, 4) }) },
   { name: 'use_held_item', description: '使用手中物品一次。', parameters: objectSchema({ hand: { type: 'string', enum: ['main', 'off'] } }) },
   { name: 'eat_safe_food', description: '饥饿值不满时连续选择并吃下安全食物，以服务端饱食度或生命值变化确认。', parameters: objectSchema({}) },
   { name: 'drop_inventory_item', description: '从自己的背包槽丢出物品。', parameters: objectSchema({ slot: integer('槽位', 0, 35), count: integer('数量', 1, 64) }) },
@@ -177,6 +178,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
       type: 'step_on_block', x: whole(args, 'x', -30_000_000, 30_000_000), y: whole(args, 'y', -2048, 2048), z: whole(args, 'z', -30_000_000, 30_000_000)
     }
     case 'unequip_armor': return { type: 'unequip_armor' }
+    case 'make_inventory_room': return { type: 'make_inventory_room', freeSlots: whole(args, 'free_slots', 1, 4) }
     case 'use_held_item': return { type: 'use_held_item', hand: args.hand === 'off' ? 'off' : 'main' }
     case 'eat_safe_food': return { type: 'eat_best_food' }
     case 'drop_inventory_item': return { type: 'drop_inventory_item', slot: whole(args, 'slot', 0, 35), count: whole(args, 'count', 1, 64) }

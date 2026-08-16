@@ -29,6 +29,7 @@ import net.minecraft.world.inventory.AbstractFurnaceMenu;
 import net.minecraft.world.inventory.ContainerInput;
 import net.minecraft.world.inventory.EnchantmentMenu;
 import net.minecraft.world.inventory.MerchantMenu;
+import net.minecraft.world.inventory.InventoryMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.trading.MerchantOffer;
@@ -364,6 +365,19 @@ public final class AdvancedTaskController {
             // after the inventory delta is observed on a subsequent tick.
             navigator.release(client);
             clearControls(client);
+            if (InventoryCleanup.freeSlots(player) == 0 && tick - pickupWaitStarted > 20L) {
+                // Backpack is full: proactively drop the lowest-priority stack so the offered
+                // item can actually be picked up, then keep waiting for the server delta.
+                int discardSlot = InventoryCleanup.discardableSlot(player);
+                if (discardSlot >= 0) {
+                    int menuSlot = discardSlot < 9 ? InventoryMenu.USE_ROW_SLOT_START + discardSlot : discardSlot;
+                    client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+                    pickupWaitStarted = tick;
+                    return;
+                }
+                finish(client, this, false, "offered item could not be picked up: inventory full and no discardable item; " + playerName);
+                return;
+            }
             if (tick - pickupWaitStarted > 100L) {
                 finish(client, this, false, "offered item remained visible but server did not confirm pickup; inventory may be full or pickup-delayed");
             }

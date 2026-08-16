@@ -565,7 +565,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private static boolean isPrimitiveAction(String type) {
         return switch (type) {
-            case "equip_best", "prepare_for", "unequip_armor", "use_item", "collect_own_drops", "gather_resource", "craft_item", "place_block", "drop_item" -> true;
+            case "equip_best", "prepare_for", "unequip_armor", "make_inventory_room", "use_item", "collect_own_drops", "gather_resource", "craft_item", "place_block", "drop_item" -> true;
             default -> false;
         };
     }

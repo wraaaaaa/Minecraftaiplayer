@@ -29,7 +29,9 @@ export interface WorldState {
     foodSaturation?: number
     safeFood?: boolean
     enchantments?: Array<{ id: string; level: number }>
+    discardReason?: 'worn_tool' | 'unsafe_food' | 'filler_excess' | 'keep'
   }>
+  freeSlots?: number
   selectedHotbarSlot?: number
   nearbyBlocks?: Array<{
     blockId: string
