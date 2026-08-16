@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { access, copyFile, mkdir, readFile, writeFile, rename } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
@@ -48,6 +48,7 @@ const files = {
   modManifest: path.join(projectRoot, '.runtime', 'minecraft', 'managed-mods.json'),
   botPid: path.join(projectRoot, 'data', 'bot.pid.json'),
   clientPid: path.join(projectRoot, 'data', 'minecraft-client.pid.json'),
+  testFlag: path.join(projectRoot, 'data', 'test-mode.flag'),
   runtimeStatus: path.join(projectRoot, 'data', 'runtime-status.json'),
   memory: path.join(projectRoot, 'data', 'memory.json'),
   experience: path.join(projectRoot, 'data', 'experience.json'),
@@ -405,10 +406,20 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     const result = await execFileAsync(process.execPath, [path.join(projectRoot, 'scripts', 'sync-client-mods.mjs')], { cwd: projectRoot, timeout: 5 * 60_000, windowsHide: true })
     return json(response, 200, { ok: true, output: result.stdout.trim(), snapshot: await snapshot() })
   }
+  if (request.method === 'POST' && pathname === '/api/runtime/test-start') {
+    await mkdir(path.dirname(files.testFlag), { recursive: true })
+    await writeFile(files.testFlag, 'test-mode\n', 'utf8')
+    return json(response, 200, { ok: true, testMode: true, output: await runPowerShell('start-all-background.ps1') })
+  }
   if (request.method === 'POST' && pathname === '/api/runtime/start') return json(response, 200, { ok: true, output: await runPowerShell('start-all-background.ps1') })
-  if (request.method === 'POST' && pathname === '/api/runtime/stop') return json(response, 200, { ok: true, output: await runPowerShell('stop-all-background.ps1') })
+  if (request.method === 'POST' && pathname === '/api/runtime/stop') {
+    const output = await runPowerShell('stop-all-background.ps1')
+    await rm(files.testFlag, { force: true })
+    return json(response, 200, { ok: true, testMode: false, output })
+  }
   if (request.method === 'POST' && pathname === '/api/runtime/restart') {
     await runPowerShell('stop-all-background.ps1')
+    await rm(files.testFlag, { force: true })
     return json(response, 200, { ok: true, output: await runPowerShell('start-all-background.ps1') })
   }
   if (request.method === 'POST' && pathname === '/api/model/test') {

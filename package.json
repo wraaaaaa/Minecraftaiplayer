@@ -25,6 +25,8 @@
     "webui": "node dist/src/webui/server.js",
     "start:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-webui-background.ps1",
     "stop:webui": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-webui-background.ps1",
+    "player-monitor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-player-monitor.ps1",
+    "stop:player-monitor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-player-monitor.ps1",
     "dashboard": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/open-control-center.ps1",
     "audit": "node scripts/audit-repository.mjs",
     "audit:dependencies": "npm audit --omit=dev --registry=https://registry.npmjs.org",

@@ -168,6 +168,7 @@ export interface BotConfig {
       maxZ: number
     }
   }
+  playerMonitor?: PlayerMonitorConfig
   policyFile: string
   personaFile: string
   promptsFile: string
@@ -297,6 +298,26 @@ export function autonomyConfig(config: BotConfig): AutonomyConfig {
   const configured = { ...config.autonomy }
   delete configured.developmentZone
   return { ...DEFAULT_AUTONOMY_CONFIG, ...configured, firstHome: { ...DEFAULT_AUTONOMY_CONFIG.firstHome, ...configured.firstHome } }
+}
+
+export interface PlayerMonitorConfig {
+  enabled: boolean
+  pollIntervalMs: number
+  onlineAfterMs: number
+  offlineAfterMs: number
+  statusTimeoutMs: number
+}
+
+export const DEFAULT_PLAYER_MONITOR_CONFIG: Readonly<PlayerMonitorConfig> = Object.freeze({
+  enabled: false,
+  pollIntervalMs: 15_000,
+  onlineAfterMs: 60_000,
+  offlineAfterMs: 30 * 60_000,
+  statusTimeoutMs: 5_000
+})
+
+export function playerMonitorConfig(config: BotConfig): PlayerMonitorConfig {
+  return { ...DEFAULT_PLAYER_MONITOR_CONFIG, ...config.playerMonitor }
 }
 
 export interface AgentWorkspaceConfig {

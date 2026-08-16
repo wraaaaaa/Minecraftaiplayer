@@ -85,6 +85,13 @@
     "ownedBlocksFile": "data/owned-blocks.json",
     "maxEvents": 5000
   },
+  "playerMonitor": {
+    "enabled": false,
+    "pollIntervalMs": 15000,
+    "onlineAfterMs": 60000,
+    "offlineAfterMs": 1800000,
+    "statusTimeoutMs": 5000
+  },
   "agentWorkspace": {
     "promptDirectory": "data/agent-prompts",
     "playerProfilesDirectory": "data/player-profiles",

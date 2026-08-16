@@ -61,12 +61,14 @@ if (-not [string]::IsNullOrWhiteSpace($configuredPassword)) {
 }
 
 $modsConfigFile = Join-Path $projectRoot 'config\mods.json'
+$skipHandshakeVerification = $false
 if (Test-Path -LiteralPath $modsConfigFile) {
     $modsConfig = Get-Content -LiteralPath $modsConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
-    if ($modsConfig.syncOnClientStart) {
+    if ($modsConfig.syncOnClientStart -and -not [bool]$modsConfig.skipHandshakeVerification) {
         & node (Join-Path $projectRoot 'scripts\sync-client-mods.mjs')
         if ($LASTEXITCODE -ne 0) { throw 'Server mod synchronization failed.' }
     }
+    $skipHandshakeVerification = [bool]$modsConfig.skipHandshakeVerification
 }
 
 $minecraftHome = if ([string]::IsNullOrWhiteSpace($env:MCAI_MINECRAFT_HOME)) {
@@ -182,7 +184,12 @@ $arguments = @(
     "-Dhmc.offline.username=$offlineName",
     '-Dhmc.assets.dummy=true',
     '-Dhmc.java.use.current=true',
-    '-Dhmc.exit.on.failed.command=true',
+    '-Dhmc.exit.on.failed.command=true'
+)
+if ($skipHandshakeVerification) {
+    $arguments += '-Dfabric.loader.disableHandshake=true'
+}
+$arguments += @(
     '-jar',
     "`"$headlessJar`"",
     '--command',

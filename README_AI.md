@@ -15,6 +15,12 @@
 
 远端仓库为 `https://github.com/wraaaaaa/Minecraftaiplayer.git`，默认分支为 `main`。本文不把提交 SHA 或测试数量当作长期不变量；第 2.2 节只保留带日期的本轮验证快照，接手时仍要动态查询：
 
+### 0.0 人数监听、测试启动与模组握手跳过（最新）
+
+- 新增 `playerMonitor` 配置（`config/bot.json`）：`src/player-monitor.ts` 作为独立进程（`npm run player-monitor` / `stop:player-monitor`，PID 在 `data/player-monitor.pid.json`）用 `src/network/server-status.ts` 的 Server List Ping（协议版本 776）轮询在线人数——该查询是短暂的未登录 TCP 连接，不占服务器人数空位。人类玩家（总数减掉 Bot 自己）在线满 `onlineAfterMs`（默认 1 分钟）自动运行 `start-all-background.ps1`，无人类玩家满 `offlineAfterMs`（默认 30 分钟）自动运行 `stop-all-background.ps1`；状态持久化在 `data/player-monitor-state.json`。
+- WebUI 新增“测试启动（绕过监听）”按钮 → `POST /api/runtime/test-start`：写 `data/test-mode.flag` 后直接启动 Bot；监听进程看到该标志就跳过自动上下线，手动 `POST /api/runtime/stop`（或 restart）会清除标志恢复正常。
+- 模组握手跳过：`config/mods.json` 新增 `skipHandshakeVerification`。为 `true` 时 `start-headless-client.ps1` 跳过 `sync-client-mods.mjs`，并在 JVM 加入 `-Dfabric.loader.disableHandshake=true`，让 Bot 以最小客户端（bridge + Fabric API）直接进服玩原版内容，避免每个新服务端 mod 都要同步适配。这是客户端侧跳过：若目标服在服务端强制校验 mod，仍需安装对应模组，效果须实服验证。
+
 ### 0.1 2026-08-07 水域/跨维度/交换/管理通道交接增量
 
 - 默认对外角色名从“小粉”改为“小默”。服务器登录名仍受 Minecraft/EasyAuth 的 ASCII 规则约束，不能因此改成中文。模板源是 `config/persona.example.json`、`config/agent-prompts.example/{IDENTITY,SOUL}.md`；实际运行目录还要同步 `config/persona.json` 与 `data/agent-prompts/`。玩家专属旧称呼仍保留在各自 `USER.md`，不应全局删除。

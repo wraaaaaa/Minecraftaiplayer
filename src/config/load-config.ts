@@ -189,6 +189,17 @@ export function validateConfig(config: BotConfig): void {
     // developmentZone is deliberately not validated. It is a removed legacy field,
     // ignored by autonomyConfig(), and must never block startup or grant permission.
   }
+  if (config.playerMonitor !== undefined) {
+    if (typeof config.playerMonitor.enabled !== 'boolean') throw new Error('playerMonitor.enabled 必须是布尔值')
+    for (const [name, value, minimum, maximum] of [
+      ['pollIntervalMs', config.playerMonitor.pollIntervalMs, 5_000, 300_000],
+      ['onlineAfterMs', config.playerMonitor.onlineAfterMs, 1_000, 3_600_000],
+      ['offlineAfterMs', config.playerMonitor.offlineAfterMs, 1_000, 86_400_000],
+      ['statusTimeoutMs', config.playerMonitor.statusTimeoutMs, 1_000, 60_000]
+    ] as const) {
+      if (value !== undefined && (!Number.isInteger(value) || value < minimum || value > maximum)) throw new Error(`playerMonitor.${name} 必须是 ${minimum}-${maximum} 的整数`)
+    }
+  }
   requireString(config.promptsFile, 'promptsFile')
 }
 

@@ -291,6 +291,7 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 
 - 服务器模组来源：`config/mods.json` 的 `sourceDirectory`。
 - 启动自动同步：`syncOnClientStart`；排除正则：`excludeFilePatterns[]`。
+- 跳过模组握手校验：`skipHandshakeVerification`。设为 `true` 后客户端不再同步服务器模组，并在 JVM 加入 `-Dfabric.loader.disableHandshake=true` 跳过 Fabric 模组协商，让 Bot 以最小客户端直接进服玩原版内容；效果需在目标服实服验证（若服务端强制校验则仍需安装对应模组）。
 - 受管理模组清单：`.runtime/minecraft/managed-mods.json`（含文件名、大小、SHA-256）。
 - Bot 日志：`logs/bot.log`；日志参数：`config/bot.json` 的 `logging`。
 - Minecraft 日志：`.runtime/minecraft/logs/latest.log`。
@@ -300,6 +301,21 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 - 一键部署并打开：`Install-and-Open-Control-Center.cmd`。
 - 只打开 WebUI：`Open-WebUI.cmd`。
 - 静默启动/停止 Bot：`Start-Bot.cmd`、`Stop-Bot.cmd`。
+
+## 9.1 人数监听自动上下线
+
+`config/bot.json` 的 `playerMonitor`：监听进程通过 Minecraft Server List Ping（不登录、不占人数空位）轮询服务器在线人数，自动控制 Bot 上下线。
+
+| 字段 | 默认值 | 效果 |
+| --- | --- | --- |
+| `enabled` | `false` | 是否启用监听；默认关闭。 |
+| `pollIntervalMs` | `15000` | 轮询在线人数的间隔（5 秒~5 分钟）。 |
+| `onlineAfterMs` | `60000` | 检测到人类玩家在线后，持续该时长才自动上线（1 分钟）。 |
+| `offlineAfterMs` | `1800000` | 检测到无人类玩家后，持续该时长才自动下线（30 分钟）。 |
+| `statusTimeoutMs` | `5000` | 单次状态查询超时。 |
+
+- 监听进程：`npm run player-monitor` 启动、`npm run stop:player-monitor` 停止；PID 记录在 `data/player-monitor.pid.json`，状态记录在 `data/player-monitor-state.json`。
+- 测试模式：WebUI“测试启动（绕过监听）”按钮会写 `data/test-mode.flag` 并直接启动 Bot；监听进程看到该标志后不自动上下线，直到手动“停止 Bot”清除标志。
 
 ## 10. Git 与 AI 接续信息
 
