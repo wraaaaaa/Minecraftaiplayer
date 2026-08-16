@@ -52,7 +52,8 @@ if (!sourceValue || !String(sourceValue).trim()) {
   process.exit(0)
 }
 
-const sourceDirectory = path.resolve(String(sourceValue))
+const rawSource = String(sourceValue)
+const sourceDirectory = path.isAbsolute(rawSource) ? rawSource : path.resolve(projectRoot, rawSource)
 const sourceInfo = await stat(sourceDirectory).catch(() => null)
 if (!sourceInfo?.isDirectory()) throw new Error(`Mod source directory does not exist: ${sourceDirectory}`)
 
