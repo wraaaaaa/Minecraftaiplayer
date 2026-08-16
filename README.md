@@ -4,6 +4,116 @@
 
 当前是统一模式的陪伴型自主玩家。语言模型负责理解自然语言、聊天与任务级决策；持续跟随、避障、上岸、穿门、动作表情和安全待机在本地客户端逐 Tick 执行，不会每走一步或每放一个方块都请求模型。Bot 没有玩家任务时会回到登记住所或“第一个家”，进入零模型调用待机；空闲时用本地确定性步骤自给自足（食物、工具、住所、装备、附魔），但不再把“通关末地”当作自主目标。有新玩家经过时可先陪走并询问是否需要跟随，遭拒后自动回家。所有采集、合成、建造、附魔和跨维度工具仍保留给玩家明确任务使用。
 
+## 部署与配置（从零开始）
+
+> 快速结论：Windows 下双击根目录 `Install-and-Open-Control-Center.cmd` 即可自动完成安装并打开总控台；随后在总控台填写服务器地址、Bot 游戏名和模型密钥，点“启动”。手动/二次部署与全部参数说明见下文。
+
+### 一、环境要求
+
+| 项 | 要求 | 说明 |
+| --- | --- | --- |
+| 操作系统 | Windows 10/11 或 Windows Server | 当前一键脚本仅支持 Windows；Node/Java 核心代码可移植，但 Linux 无界面服务脚本尚未提供 |
+| Node.js | ≥ 22（推荐 22 LTS） | 一键脚本可自动安装便携版 22.12.0 |
+| Java（构建用） | JDK 25 或 26 | 用于 Gradle 构建 Fabric 桥；一键脚本可自动安装 Temurin 25 |
+| Minecraft 运行时 | OpenJDK 25（官方 java-runtime-epsilon） | 无界面客户端实际运行用 |
+| 目标服务器 | Fabric 26.2 模组服（offline-mode:false） | 也可用“局域网兼容模式”加入本地/局域网 LAN 世界 |
+| 网络 | 可访问 npm 镜像、BMCLAPI/CERNET 资源镜像、GitHub 镜像 | 中国大陆已内置回退下载路线 |
+
+版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 0.1.0`。
+
+### 二、一键安装（推荐）
+
+1. 双击项目根目录 `Install-and-Open-Control-Center.cmd`（等价命令：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts\install-windows.ps1`）。
+2. 脚本按顺序自动完成：
+   - 检测并安装 Node.js（缺失则下载便携版 22.12.0）与 Java 25（缺失则下载 Temurin 25）；
+   - `npm install` → `npm run check` → `npm run build`；
+   - `npm run prefetch:minecraft` 下载并 SHA-1/SHA-256 校验 Minecraft 26.2 客户端资源；
+   - `gradlew build` 构建 Fabric 桥，并准备无界面客户端（HeadlessMc + 桥 jar + Fabric API + 万用皮肤加载器）；
+   - 把 `config\*.example.json` 复制为 `userdata\config\*.json`、`.env.example` 复制为 `userdata\.env`（不覆盖已存在文件）；
+   - 启动本机总控台并打开 `http://127.0.0.1:3210`。
+3. 在总控台完成配置（见“四、配置”），点“启动”。
+
+### 三、手动部署 / 二次部署
+
+1. `npm install`
+2. `npm run build`（生成 `dist/`）
+3. `npm run prefetch:minecraft`（下载并校验 26.2 资源）
+4. 构建桥模组（需要 JDK 25/26 在 PATH 或设置 `JAVA_HOME`）：
+
+   ```powershell
+   cd fabric-bridge
+   .\gradlew.bat build --no-daemon
+   ```
+
+   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-0.1.0.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
+5. 初始化用户数据目录（只复制模板，不覆盖已有文件）：
+
+   ```powershell
+   New-Item -ItemType Directory -Force userdata\config, userdata\data | Out-Null
+   Copy-Item config\bot.example.json          userdata\config\bot.json
+   Copy-Item config\persona.example.json      userdata\config\persona.json
+   Copy-Item config\prompts.example.json      userdata\config\prompts.json
+   Copy-Item config\mods.example.json         userdata\config\mods.json
+   Copy-Item config\skin.example.json         userdata\config\skin.json
+   Copy-Item config\behavior-rules.example.json userdata\config\behavior-rules.json
+   Copy-Item .env.example userdata\.env
+   ```
+
+6. 填写 `userdata\.env` 与 `userdata\config\bot.json`（见下）。
+7. 启动：`npm run start:webui`（只开总控台）或 `npm run start:all`（直接启动 Bot）。
+
+### 四、配置（WebUI 与本地文件等价）
+
+总控台 `http://127.0.0.1:3210` 只监听本机。页面里改任何设置都会写回 `userdata\` 下的 JSON，与直接编辑本地文件等价。下表按“功能 → WebUI 位置 → 本地文件/字段”列出。
+
+| 功能 | WebUI 位置 | 本地文件 / 字段 |
+| --- | --- | --- |
+| 服务器地址、端口、连接模式（direct/lan） | “服务器与客户端” | `userdata\config\bot.json` → `server.host/port/connectionMode/version` |
+| Bot 游戏名（离线登录名，3–16 位字母数字下划线） | “服务器与客户端”→“Bot 游戏名” | `bot.json` → `server.username` |
+| EasyAuth 自动登录/注册 | “服务器与客户端” | `bot.json` → `easyAuth.*`；密码只存 `userdata\.env` 的 `MINECRAFT_LOGIN_PASSWORD` |
+| 模型供应商、模型 ID、端点、推理强度 | “模型” | `bot.json` → `model.provider/model/baseUrl/reasoningEffort` |
+| API Key | “模型”/“密钥”区 | `userdata\.env` → `DEEPSEEK_API_KEY` / `ARK_API_KEY` / `MIMO_API_KEY` / `OPENAI_API_KEY` |
+| Token / 工具步数硬预算 | “模型”/“Agent” | `bot.json` → `model.agentMaxSteps/agentMaxApiCalls/agentMaxTaskTokens` 等 |
+| AI 对外角色名（“小默”） | “兼容角色名” | `userdata\config\persona.json` → `name` |
+| 人设、语气、价值观 | “提示词与玩家画像” → `SOUL.md` / `IDENTITY.md` | `userdata\data\agent-prompts\SOUL.md`、`IDENTITY.md`（热读取，无需重启） |
+| 行为准则（禁止破坏玩家财产等） | “安全” | `userdata\config\behavior-rules.json` |
+| 模组来源文件夹与自动同步 | “模组” | `userdata\config\mods.json` → `sourceDirectory` / `syncOnClientStart` |
+| 皮肤 | “Bot 皮肤” | `userdata\config\skin.json` + `userdata\data\skins\<Bot名>.png` |
+| 游戏内语音（TTS） | “游戏内语音” | `bot.json` → `speech.*`；密钥在 `userdata\.env` |
+| 人数监听自动上下线 | “玩家监听” | `bot.json` → `playerMonitor.*` |
+| 存储路径（记忆/经验/任务/住所） | “存储” | `bot.json` → `storage.*`（相对路径自动解析到 `userdata\` 下） |
+| 首个家 / 自主生存开关 | “自主生存与任务” | `bot.json` → `autonomy.*` |
+
+要点：
+
+- **密钥只在 `userdata\.env`**：WebUI 只显示“已配置/未配置”，不返回值；密钥不会进入 Git、日志、游戏聊天或模型提示。
+- **提示词热读取**：`SOUL.md`/`IDENTITY.md` 等每次模型决策前重新读取，改完下次对话即生效；改“兼容角色名”、`server.username`、存储路径等建议重启。
+- **配置字段里的相对路径**（如 `storage.memoryFile:"data/memory.json"`）会自动解析到 `userdata\` 下，老配置无需改写。
+
+### 五、启动、停止与日常使用
+
+| 操作 | 方式 |
+| --- | --- |
+| 打开总控台 | 双击 `Open-WebUI.cmd`，或 `npm run start:webui`；地址 `http://127.0.0.1:3210` |
+| 启动 Bot | 总控台“启动”按钮，或双击 `Start-Bot.cmd`，或 `npm run start:all` |
+| 停止 Bot | 总控台“停止”按钮，或双击 `Stop-Bot.cmd`，或 `npm run stop:all` |
+| 重启 | 总控台“重启”按钮 |
+| 测试启动（绕过人数监听） | 总控台“测试启动（绕过监听）”按钮 |
+
+首次冷启动约 1–2 分钟（同步模组 + 拉起无界面 Fabric 客户端并进服）；再次点“启动”会很快提示“已在运行”。进程/PID 记录在 `userdata\data\*.pid.json`，日志在 `logs\`。
+
+### 六、用户数据目录与升级
+
+见下一节“用户数据统一目录 `userdata/`”。升级新版本时只需替换 `userdata\` 一个文件夹；模板（`config\*.example.json`、`config\agent-prompts.example\`）随源码更新，`mods\`、`logs\`、`.runtime\`、`HeadlessMC\` 属于版本绑定/可再生内容，留在项目根目录。
+
+### 七、常见问题（快速排查）
+
+- **点按钮报 `failed to fetch`**：总控台后台进程没在运行。运行 `npm run start:webui` 后刷新页面。
+- **端口占用 / 提示先停止旧控制台**：先停掉旧目录的 Bot 和 WebUI（`Stop-Bot.cmd`、`npm run stop:webui`）。
+- **模型不回复**：检查 `userdata\.env` 里当前供应商的 Key 是否存在、`model.model`/`baseUrl` 是否正确。
+- **进不了 EasyAuth 服务器**：Bot 游戏名必须 `^[A-Za-z0-9_]{3,16}$`（无空格/连字符/中文），密码变量名与 `.env` 一致。
+- **`unknown packet id` 断线**：服务器有客户端模组缺失，在“模组”里配置来源文件夹并点“立即同步”后重新进服。
+
 > 模组兼容边界：同步器可以复制未来新增的有效 `.jar` 并记录校验值，但不能保证“任意新模组”都兼容。新增模组必须同时适配 Minecraft 26.2、Fabric Loader、Java 25、客户端侧运行与无界面环境；依赖缺失、Mixin 冲突、仅服务端模组、需要渲染/音频窗口的模组仍可能导致启动失败。每次服务器增删模组后都应在 WebUI 重新同步并做一次真实进服测试。
 
 ## 用户数据统一目录 `userdata/`

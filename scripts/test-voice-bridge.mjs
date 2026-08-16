@@ -1,10 +1,15 @@
 import { randomUUID } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { access, readFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
 
 const CONFIRMATION = '--send-test-tone'
 const projectRoot = path.resolve(import.meta.dirname, '..')
+const userDataRoot = path.resolve(process.env.MCAI_USERDATA_DIR?.trim() || path.join(projectRoot, 'userdata'))
+
+async function exists(file) {
+  try { await access(file); return true } catch { return false }
+}
 
 if (!process.argv.includes(CONFIRMATION)) {
   console.error(`用法: node scripts/test-voice-bridge.mjs ${CONFIRMATION}`)
@@ -20,7 +25,9 @@ if (!process.argv.includes(CONFIRMATION)) {
 }
 
 async function run() {
-  const configText = (await readFile(path.join(projectRoot, 'config', 'bot.json'), 'utf8')).replace(/^\uFEFF/u, '')
+  const botConfig = path.join(userDataRoot, 'config', 'bot.json')
+  const configFile = (await exists(botConfig)) ? botConfig : path.join(projectRoot, 'config', 'bot.example.json')
+  const configText = (await readFile(configFile, 'utf8')).replace(/^\uFEFF/u, '')
   const config = JSON.parse(configText)
   const host = String(config?.server?.bridgeHost ?? '127.0.0.1')
   const port = Number(config?.server?.bridgePort ?? 8765)

@@ -6,6 +6,9 @@
 
 
 > **用户数据统一目录 `userdata/`**：`.env`、`config/*.json`、`data/` 已全部合并到项目根目录的 `userdata/`（可用 `MCAI_USERDATA_DIR` 覆盖位置）。升级版本 = 只替换 `userdata/` 一个文件夹。配置字段里的相对路径（如 `data/memory.json`、`config/persona.json`）仍按原字符串填写，由 `src/core/user-data.ts` 的 `resolveUserData()` 解析到 `userdata/` 下；仓库模板 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 留在根目录。旧目录可跑 `node scripts/migrate-userdata.mjs` 一次性迁移。
+
+> **本轮交付（文档 + 修复）**：README.md 最前新增“部署与配置（从零开始）”完整章节（环境安装、WebUI/本地文件配置对照、启动停止、常见问题）；PARAMETERS.md 顶部新增“存储位置速查”。修复：`scripts/test-voice-bridge.mjs` 改读 `userdata/config/bot.json`（带 example 回退）；`src/webui/server.ts` 为行为规则增加 `config/behavior-rules.example.json` 回退；`config/behavior-rules.json` 拆为跟踪模板 `config/behavior-rules.example.json` + 运行时 `userdata/config/behavior-rules.json`。
+
 ## 0. 接手时先做什么
 
 当前工作机有两个目录：

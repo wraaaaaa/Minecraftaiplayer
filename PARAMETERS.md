@@ -2,9 +2,25 @@
 
 本文专门回答“某个参数存在哪里、改什么值、产生什么效果”。用户数据统一放在项目根目录的 `userdata/` 子目录（可用环境变量 `MCAI_USERDATA_DIR` 改到别处）；配置字段里的相对路径会自动解析到 `userdata/` 下。推荐双击 `Open-WebUI.cmd` 修改；直接编辑 JSON 时必须保持合法 JSON，改完后重启 Bot。
 
+## 0. 存储位置速查
+
+| 内容 | 位置 |
+| --- | --- |
+| 全部秘密（API Key、EasyAuth 密码、TTS 密钥） | `userdata/.env` |
+| 运行配置（bot/persona/prompts/mods/skin/behavior-rules） | `userdata/config/*.json` |
+| 记忆 / 经验 / 任务 / 住所 / 自有方块 / 发育检查点 | `userdata/data/{memory,experience,tasks,autonomy-state,owned-blocks,progression}.json` |
+| 运行时提示词（SOUL/IDENTITY/rules/TOOLS/MEMORY） | `userdata/data/agent-prompts/*.md` |
+| 玩家画像（每人一份 USER.md） | `userdata/data/player-profiles/<uuid-or-name>/USER.md` |
+| 皮肤 | `userdata/data/skins/<Bot名>.png` |
+| 诊断 / 实时状态 / 桥令牌 / PID | `userdata/data/diagnostics.json`、`runtime-status.json`、`bridge-token.txt`、`*.pid.json` |
+| 新部署模板（随源码更新，不属用户数据） | `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` |
+| 日志 / 运行时 / 模组（版本绑定或可再生） | 项目根目录的 `logs/`、`.runtime/`、`HeadlessMC/`、`mods/` |
+
+整体 `userdata/` 目录可用环境变量 `MCAI_USERDATA_DIR` 移到任意位置；升级新版本只需替换 `userdata/` 一个文件夹。
+
 ## 1. API Key 与登录密码
 
-实际秘密只保存在根目录 `userdata/.env`（已被 `.gitignore` 排除，不会推送）：
+实际秘密只保存在 `userdata/.env`（用户数据目录，已被 `.gitignore` 排除，不会推送）：
 
 ```dotenv
 MINECRAFT_LOGIN_PASSWORD=EasyAuth登录密码
