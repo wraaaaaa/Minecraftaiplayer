@@ -63,7 +63,7 @@ npm test
 6. 修改 Java 桥后必须重新构建并把新 jar 复制到隔离客户端；只运行 TypeScript 构建不会更新游戏内代码。
 7. 正式推送前必须删除本地测试 API Key，并扫描当前工作树和 Git 历史。
 
-### 0.1 2026-08-07 分玩家称呼、适应性寻路、正确工具与二次 Token 收缩（最新）
+### 0.2 2026-08-07 分玩家称呼、适应性寻路、正确工具与二次 Token 收缩（最新）
 
 - `AddressingEngine.decide()` 新增可选 `aliases` 参数。`FabricBridgeClient`/`MinecraftClient` 在寻址前异步调用 `PromptWorkspace.botAliases(identity)`，所以只加载当前发言者 `USER.md` 中“`## 该玩家对 AI 的称呼`”小节的项目符号；同一个昵称不会跨玩家传播。固定配置名、角色名、`!`、距离和连续对话逻辑仍然保留。
 - `PromptWorkspace.ensurePlayerProfile()` 会给旧画像无损补入称呼小节；`appendBotAlias()` 原子追加；`extractDeclaredBotAlias()` 只学习“以后叫你/喊你/称呼你/管你叫”这类明确自述，不把普通聊天里的任意名词当别名。称呼最多 32 个、单个最长 24 字符，WebUI 仍通过现有玩家画像编辑器直接修改同一文件。
@@ -76,7 +76,7 @@ npm test
 - `follow_player` 现在即使第一次 A* 返回 no route 也返回 `continuous_follow_engaged` 并保留 `MovementTarget.follow=true`；短暂看不到非 owner 玩家时保留最后坐标，owner 继续使用定位栏分段。到达跟随距离只释放按键，不清除模式；`stop`、冲突任务、断桥/换世界仍会清理导航和恢复控制器。物理上不存在对目标离线、跨未加载维度或服务器断线的“绝不丢失”保证，文档不得这样宣称。
 - 新 JAR 已在私有运行目录构建并替换。无模型实服桥测试确认连接、`followOk=true`、3 秒和 12 秒均保持 movement，随后 stop 成功；因为目标当时在停止距离内，这不证明门/潜行/开路/搭桥现场全部通过。Java 映射与安全分支已通过完整 Gradle build，复杂障碍仍列为后续实服矩阵。
 
-### 0.2 2026-08-07 总聊天驱动的持续技能与会话压缩修复
+### 0.3 2026-08-07 总聊天驱动的持续技能与会话压缩修复
 
 - 私有运行数据中的任务 `10c6...` 对“你跟我过来”连续选择了五次 `navigate_to`，只追逐当轮观察到的旧坐标；每轮供应商实际输入约为 15584、18893、22252、25600、28955 Token，第六轮在发送前触发 `agent_input_budget_exhausted`。根因不是 Java 跟随器不会工作，而是原生工具 Agent 没有公开长期跟随工具。
 - `AGENT_TOOLS` 现在公开 `follow_player_continuously {player}`，映射到既有 `AgentAction {type:'follow_player'}`。Java `MovementTarget.follow=true` 会持续读取目标实体新位置；到达期望距离时只松开移动键，不清除跟随目标。模型与 `TOOLS.md` 被明确要求只调用一次，禁止用重复 `navigate_to` 模拟。
@@ -90,7 +90,7 @@ npm test
 - 受控真实 DeepSeek 探针使用运行目录私有配置，但只向控制台输出聚合用量和动作类型：模型在 2 次 API 中使用输入 6855、输出 115、总计 6970 Token（推理 26），唯一动作是 `{type:'follow_player',target:'wraaaaaa'}`，最终自然回复长度 51 字符。此探针的执行器是内存 mock，只证明真实模型选工具和会话协议，不冒充服务器动作证据。
 - 随后只启动真实 Fabric 客户端和本地桥、不注册主动模型 handler：客户端进入实际服务器并观察到目标玩家，`follow_player` 返回成功；3 秒与 17 秒的真实 state 都为 `activePrimitive:'movement'`，发送 `stop` 后变为空字符串。第一次将桥等待保留为正式配置的 30 秒时，冷启动客户端未赶上握手；清理后用仅探针内存配置的 90 秒等待复测成功，没有修改 `userdata/config/bot.json`。结束后测试客户端已停止，现有 WebUI 未停止。
 
-### 0.3 2026-08-07 紧急延迟/Token 重构（优先级最高）
+### 0.4 2026-08-07 紧急延迟/Token 重构（优先级最高）
 
 - 现场任务 `0e6f...`（公开文档只保留截断 ID）在约十分钟内进行了 48 次模型工具轮，只从 Y=69 挖到 Y=52，最后以 `agent_step_budget_exhausted:48` 结束。用户侧观察到接近五百万 Token。直接原因是旧版要求模型每挖一格重新决策、每轮重复完整工具表/大世界状态，并且将世界状态在用户目标和 Agent 上下文中发送了两次；4096 输出预算和每轮高推理又放大了耗时与费用。
 - 当前默认是“模型策略 Agent + 原子接口 + 连续运动技能”三层：模型根据自然语言和环境自行选择工具、参数、顺序和替代方案；`gather_resource`、`excavate_safely`、`craft_item`、`smelt_items`、`hunt_for`、`return_to_task_start` 等连续技能只负责逐 Tick 重复运动、安全检查和后置条件，不按聊天关键词自动运行，也不替模型决定总目标。不要把连续运动控制删回逐方块模型调用。
@@ -102,7 +102,7 @@ npm test
 - 能力检测将 DeepSeek 固定为纯文本；MiMo 2.5 自动声明视觉、语音/视频理解和攻略搜索能力。视觉首轮优先读取 15 秒内的 `userdata/data/sensory/latest.png`，否则从真实方块/实体状态生成 128×128 语义俯视 PNG；语音只接受新鲜 `latest-audio.json`，当前 Simple Voice Chat 尚无帧生产器，因此缺帧时必须显示 unavailable。攻略搜索走现有百度/SearXNG 中国可达研究层，网页是不可信参考，不能执行代码。
 - WebUI 已加入上述预算、多模态开关和 MiMo 密钥/预设；总聊天记录每个模型轮的耗时、输入/输出/推理/缓存/累计 Token，并汇总最近任务与 24 小时费用。禁止记录隐藏思维链正文。
 
-### 0.4 2026-08-05 交接增量（历史仍有效）
+### 0.5 2026-08-05 交接增量（历史仍有效）
 
 - 人工 `developmentZone` 已取消。旧 JSON 字段只为升级兼容而解析，`autonomyConfig()` 删除它，WebUI 不显示，启动脚本不传坐标，Java 启动时清空遗留区域。AI 依据结构化环境选意图，Fabric 对每个实际目标执行天然性、玩家结构、方块实体、危险源、碰撞、玩家距离、撤退路线和服务端后置条件检查。
 - 提示词运行源改为 `userdata/data/agent-prompts/{rules.md,IDENTITY.md,SOUL.md,TOOLS.md,MEMORY.md}`；每位玩家自动创建 `userdata/data/player-profiles/<uuid-or-name>/USER.md`。模板位于 `config/agent-prompts.example/`。`SOUL.md` 是核心人设；五份文档可在 WebUI 或本地直接编辑，每次模型决策前重新读取。
@@ -1011,7 +1011,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-fabric-clien
 
 1. 查看 `userdata/data/bot.pid.json`、`userdata/data/minecraft-client.pid.json` 是否属于当前项目根。
 2. 查看 `logs/background.stderr.log`、`logs/minecraft-client.stderr.log`。
-3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-0.1.0.jar` 存在。
+3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.0.0.jar` 存在。
 4. 用 `Start-Bot.cmd` 成对启动，不要只开 Java 或只开 Node。
 5. 确认桥 host/port 相同且 `userdata/data/bridge-token.txt` 非空。
 6. 如果项目移动过，删除已经停止进程遗留的 PID 文件；停止脚本会做所有权检查，不要手工杀不明 PID。
@@ -1196,7 +1196,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 
 - TypeScript：`npm run check` 成功。
 - Node：最终候选工作树 `npm test` 为 74 tests、74 pass、0 fail；数量只代表本快照，后续以当次输出为准。
-- Fabric：Java 25 下 `gradlew.bat clean build --no-daemon` 成功，新 jar 已复制到 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-0.1.0.jar`。
+- Fabric：Java 25 下 `gradlew.bat clean build --no-daemon` 成功，新 jar 已复制到 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.0.0.jar`。
 - 生产与审计：`npm run build` 成功；`npm run audit` 扫描 110 个跟踪文件，0 个秘密、编码、乱码、控制字符或 JSON 问题；`git diff --check` 成功。
 - 真实服扫描和动作验证只记录动作后置条件，不在公开文档保存服务器地址或实际测试坐标。
 - 第一次采集暴露并复现连续挖掘状态机 bug；测试区产生的旧圆石掉落属于此授权测试遗留物。
@@ -1254,7 +1254,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 - `npm test`：76 tests、76 pass、0 fail；新增测试验证诊断文件持久化，以及完整动作名/参数/错误只进入诊断而不进入游戏聊天。
 - `node --check public/webui/app.js`：通过。
 - `npm run build`：通过。
-- Fabric Java 25 build：通过；新 jar 已覆盖 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-0.1.0.jar`。
+- Fabric Java 25 build：通过；新 jar 已覆盖 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.0.0.jar`。
 - 后台完整重启后，Node 控制器、Minecraft 客户端和 WebUI 均运行，Fabric 重新握手并达到 `in_world`。初次位于石砖/楼梯围场且已加载方块内无出口时，连续两次 `return_to_zone` 都立即返回 `no collision-safe loaded route`，没有把开始移动误报成成功；完整原因进入诊断。重生到自然地形后，状态上报出现 `following_path 3/13`、`19/30` 等逐段进度，坐标持续改变；玩家随后发出的 `come_to_player` 也由同一规划器接受。最终玩家要求停止移动后，实测 `activePrimitive=""`、`navigationStatus="idle"`。这证明安全拒绝、路线驱动和停止释放按键均工作，但尚未建立固定长墙/U 形墙的可重复实服测试地图，不能把任意复杂地形宣称为已验证。
 - 最新一次完整重启还包含住所控制器 A* 接入；Java 编译通过，运行 jar 与构建 jar SHA-256 一致。自动避难的路线行为需等服务器再次进入夜间或人工下达可触发 `seek_shelter` 的条件继续实测。
 - 浏览器回归：WebUI 显示运行进程、`in_world`、实时 `navigationStatus`、总聊天导航/说明/时间线/任务侧栏；“仅警告与错误”筛选工作，能展开最新任务的完整本机错误，操作后仍为“设置已同步”；浏览器控制台 0 warning/error。
