@@ -317,7 +317,8 @@
       <section id="mods" class="panel">
         <div class="section-heading"><div><p class="eyebrow">MOD COMPATIBILITY</p><h2>服务器模组</h2></div><details open><summary>能兼容未来任意新模组吗？</summary><p>不能无条件保证。同步器会自动接纳未来新增的有效 JAR、保留项目桥并生成兼容提示，但 Fabric/Java 版本、客户端依赖、Mixin、渲染与 HeadlessMC 冲突仍必须通过实际启动验证。请使用服主提供的同版本客户端包。</p></details></div>
         <div class="form-grid two"><label class="span-two">模组来源文件夹<input id="modsSource" type="text" placeholder="例如 D:\Minecraft\服务器客户端模组"></label><label class="switch"><input id="syncOnStart" type="checkbox"><span></span>每次启动客户端前自动同步</label><label>排除文件名规则（每行一个正则）<textarea id="excludePatterns" rows="4"></textarea></label></div>
-        <div class="inline-actions"><button id="syncModsButton" class="button primary">立即同步模组</button><span id="modsSummary" class="muted"></span></div>
+        <div class="inline-actions"><button id="syncModsButton" class="button primary">立即同步模组</button><button id="importModsButton" class="button ghost">导入多个 Mod（.jar）</button><input id="modsFileInput" type="file" accept=".jar" multiple hidden><span id="modsSummary" class="muted"></span></div>
+        <p class="muted">导入的 Mod 会保存到项目根的 <code>mods</code> 子文件夹，之后可配合“模组来源文件夹”或重启客户端同步进游戏。</p>
         <div id="modList" class="mod-list"></div>
       </section>
 

@@ -104,6 +104,18 @@ async function body(request: IncomingMessage): Promise<unknown> {
   return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown
 }
 
+async function bodyLarge(request: IncomingMessage, maxBytes: number): Promise<unknown> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.length
+    if (size > maxBytes) throw new Error(`请求内容超过 ${Math.round(maxBytes / 1024 / 1024)} MiB 限制`)
+    chunks.push(buffer)
+  }
+  return JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}') as unknown
+}
+
 function object(value: unknown, name: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${name} 必须是对象`)
   return value as Record<string, unknown>
@@ -328,6 +340,29 @@ async function importSkin(value: unknown): Promise<{ width: number; height: numb
   return { ...dimensions, file: relativeSkinFile }
 }
 
+async function importMods(value: unknown): Promise<{ imported: string[]; directory: string }> {
+  const candidate = object(value, 'modImport')
+  const files = candidate.files
+  if (!Array.isArray(files) || files.length === 0) throw new Error('files 必须是非空数组')
+  const targetDirectory = path.join(projectRoot, 'mods')
+  await mkdir(targetDirectory, { recursive: true })
+  const imported: string[] = []
+  for (const raw of files) {
+    const entry = object(raw, 'modFile')
+    const name = entry.name
+    if (typeof name !== 'string' || path.basename(name) !== name || !name.toLowerCase().endsWith('.jar')) {
+      throw new Error(`无效的 Mod 文件名（仅允许单个 .jar 文件名）：${String(name)}`)
+    }
+    const dataBase64 = entry.dataBase64
+    if (typeof dataBase64 !== 'string' || dataBase64.length === 0) throw new Error(`Mod ${name} 缺少数据`)
+    const data = Buffer.from(dataBase64, 'base64')
+    if (data.length < 4 || data[0] !== 0x50 || data[1] !== 0x4B) throw new Error(`不是有效的 JAR/ZIP 文件：${name}`)
+    await writeFile(path.join(targetDirectory, name), data)
+    imported.push(name)
+  }
+  return { imported, directory: 'mods' }
+}
+
 async function sendSkinImage(response: ServerResponse): Promise<void> {
   const skin = await readJson<SkinConfig>(files.skin, files.skinExample)
   const target = path.resolve(projectRoot, skin.skinFile)
@@ -405,6 +440,9 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
   if (request.method === 'POST' && pathname === '/api/mods/sync') {
     const result = await execFileAsync(process.execPath, [path.join(projectRoot, 'scripts', 'sync-client-mods.mjs')], { cwd: projectRoot, timeout: 5 * 60_000, windowsHide: true })
     return json(response, 200, { ok: true, output: result.stdout.trim(), snapshot: await snapshot() })
+  }
+  if (request.method === 'POST' && pathname === '/api/mods/import') {
+    return json(response, 200, { ok: true, ...(await importMods(await bodyLarge(request, 512 * 1024 * 1024))) })
   }
   if (request.method === 'POST' && pathname === '/api/runtime/test-start') {
     await mkdir(path.dirname(files.testFlag), { recursive: true })

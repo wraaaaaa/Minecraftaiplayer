@@ -468,6 +468,24 @@ $('testStartButton').addEventListener('click', () => action('/api/runtime/test-s
 $('stopButton').addEventListener('click', () => action('/api/runtime/stop', 'Bot 已停止'))
 $('restartButton').addEventListener('click', () => action('/api/runtime/restart', 'Bot 已重新启动'))
 $('syncModsButton').addEventListener('click', async () => { try { if (dirty) await save(); await request('/api/mods/sync', { method: 'POST', body: '{}' }); toast('服务器模组同步完成'); await load() } catch (error) { toast(error.message, true) } })
+$('importModsButton').addEventListener('click', () => $('modsFileInput').click())
+$('modsFileInput').addEventListener('change', async () => {
+  const input = $('modsFileInput')
+  const files = [...input.files]
+  if (!files.length) return
+  try {
+    const payload = { files: await Promise.all(files.map(file => new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => { const dataUrl = String(reader.result); resolve({ name: file.name, dataBase64: dataUrl.includes(',') ? dataUrl.slice(dataUrl.indexOf(',') + 1) : dataUrl }) }
+      reader.onerror = () => reject(reader.error)
+      reader.readAsDataURL(file)
+    }))) }
+    const result = await request('/api/mods/import', { method: 'POST', body: JSON.stringify(payload) })
+    toast(`已导入 ${result.imported.length} 个 Mod`)
+    input.value = ''
+    await load()
+  } catch (error) { toast(error.message, true) }
+})
 $('testModelButton').addEventListener('click', async () => { try { $('modelTestResult').textContent = '正在进行一次最小请求…'; const result = await request('/api/model/test', { method: 'POST', body: '{}' }); $('modelTestResult').textContent = `${result.model} · ${result.elapsedMs}ms · ${result.effectiveEffort} · ${result.usage?.totalTokens ?? '未返回'} Token · 视觉${result.capabilities?.vision ? '开' : '关'}/语音${result.capabilities?.audio ? '开' : '关'}/搜索${result.capabilities?.webSearch ? '开' : '关'}`; toast('模型接口测试成功') } catch (error) { $('modelTestResult').textContent = ''; toast(error.message, true) } })
 $('refreshLogsButton').addEventListener('click', refreshStatus)
 $('refreshCentralChatButton').addEventListener('click', refreshCentralChat)
