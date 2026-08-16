@@ -20,7 +20,9 @@ interface PlayerMonitorState {
 const projectRoot = process.cwd()
 const stateFile = path.join(projectRoot, 'data', 'player-monitor-state.json')
 const testFlagFile = path.join(projectRoot, 'data', 'test-mode.flag')
-const botPidFile = path.join(projectRoot, 'data', 'bot.pid.json')
+// The Minecraft client is what actually joins the server and occupies a player slot;
+// check its pid (not the Node controller pid) when deciding whether to subtract the bot.
+const botPidFile = path.join(projectRoot, 'data', 'minecraft-client.pid.json')
 
 function log(message: string): void {
   console.log('[' + new Date().toISOString() + '] ' + message)

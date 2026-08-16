@@ -19,7 +19,8 @@
 
 - 新增 `playerMonitor` 配置（`config/bot.json`）：`src/player-monitor.ts` 作为独立进程（`npm run player-monitor` / `stop:player-monitor`，PID 在 `data/player-monitor.pid.json`）用 `src/network/server-status.ts` 的 Server List Ping（协议版本 776）轮询在线人数——该查询是短暂的未登录 TCP 连接，不占服务器人数空位。人类玩家（总数减掉 Bot 自己）在线满 `onlineAfterMs`（默认 1 分钟）自动运行 `start-all-background.ps1`，无人类玩家满 `offlineAfterMs`（默认 30 分钟）自动运行 `stop-all-background.ps1`；状态持久化在 `data/player-monitor-state.json`。
 - WebUI 新增“测试启动（绕过监听）”按钮 → `POST /api/runtime/test-start`：写 `data/test-mode.flag` 后直接启动 Bot；监听进程看到该标志就跳过自动上下线，手动 `POST /api/runtime/stop`（或 restart）会清除标志恢复正常。
-- 模组握手跳过：`config/mods.json` 新增 `skipHandshakeVerification`。为 `true` 时 `start-headless-client.ps1` 跳过 `sync-client-mods.mjs`，并在 JVM 加入 `-Dfabric.loader.disableHandshake=true`，让 Bot 以最小客户端（bridge + Fabric API）直接进服玩原版内容，避免每个新服务端 mod 都要同步适配。这是客户端侧跳过：若目标服在服务端强制校验 mod，仍需安装对应模组，效果须实服验证。
+- 模组校验跳过（实测边界见下）：`config/mods.json` 新增 `skipHandshakeVerification`。为 `true` 时 `start-headless-client.ps1` 跳过 `sync-client-mods.mjs`，并设置 `MCAI_SKIP_REGISTRY_SYNC=true` 环境变量（HeadlessMc 用独立 JVM 启动客户端，不转发任意 `-D` 系统属性，所以用环境变量传递），由 bridge 的两个 Mixin——`ClientRegistrySyncMixin`（cancel `ClientRegistrySyncHandler.checkRemoteRemap`）与 `MappedRegistryRemapMixin`（cancel `MappedRegistry.remap`）——跳过 Fabric API 注册表同步的严格校验，让 Bot 通过 configuration phase。
+- **模组跳过的真实边界（2026-08-16 实服排查）**：跳过 registry sync 后客户端能通过 configuration phase，但若服务器缺失的是“客户端+服务器模组”（如 `create`/`moredelight`/`travelersbackpack`），这些模组会在 play phase 发送自定义数据包，客户端会因 `DecoderException: Received unknown packet id` 断线。因此“完全跳过模组验证玩原版”只对**纯服务端模组**（`environment: server`）成立；对客户端模组，客户端仍必须安装对应 jar（把它们放进 `config/mods.json.sourceDirectory` 重新同步）。这是 Fabric 协议的根本约束，不是可以继续 patch 的 bug。默认 `skipHandshakeVerification=false`（同步模组、不做跳过）。
 
 ### 0.1 2026-08-07 水域/跨维度/交换/管理通道交接增量
 

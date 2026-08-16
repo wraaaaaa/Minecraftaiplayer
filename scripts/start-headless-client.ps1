@@ -187,7 +187,8 @@ $arguments = @(
     '-Dhmc.exit.on.failed.command=true'
 )
 if ($skipHandshakeVerification) {
-    $arguments += '-Dfabric.loader.disableHandshake=true'
+    $env:MCAI_SKIP_REGISTRY_SYNC = 'true'
+    $arguments += '-Dmcai.skipRegistrySync=true'
 }
 $arguments += @(
     '-jar',

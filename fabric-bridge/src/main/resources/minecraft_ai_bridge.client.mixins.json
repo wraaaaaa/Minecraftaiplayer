@@ -2,7 +2,7 @@
   "required": true,
   "package": "kim.ciallo.minecraftai.bridge.mixin",
   "compatibilityLevel": "JAVA_25",
-  "client": ["LivingEntityDamageMixin"],
+  "client": ["LivingEntityDamageMixin", "ClientRegistrySyncMixin", "MappedRegistryRemapMixin"],
   "injectors": {
     "defaultRequire": 1
   }

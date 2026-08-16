@@ -291,7 +291,7 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 
 - 服务器模组来源：`config/mods.json` 的 `sourceDirectory`。
 - 启动自动同步：`syncOnClientStart`；排除正则：`excludeFilePatterns[]`。
-- 跳过模组握手校验：`skipHandshakeVerification`。设为 `true` 后客户端不再同步服务器模组，并在 JVM 加入 `-Dfabric.loader.disableHandshake=true` 跳过 Fabric 模组协商，让 Bot 以最小客户端直接进服玩原版内容；效果需在目标服实服验证（若服务端强制校验则仍需安装对应模组）。
+- 跳过模组校验：`skipHandshakeVerification`。设为 `true` 后客户端不再同步服务器模组，并设置 `MCAI_SKIP_REGISTRY_SYNC=true` 环境变量，由 bridge 的 `ClientRegistrySyncMixin` + `MappedRegistryRemapMixin` 跳过 Fabric API 注册表同步。**实测边界**：跳过只对纯服务端模组（`environment: server`）有效；若服务器缺失的是客户端模组（如 create、moredelight、travelersbackpack），进服后仍会因自定义数据包（`unknown packet id`）断线，客户端必须安装对应 jar 并重新同步。
 - 受管理模组清单：`.runtime/minecraft/managed-mods.json`（含文件名、大小、SHA-256）。
 - Bot 日志：`logs/bot.log`；日志参数：`config/bot.json` 的 `logging`。
 - Minecraft 日志：`.runtime/minecraft/logs/latest.log`。
