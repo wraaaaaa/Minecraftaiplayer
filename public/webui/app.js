@@ -211,7 +211,7 @@ function renderStatus(snapshot) {
   $('taskQueueSummary').textContent = snapshot.tasks ? `执行中 ${taskCounts.running || 0}，排队 ${taskCounts.queued || 0}，完成 ${taskCounts.completed || 0}，失败/拒绝 ${taskCounts.failed || 0}` : '尚无任务记录'
   const progression = snapshot.progression
   $('progressionSummary').textContent = progression
-    ? `${progression.stage || 'survive'}；最近：${progression.lastAction || '等待'}`${progression.lastResult ? `（${progression.lastResult.ok ? '成功' : '失败'}）` : ''}`
+    ? `${progression.stage || 'survive'}；最近：${progression.lastAction || '等待'}${progression.lastResult ? `（${progression.lastResult.ok ? '成功' : '失败'}）` : ''}`
     : '尚未生成发育进度文件'
   $('modsSummary').textContent = snapshot.manifest.sourceDirectory ? `来源：${snapshot.manifest.sourceDirectory}` : '尚未设置模组来源'
   $('modList').replaceChildren(...mods.map(mod => {
