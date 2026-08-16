@@ -6,6 +6,20 @@
 
 > 模组兼容边界：同步器可以复制未来新增的有效 `.jar` 并记录校验值，但不能保证“任意新模组”都兼容。新增模组必须同时适配 Minecraft 26.2、Fabric Loader、Java 25、客户端侧运行与无界面环境；依赖缺失、Mixin 冲突、仅服务端模组、需要渲染/音频窗口的模组仍可能导致启动失败。每次服务器增删模组后都应在 WebUI 重新同步并做一次真实进服测试。
 
+## 用户数据统一目录 `userdata/`
+
+所有个人化/用户数据都集中在项目根目录的 `userdata/` 子目录，升级到新版本时**只替换这一个文件夹**即可无损使用新版本：
+
+- `userdata/.env`：API Key、EasyAuth 密码等全部秘密。
+- `userdata/config/`：`bot.json`、`persona.json`、`prompts.json`、`mods.json`、`skin.json`、`behavior-rules.json`。
+- `userdata/data/`：记忆、经验、任务、住所、自有方块、发育检查点、玩家画像、运行时提示词、皮肤、诊断、PID 与桥令牌等全部运行数据。
+
+仓库里的 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 只是新部署用的模板，属于源码而非用户数据，升级时会随源码更新。
+
+配置字段里的**相对路径**（如 `storage.memoryFile:"data/memory.json"`、`sensoryDirectory:"data/sensory"`、`agentWorkspace.promptDirectory:"data/agent-prompts"`）仍按原字符串填写，程序会自动解析到 `userdata/` 下（即 `userdata/data/memory.json` 等），所以老 `bot.json` 无需改写；绝对路径则原样使用。
+
+可用环境变量 `MCAI_USERDATA_DIR` 把整个用户数据目录改到任意位置（所有 PowerShell 脚本与 Node 解析器都遵循它）。旧版（把 `.env`、`config/*.json`、`data/` 放在项目根目录）可运行 `node scripts/migrate-userdata.mjs` 一次性迁移。与版本绑定的 `mods/`、`logs/`、`.runtime/`、`HeadlessMC/` 仍留在项目根目录。
+
 ## 当前能力
 
 已实现：
@@ -25,7 +39,7 @@
 - Agent 原子工具覆盖刷新观察、坐标寻路、看向、快捷栏、精确破坏/放置、实体与方块交互、使用/丢弃物品、具体配方、安全 TP、停止和等待；连续技能覆盖持续跟随、采集、通用制作、熔炼/烹饪、安全阶梯矿道与返程、自有掉落、物品交付、自动装备和狩猎。一次只接受一个模型工具调用，技能内部的多 Tick 动作不会重复调用模型。
 - 危险度准备：末地/末影龙任务在执行跟随等主动作前也会强制检查装备，最低为四件附魔黄金等效护甲、同等级武器、安全耐久和至少 16 个安全食物；不足时选择现有最佳装备后详细拒绝。
 - 人数监听自动上下线：`playerMonitor` 用 Server List Ping（不登录、不占人数）轮询服务器，人类玩家在线满 1 分钟自动启动 Bot，人类玩家清空满 30 分钟自动停止；WebUI 提供“测试启动（绕过监听）”按钮可跳过该逻辑直接进服。
-- 跳过模组校验：`config/mods.json` 的 `skipHandshakeVerification` 开启后，客户端不再同步服务器模组，由 bridge 的 Mixin 跳过 Fabric API 注册表同步。注意：这只对**纯服务端模组**有效；若服务器缺失的是**客户端模组**（如 create 等），它们会在进服后发送自定义数据包导致断线，客户端仍须安装对应 jar。
+- 跳过模组校验：`userdata/config/mods.json` 的 `skipHandshakeVerification` 开启后，客户端不再同步服务器模组，由 bridge 的 Mixin 跳过 Fabric API 注册表同步。注意：这只对**纯服务端模组**有效；若服务器缺失的是**客户端模组**（如 create 等），它们会在进服后发送自定义数据包导致断线，客户端仍须安装对应 jar。
 - 住所：AI 自行选择候选环境，Fabric 对施工点逐格验证天然性、玩家结构、容器、危险源、碰撞、撤退路线和其他玩家距离；施工前要求门、普通火把和 23 个同类安全实心方块，住所坐标持久化到单独文件。
 - 独立行为准则：禁止破坏玩家物品、禁止打开玩家容器、未知归属时拒绝破坏、仅允许短时针对实际攻击者自卫。
 - Mineflayer 兼容探针与固定来源的 26.2 协议数据，供诊断使用；目标模组服默认使用原生 Fabric 适配器。
@@ -41,7 +55,7 @@
 - Java 中已经有后置条件完备的连续控制器（狩猎、熔炼、阶梯矿道等）；当前把其中可安全复用的能力作为“技能”开放给模型。它们不是按聊天关键词自动启动的整套任务脚本：只有模型可以选择技能、填写目标参数并根据结果组合下一步。尚未开放的通用菜单和跨维度长链不能冒充完成。
 - 路径与水下生存：有界 A* 记录逐格路线、重新规划、绕开危险落脚点；阶梯挖掘可清理头顶、在洞穴内放置自有垫脚块并以稳定落地作为后置条件；游泳时搜索可呼吸水面，冰下无出口时可破坏天然冰/雪顶部自救。
 - 最高优先玩家定位状态仍可提供方位/距离线索；“跟着我”会由模型启动一次 `follow_player_continuously` 持续技能，Fabric 随玩家实时位置长期重规划，不再反复追逐旧坐标。第一次局部规划无路也不会把持续跟随判为失败；短暂离开实体加载范围时保留最后目标并继续等待，空闲自主发展不会覆盖它。明确停止、冲突的新任务、危险抢占、死亡或断线才会结束；远距离仍可分段寻路，或在管理员授权并开启开关后尝试 TP。
-- 自有方块账本：工作台、熔炉、床、附魔台、住所和上行垫脚块按维度/坐标写入 `data/owned-blocks.json`；只把账本中仍与服务端实际方块一致的设施当作自己的，避免借用或破坏玩家设施。
+- 自有方块账本：工作台、熔炉、床、附魔台、住所和上行垫脚块按维度/坐标写入 `userdata/data/owned-blocks.json`；只把账本中仍与服务端实际方块一致的设施当作自己的，避免借用或破坏玩家设施。
 
 ### 2026-08-11 陪伴模式、低延迟与零 Token 待机
 
@@ -63,7 +77,7 @@
 - `return_home` 工具优先返回当前维度已登记的自建避难所，没有时返回 WebUI“第一个家”。默认第一个家位于主世界中心 `1226,65,199`、半径 10 格；只表示安全位置，不会自动声称那里已有房屋。跨维度时 Agent 必须先解决维度旅行。
 - 物品交换分成两个可验证方向：`give_item_to_player` 接近并把 Bot 自身物品丢给明确玩家；`accept_items_from_player` 只追踪该玩家身边近期可见的匹配掉落物，以 Bot 背包增量确认接收。拿到盔甲后模型可继续调用装备工具；背包满或物品不在玩家附近会把完整原因留在总聊天。
 - 路径上的木门/栅栏门会自动开启，铁门会寻找附近未激活按钮/拉杆；通过后会在仍可交互时尽量关闭或复位。明确坐标的按钮、拉杆、门和门禁也会优先出现在 Agent 的附近方块观察中，可用 `interact_block` 操作。
-- WebUI“总聊天”底部新增最高权限文本栏。它只监听本机 `127.0.0.1`，提交后写入 `data/admin-inbox/` 的单指令原子文件；控制器轮询后停止当前动作、把运行中的普通任务标记为被抢占，并用 `source=webui_admin`、紧急度 100 排到 owner 和其他玩家之前。Bot 未启动时指令保留为待处理，启动后继续。明确要求“停下并原地等候”会进入持久保持状态，普通空闲心跳不会几秒后重新启动；下一条定向玩家/管理指令、遭到攻击或真实低血/缺氧等生存危险才解除。
+- WebUI“总聊天”底部新增最高权限文本栏。它只监听本机 `127.0.0.1`，提交后写入 `userdata/data/admin-inbox/` 的单指令原子文件；控制器轮询后停止当前动作、把运行中的普通任务标记为被抢占，并用 `source=webui_admin`、紧急度 100 排到 owner 和其他玩家之前。Bot 未启动时指令保留为待处理，启动后继续。明确要求“停下并原地等候”会进入持久保持状态，普通空闲心跳不会几秒后重新启动；下一条定向玩家/管理指令、遭到攻击或真实低血/缺氧等生存危险才解除。
 - 游戏聊天出口现在逐句丢弃工具名、参数、内部操作说明、“现在回复玩家”和“已停止移动”等工具回执草稿；若模型把草稿、回执和最终答复混在一起，只保留最后的自然答复。首次开工回应有多套轮换模板，同一玩家不会连续收到完全相同文本。主动发育目标不再重复内嵌完整世界 JSON，避免空闲心跳的额外 Token 膨胀。
 - 阶梯下挖会在每一级重新比较四个方向，下一落脚格下方是空气/液体或无碰撞面时不再沿旧方向挖进洞穴；会换到有真实支撑的天然方向，四向都不安全才明确停止。背包材料换入快捷栏的确认以源槽和目标槽的实际物品栈为准，不再错误要求容器 `stateId` 必须变化。
 
@@ -147,9 +161,9 @@ npm run dashboard
 - 皮肤：导入标准 PNG、选择手臂模型、安装万用皮肤加载器并生成其他玩家使用的皮肤包。
 - 记忆与提示词：可视化编辑完整提示词，查看和导出统一记忆/经验文件。
 
-所有设置最终仍保存在普通 JSON/`.env` 文件中，总控台不是唯一入口，换机器后可以直接携带这些文件。
+所有设置最终仍保存在普通 JSON/`userdata/.env` 文件中，总控台不是唯一入口，换机器后可以直接携带这些文件。
 
-游戏聊天与诊断聊天有明确边界：游戏里只进行自然对话、接受任务、报告完成或用一句话说明“现在做不到”；不会再广播动作名、物品命名空间 ID、调用参数、步骤序号或底层报错。需要排错时打开 WebUI 的“总聊天”，完整原因保存在本机 `data/diagnostics.json`，并在写入前经过密钥、登录信息、服务器地址和本地路径脱敏。
+游戏聊天与诊断聊天有明确边界：游戏里只进行自然对话、接受任务、报告完成或用一句话说明“现在做不到”；不会再广播动作名、物品命名空间 ID、调用参数、步骤序号或底层报错。需要排错时打开 WebUI 的“总聊天”，完整原因保存在本机 `userdata/data/diagnostics.json`，并在写入前经过密钥、登录信息、服务器地址和本地路径脱敏。
 
 ### Agent 与 TP 的设置
 
@@ -197,15 +211,15 @@ WebUI“模型”区域的“玩家任务最大工具步数”对应 `model.agen
 
 ```powershell
 npm install
-Copy-Item config\bot.example.json config\bot.json
-Copy-Item config\persona.example.json config\persona.json
+Copy-Item config\bot.example.json userdata/config/bot.json
+Copy-Item config\persona.example.json userdata/config/persona.json
 ```
 
 `npm install` 使用仓库中的 `.npmrc`，默认从 npmmirror 获取 npm 包。
 
 ### 2. 配置模型、服务器和人设
 
-编辑 `config\bot.json`。默认服务器已设为：
+编辑 `userdata/config/bot.json`。默认服务器已设为：
 
 ```json
 {
@@ -228,9 +242,9 @@ Copy-Item config\persona.example.json config\persona.json
 
 | 想修改的内容 | WebUI 位置 | 本地文件 | 是否需要重启 |
 | --- | --- | --- | --- |
-| 性格、价值观、语气和角色设定 | “提示词与玩家画像”→`SOUL.md（核心人设）` | `data/agent-prompts/SOUL.md` | 不需要；下一次模型决策重新读取 |
-| AI 对外角色称呼 | “兼容角色名”，并同步修改 `IDENTITY.md`、`SOUL.md` 中的旧称呼 | `config/persona.json` 的 `name`，以及 `data/agent-prompts/IDENTITY.md`、`SOUL.md` | 建议重启；Markdown 本身可热读取，但兼容角色名、点名和记忆标签在启动时载入 |
-| 服务器玩家列表和头顶显示的登录名 | “服务器与客户端”→“Bot 游戏名” | `config/bot.json` 的 `server.username` | 必须重启 Minecraft 客户端和 Bot |
+| 性格、价值观、语气和角色设定 | “提示词与玩家画像”→`SOUL.md（核心人设）` | `userdata/data/agent-prompts/SOUL.md` | 不需要；下一次模型决策重新读取 |
+| AI 对外角色称呼 | “兼容角色名”，并同步修改 `IDENTITY.md`、`SOUL.md` 中的旧称呼 | `userdata/config/persona.json` 的 `name`，以及 `userdata/data/agent-prompts/IDENTITY.md`、`SOUL.md` | 建议重启；Markdown 本身可热读取，但兼容角色名、点名和记忆标签在启动时载入 |
+| 服务器玩家列表和头顶显示的登录名 | “服务器与客户端”→“Bot 游戏名” | `userdata/config/bot.json` 的 `server.username` | 必须重启 Minecraft 客户端和 Bot |
 
 用 WebUI 修改“小默”人设：
 
@@ -239,7 +253,7 @@ Copy-Item config\persona.example.json config\persona.json
 3. 如要把角色名从“小默”改成其他称呼，同时修改页面中的“兼容角色名”，并把 `IDENTITY.md`、`SOUL.md` 内所有作为角色称呼的“小默”替换为新名字。
 4. 点击页面顶部“保存全部设置”。只改 Markdown 时下一次对话即可生效；改了“兼容角色名”后点击“重新启动”。
 
-直接修改本地文件时，当前运行文件是 `data/agent-prompts/`，不是 `config/agent-prompts.example/`；后者只是新安装时使用的模板。若想让以后新部署也采用同一人设，再把确认后的 `SOUL.md` 和 `IDENTITY.md` 同步到模板目录。
+直接修改本地文件时，当前运行文件是 `userdata/data/agent-prompts/`，不是 `config/agent-prompts.example/`；后者只是新安装时使用的模板。若想让以后新部署也采用同一人设，再把确认后的 `SOUL.md` 和 `IDENTITY.md` 同步到模板目录。
 
 修改“Bot 游戏名”还要注意：新离线名会产生不同的离线 UUID，EasyAuth 可能要求为新名称执行 `/register`，皮肤文件和皮肤站角色名也应同步改成新登录名。只想改变 AI 自称时不要修改 `server.username`。
 
@@ -247,7 +261,7 @@ Copy-Item config\persona.example.json config\persona.json
 
 人类玩家在单人世界暂停菜单选择“对局域网开放”，然后在 WebUI 将连接模式改为 `lan`（或直接点“扫描局域网世界”）并保持 `auth:"offline"`。Bot 启动时监听 `224.0.2.60:4445`，读取广播里的动态端口后静默加入；无需把世界改成固定端口。同机和同路由器都支持。扫描失败时先检查 Windows 防火墙是否允许 UDP 4445、是否真的已开放 LAN，以及 VPN/虚拟网卡是否抢占组播接口。
 
-编辑 `config\behavior-rules.json` 可以调整行为准则；它是硬策略配置，不应当用来编写人设。
+编辑 `userdata/config/behavior-rules.json` 可以调整行为准则；它是硬策略配置，不应当用来编写人设。
 
 模型配置示例：
 
@@ -279,10 +293,10 @@ Copy-Item config\persona.example.json config\persona.json
 
 ### 3. 注入秘密
 
-可在当前终端、系统服务环境或被 Git 忽略的 `.env` 中设置。最简单的方式是复制模板后填写：
+可在当前终端、系统服务环境或被 Git 忽略的 `userdata/.env` 中设置。最简单的方式是复制模板后填写：
 
 ```powershell
-Copy-Item .env.example .env
+Copy-Item .env.example userdata\.env
 ```
 
 也可以只为当前终端注入：
@@ -292,7 +306,7 @@ $env:DEEPSEEK_API_KEY='你的 API Key'
 $env:MINECRAFT_LOGIN_PASSWORD='你的 EasyAuth 密码'
 ```
 
-改用豆包、MiMo 或 OpenAI 时设置 `ARK_API_KEY`、`MIMO_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `.env`，但不会覆盖终端里已有的同名变量；`.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。没有模型 Key 时 Bot 仍会进入游戏并保持后台连接，但收到 AI 请求会明确失败，不会伪造回答。
+改用豆包、MiMo 或 OpenAI 时设置 `ARK_API_KEY`、`MIMO_API_KEY` 或 `OPENAI_API_KEY`，并让 `apiKeyEnv` 与变量名一致。程序会自动读取项目根目录的 `userdata/.env`，但不会覆盖终端里已有的同名变量；`userdata/.env` 已被 Git 忽略，仍需避免复制到 README、日志或聊天中。没有模型 Key 时 Bot 仍会进入游戏并保持后台连接，但收到 AI 请求会明确失败，不会伪造回答。
 
 ### 4. 构建控制器和 Fabric 桥
 
@@ -318,7 +332,7 @@ npm run prefetch:minecraft
 .\scripts\install-headlessmc.ps1
 ```
 
-然后把服务器客户端模组包合并进隔离实例。真实来源目录只保存在本机 `config/mods.json`；以下用 `C:\MinecraftMods` 举例：
+然后把服务器客户端模组包合并进隔离实例。真实来源目录只保存在本机 `userdata/config/mods.json`；以下用 `C:\MinecraftMods` 举例：
 
 ```powershell
 .\scripts\prepare-fabric-client.ps1 -AdditionalModsDirectory 'C:\MinecraftMods'
@@ -326,7 +340,7 @@ npm run prefetch:minecraft
 
 该步骤会复制本项目桥接模组和固定 Fabric API，并从外部包导入 23 个文件；包内旧版 `fabric-api-0.152.2+26.2.jar` 会按规则跳过，避免重复 mod ID。不要把服务端专用、明确不能装客户端的模组盲目复制进来；优先使用服主提供的同版本客户端整合包。实例位于 `.runtime\minecraft`，不会把模组写进项目源码。
 
-模组来源和同步规则保存于 `config\mods.json`。以后服务器新增 mod 时：把新 jar 放进来源文件夹，删除被替换的旧 jar，然后在总控台点“立即同步”或执行 `npm run sync:mods`。同步器只删除上次清单中由自己复制的 jar，再复制当前来源文件并重建 `.runtime\minecraft\managed-mods.json`，不会删除未知文件。
+模组来源和同步规则保存于 `userdata/config/mods.json`。以后服务器新增 mod 时：把新 jar 放进来源文件夹，删除被替换的旧 jar，然后在总控台点“立即同步”或执行 `npm run sync:mods`。同步器只删除上次清单中由自己复制的 jar，再复制当前来源文件并重建 `.runtime\minecraft\managed-mods.json`，不会删除未知文件。
 
 如默认镜像不可达，可设置：
 
@@ -373,7 +387,7 @@ CialloAI 跟着我
 不要再跟着我了
 ```
 
-每个玩家还可以拥有自己对 Bot 的叫法。打开 WebUI 的玩家画像，进入该玩家的 `USER.md`，在“`## 该玩家对 AI 的称呼`”下按一行一个的格式填写，例如 `- 粉粉`、`- 小不点`；也可以先用已有名称对 Bot 说“以后我就叫你粉粉”。之后只有这名玩家说“粉粉，过来”时会把“粉粉”视为点名，其他玩家不会继承。称呼列表的本地文件位置是 `data/player-profiles/<uuid-or-name>/USER.md`，最多读取 32 个、每个最多 24 个字符；修改后无需重启。
+每个玩家还可以拥有自己对 Bot 的叫法。打开 WebUI 的玩家画像，进入该玩家的 `USER.md`，在“`## 该玩家对 AI 的称呼`”下按一行一个的格式填写，例如 `- 粉粉`、`- 小不点`；也可以先用已有名称对 Bot 说“以后我就叫你粉粉”。之后只有这名玩家说“粉粉，过来”时会把“粉粉”视为点名，其他玩家不会继承。称呼列表的本地文件位置是 `userdata/data/player-profiles/<uuid-or-name>/USER.md`，最多读取 32 个、每个最多 24 个字符；修改后无需重启。
 
 远处闲聊、明确叫其他人的话、多名玩家之间含糊的陈述不会误触发。进入对话链路后，模型先根据完整语句、上下文和当前玩家画像区分 `chat` 与 `action`：“我刚才挖到钻石了”“你喜欢挖矿吗”只会正常聊天，“帮我挖三块石头”才会选择工具。玩家命令不再经过关键词动作脚本；模型根据结构化世界状态自行选择或组合白名单工具，程序只负责能力、危险度、财产和真实后置条件检查。
 
@@ -399,20 +413,20 @@ CialloAI 跟着我
 
 记忆与运行状态迁移时保留：
 
-- `data\memory.json`：所有玩家档案、长期事件与摘要，满足“统一为一个记忆文件”。
-- `data\experience.json`：任务经验和纠错记录。
-- `data\tasks.json`：所有排队、运行、完成、失败/拒绝任务；重启/重连后恢复未完成项。
-- `data\autonomy-state.json`：服务端确认过的住所维度、室内位置和门位置。
-- `data\diagnostics.json`：WebUI“总聊天”的结构化决策、每步参数、后置条件和完整脱敏错误，最多保留最近 1000 条并原子写入 `.bak`；它用于排错，不替代统一记忆。
-- `data\agent-prompts\`：运行时五份全局 Markdown 提示词及声明式行为补丁；可直接编辑，也可由 WebUI 保存。
-- `data\player-profiles\<uuid-or-name>\USER.md`：每位玩家的画像，首次对话自动创建；不能跨玩家混用。
-- `data\self-improvement.json`：失败签名、重复次数、研究与学习时间；不含网页全文和密钥。
+- `userdata/data/memory.json`：所有玩家档案、长期事件与摘要，满足“统一为一个记忆文件”。
+- `userdata/data/experience.json`：任务经验和纠错记录。
+- `userdata/data/tasks.json`：所有排队、运行、完成、失败/拒绝任务；重启/重连后恢复未完成项。
+- `userdata/data/autonomy-state.json`：服务端确认过的住所维度、室内位置和门位置。
+- `userdata/data/diagnostics.json`：WebUI“总聊天”的结构化决策、每步参数、后置条件和完整脱敏错误，最多保留最近 1000 条并原子写入 `.bak`；它用于排错，不替代统一记忆。
+- `userdata/data/agent-prompts\`：运行时五份全局 Markdown 提示词及声明式行为补丁；可直接编辑，也可由 WebUI 保存。
+- `userdata/data/player-profiles\<uuid-or-name>\USER.md`：每位玩家的画像，首次对话自动创建；不能跨玩家混用。
+- `userdata/data/self-improvement.json`：失败签名、重复次数、研究与学习时间；不含网页全文和密钥。
 
-迁移 `tasks.json` 和 `autonomy-state.json` 时，先停止旧目录中的 Bot 和 Minecraft 客户端，再把这两个文件复制到新项目 `data` 目录，并确认 `config/bot.json` 的 `storage.taskFile` / `storage.autonomyFile` 仍指向它们。`tasks.json` 会保留 `.bak`，启动时会把遗留的 `running` 任务重新排为 `queued`；`autonomy-state.json` 使用临时文件原子替换但不生成 `.bak`，加载时还会校验格式、维度和门/室内坐标，因此应另行备份。不要迁移 `bridge-token.txt`、PID 或 `runtime-status.json`；它们会在新实例启动时重建。
+迁移 `tasks.json` 和 `autonomy-state.json` 时，先停止旧目录中的 Bot 和 Minecraft 客户端，再把这两个文件复制到新项目 `userdata/data` 目录，并确认 `userdata/config/bot.json` 的 `storage.taskFile` / `storage.autonomyFile` 仍指向它们。`tasks.json` 会保留 `.bak`，启动时会把遗留的 `running` 任务重新排为 `queued`；`autonomy-state.json` 使用临时文件原子替换但不生成 `.bak`，加载时还会校验格式、维度和门/室内坐标，因此应另行备份。不要迁移 `bridge-token.txt`、PID 或 `runtime-status.json`；它们会在新实例启动时重建。
 
-`memory.json`、`experience.json`、`tasks.json` 和 `diagnostics.json` 正常写入时会生成同名 `.bak`。误删这些主文件但备份仍在时，应先停止程序，再把对应 `.bak` 复制回原文件名。`.env` 也不会随源码或 Git 自动迁移，必须通过安全渠道在新机器重新配置，不能发进游戏聊天、提交记录或问题截图。
+`memory.json`、`experience.json`、`tasks.json` 和 `diagnostics.json` 正常写入时会生成同名 `.bak`。误删这些主文件但备份仍在时，应先停止程序，再把对应 `.bak` 复制回原文件名。`userdata/.env` 也不会随源码或 Git 自动迁移，必须通过安全渠道在新机器重新配置，不能发进游戏聊天、提交记录或问题截图。
 
-原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。只有真实记忆/画像接近预算时，`ContextCompressor` 才保留最近事件并总结更早内容；世界快照不再误算成记忆压力。压缩在玩家任务结束后后台启动，返回格式错误会记录到总控台但不会让“来找我”等游戏任务失败。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `data/agent-prompts/`。
+原始事件仍统一保存在 `memory.json`，玩家消息、实际回复和游戏事件即时原子追加；不同玩家按 UUID/名称隔离。只有真实记忆/画像接近预算时，`ContextCompressor` 才保留最近事件并总结更早内容；世界快照不再误算成记忆压力。压缩在玩家任务结束后后台启动，返回格式错误会记录到总控台但不会让“来找我”等游戏任务失败。动作失败同时写入 `experience.json`；同类错误达到阈值后，自我改进层可研究并只写受限托管区。示例在 `config/agent-prompts.example/`，运行副本在 `userdata/data/agent-prompts/`。
 
 ## 让小默在 Simple Voice Chat 里说话
 
@@ -426,7 +440,7 @@ CialloAI 跟着我
    - OpenAI：使用 `gpt-4o-mini-tts`、`OPENAI_API_KEY` 和 `/v1` Base URL。
    - MiMo：使用 `mimo-v2.5-tts`、`MIMO_API_KEY`，内置中文音色可填 `冰糖`、`茉莉`、`苏打` 或 `白桦`。
    - 音频多模态：用于支持 Chat Completions 音频输出的模型，如 `gpt-audio-1.5`；接口需返回 `choices[0].message.audio.data` 的 Base64 PCM16。
-   - 自定义：可选直接返回 PCM16 二进制，或 JSON Base64；需要鉴权时密钥只从 `.env` 环境变量读取，无鉴权的本机/局域网接口可把“密钥环境变量”留空。
+   - 自定义：可选直接返回 PCM16 二进制，或 JSON Base64；需要鉴权时密钥只从 `userdata/.env` 环境变量读取，无鉴权的本机/局域网接口可把“密钥环境变量”留空。
 
 4. 保存设置并完整重启 Bot。之后 Bot 每次真正发给玩家的自然聊天会先以文字立即出现，再异步合成声音。内部思考、工具名、动作回执和完整错误永远不会被朗读。
 
@@ -441,7 +455,7 @@ CialloAI 跟着我
 3. 点击“生成给其他玩家的皮肤包”，取得 `.runtime\skin-pack\Minecraft-AI-Skin-Pack.zip`。
 4. 每个需要看见 Bot 皮肤的人将压缩包内容复制到自己正在使用的 Minecraft 实例目录，然后重启并重新进服。
 
-万用皮肤加载器官方明确说明 LocalSkin 只能由持有同一文件的客户端看见，所以“只给 Bot 装 Mod”不会把纹理广播给其他玩家。长期服务器更推荐把同名 Bot 角色上传到所有玩家共同配置的 LittleSkin/兼容皮肤站；配置位置为 `config/skin.json`。官方正版披风仍只能随实际拥有披风的 Microsoft 账号使用。
+万用皮肤加载器官方明确说明 LocalSkin 只能由持有同一文件的客户端看见，所以“只给 Bot 装 Mod”不会把纹理广播给其他玩家。长期服务器更推荐把同名 Bot 角色上传到所有玩家共同配置的 LittleSkin/兼容皮肤站；配置位置为 `userdata/config/skin.json`。官方正版披风仍只能随实际拥有披风的 Microsoft 账号使用。
 
 ## EasyAuth 与安全行为
 
@@ -464,25 +478,25 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | --- | --- | --- |
 | `Install-and-Open-Control-Center.cmd` | 双击完成安装并打开总控台 | 从项目目录调用 PowerShell 部署器，失败时保留窗口和日志 |
 | `Open-WebUI.cmd` / `Start-Bot.cmd` / `Stop-Bot.cmd` | 日常打开页面、静默启动和停止 | 调用固定脚本并保持工作目录正确 |
-| `config/bot.json` | 实际服务器、模型、语音、聊天、存储和日志参数 | 总控台将表单转换为 JSON；启动时严格校验后一次性载入 |
-| `config/persona.json` | 实际 Bot 人设 | 每次模型请求把描述、说话风格、目标和边界放入系统上下文 |
-| `config/prompts.json` | 完整系统/记忆/动作/空闲提示词 | 启动时读取，页面可编辑，模板再注入人设 |
-| `config/skin.json` | 皮肤模型、路径和多人可见方式 | PNG 校验后保存本地副本或指导共同皮肤站配置 |
-| `config/behavior-rules.json` | 实际安全规则 | LLM 动作执行前由 `PolicyEngine` 再审查，不能靠提示词绕过 |
-| `config/mods.json` | 服务器 mod 来源和同步规则 | 启动前/按钮触发时与上次清单比较，受管理地替换 jar |
-| `.env` | 大模型/TTS API Key、火山 TTS AppID/Token 和 EasyAuth 密码 | 仅本机载入且被 Git 忽略；WebUI 只显示是否存在，不返回值 |
-| `data/memory.json` | 所有长期记忆和玩家档案 | UUID 分玩家、限制事件数量、原子写入并保留 `.bak` |
-| `data/experience.json` | 任务经验、失败与修正 | 与记忆独立，提示组装时按任务检索相关经验 |
-| `data/tasks.json` | 持久任务队列和全部终态 | 保存发令者、优先级、尝试次数、真实结果；同进程重连与进程重启均可恢复孤立任务 |
-| `data/autonomy-state.json` | 已验证住所位置 | Java 仅在门、光照、外壳和服务端状态全部确认后原子写入 |
-| `data/bridge-token.txt` | Node 与 Java 的临时本机会话令牌 | 启动控制器生成；被 Git 忽略，不交给模型或玩家 |
-| `data/runtime-status.json` | 当前游戏阶段、坐标、生命、附近玩家/威胁和寻路摘要 | Fabric 持续上报完整结构化状态；Node 仅按变化节流落盘 WebUI 所需轻量摘要，不保存背包明细和附近方块全集 |
+| `userdata/config/bot.json` | 实际服务器、模型、语音、聊天、存储和日志参数 | 总控台将表单转换为 JSON；启动时严格校验后一次性载入 |
+| `userdata/config/persona.json` | 实际 Bot 人设 | 每次模型请求把描述、说话风格、目标和边界放入系统上下文 |
+| `userdata/config/prompts.json` | 完整系统/记忆/动作/空闲提示词 | 启动时读取，页面可编辑，模板再注入人设 |
+| `userdata/config/skin.json` | 皮肤模型、路径和多人可见方式 | PNG 校验后保存本地副本或指导共同皮肤站配置 |
+| `userdata/config/behavior-rules.json` | 实际安全规则 | LLM 动作执行前由 `PolicyEngine` 再审查，不能靠提示词绕过 |
+| `userdata/config/mods.json` | 服务器 mod 来源和同步规则 | 启动前/按钮触发时与上次清单比较，受管理地替换 jar |
+| `userdata/.env` | 大模型/TTS API Key、火山 TTS AppID/Token 和 EasyAuth 密码 | 仅本机载入且被 Git 忽略；WebUI 只显示是否存在，不返回值 |
+| `userdata/data/memory.json` | 所有长期记忆和玩家档案 | UUID 分玩家、限制事件数量、原子写入并保留 `.bak` |
+| `userdata/data/experience.json` | 任务经验、失败与修正 | 与记忆独立，提示组装时按任务检索相关经验 |
+| `userdata/data/tasks.json` | 持久任务队列和全部终态 | 保存发令者、优先级、尝试次数、真实结果；同进程重连与进程重启均可恢复孤立任务 |
+| `userdata/data/autonomy-state.json` | 已验证住所位置 | Java 仅在门、光照、外壳和服务端状态全部确认后原子写入 |
+| `userdata/data/bridge-token.txt` | Node 与 Java 的临时本机会话令牌 | 启动控制器生成；被 Git 忽略，不交给模型或玩家 |
+| `userdata/data/runtime-status.json` | 当前游戏阶段、坐标、生命、附近玩家/威胁和寻路摘要 | Fabric 持续上报完整结构化状态；Node 仅按变化节流落盘 WebUI 所需轻量摘要，不保存背包明细和附近方块全集 |
 | `.runtime/minecraft/managed-mods.json` | 最近一次服务器 mod 同步清单 | 记录来源、时间、文件名、大小和 SHA-256，用于安全升级/删除 |
 | `.runtime/skin-pack/Minecraft-AI-Skin-Pack.zip` | 给其他玩家安装的离线皮肤包 | 含官方万用皮肤加载器和按 Bot 名称放置的本地皮肤 |
 | `logs/bot.log` | AI 控制器 JSONL 日志 | 每行一个结构化事件，递归脱敏 password/token/authorization |
 | `.runtime/minecraft/logs/latest.log` | 原生客户端和 mod 日志 | Minecraft/Fabric 自身日志，用于排查注册表和模组崩溃 |
 
-`config/*.example.json` 和 `.env.example` 是可提交的无秘密模板；同名非 example 文件才是本机实际设置。Node 控制器和直接双击启动的 Fabric 客户端都会读取 `.env`，已有进程环境变量优先；EasyAuth 密码按 `easyAuth.passwordEnv` 映射且不会输出。
+`config/*.example.json` 和 `.env.example` 是可提交的无秘密模板；同名非 example 文件才是本机实际设置。Node 控制器和直接双击启动的 Fabric 客户端都会读取 `userdata/.env`，已有进程环境变量优先；EasyAuth 密码按 `easyAuth.passwordEnv` 映射且不会输出。
 
 ### 程序源码与脚本
 
@@ -490,7 +504,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | --- | --- |
 | `src/index.ts` | 后台控制器入口，加载配置并处理停止信号 |
 | `src/config/types.ts` | 所有配置、规则、人设和推理强度的 TypeScript 契约 |
-| `src/config/load-config.ts` | 读取 `.env`/JSON、校验必填值，进程环境变量优先于 `.env` |
+| `src/config/load-config.ts` | 读取 `userdata/.env`/JSON、校验必填值，进程环境变量优先于 `userdata/.env` |
 | `src/llm/provider-factory.ts` | DeepSeek/方舟/MiMo Chat Completions、OpenAI Responses、能力检测、附件和 usage 解析 |
 | `src/llm/types.ts` | 模型请求/响应边界，使核心逻辑不绑定供应商 SDK |
 | `src/agent/prompt.ts` | 旧 `prompts.json` 兼容提示词；新部署由 Markdown 工作区接管 |
@@ -515,7 +529,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `src/minecraft/minecraft-client.ts` | Mineflayer 诊断适配器，不用于当前模组服正式运行 |
 | `src/minecraft/easy-auth.ts` | Mineflayer 路线的认证提示处理；正式 Fabric 路线在 Java 模组中处理 |
 | `src/runtime/bot-runtime.ts` | 创建模块、连接/关闭/重连循环并写运行阶段 |
-| `src/runtime/status-store.ts` | 将 WebUI 所需实时状态原子保存到 `data/runtime-status.json` |
+| `src/runtime/status-store.ts` | 将 WebUI 所需实时状态原子保存到 `userdata/data/runtime-status.json` |
 | `src/network/lan-discovery.ts` | 监听 224.0.2.60:4445、解析 LAN 世界动态地址和端口 |
 | `src/skin/png.ts` | 校验 PNG 签名和 Minecraft 标准皮肤尺寸 |
 | `src/core/atomic-json-file.ts` | 临时文件→备份→替换，避免断电留下半个 JSON |
@@ -549,14 +563,14 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `scripts/start-*`、`stop-*` | WebUI、Node、Minecraft 的隐藏启动和精确 PID 停止，组合启动失败会回滚 |
 | `src/probe.ts` | 不发言、不动作的 Mineflayer 握手诊断 |
 | `test/*.test.ts` | 决策、记忆、经验、策略、脱敏、本机桥和后续回归测试 |
-| `vendor/minecraft-data/26.2/*` | 固定上游提交的声明式协议 JSON，仅用于诊断 |
+| `vendor/minecraft-userdata/data/26.2/*` | 固定上游提交的声明式协议 JSON，仅用于诊断 |
 | `package.json` / `package-lock.json` / `tsconfig.json` | 固定 Node 依赖、命令和严格 TypeScript 构建 |
 | `.npmrc` / `.gitignore` | npmmirror 默认源；排除秘密、数据、日志、构建和运行时目录 |
 | `README.md` / `README_AI.md` / `PARAMETERS.md` | 人类教程、跨 Agent 续作档案、精确参数位置总表 |
 
 ## 所有参数存放位置
 
-### `config/bot.json`
+### `userdata/config/bot.json`
 
 | JSON 路径 | 默认值 | 作用 |
 | --- | --- | --- |
@@ -624,7 +638,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 | `agentWorkspace.compressionTriggerRatio` | `0.72` | 达到预算比例后压缩旧记忆，范围 0.5–0.95 |
 | `agentWorkspace.retainRecentEvents` | `16` | 压缩时保留当前玩家最近事件数 |
 | `agentWorkspace.selfImprovement.*` | 见 `PARAMETERS.md` | 自我改进开关、托管提示词/声明式补丁权限、重复失败阈值、百度/SearXNG 与超时 |
-| `policyFile` / `personaFile` / `promptsFile` | `config/...json` | 规则、人设和提示词路径；WebUI 只允许项目 config 内 |
+| `policyFile` / `personaFile` / `promptsFile` | `config/...json`（相对路径，解析到 `userdata/config`） | 规则、人设和提示词路径；WebUI 只允许项目 `userdata/config` 内 |
 | `logging.file` | `logs/bot.log` | JSONL 日志路径 |
 | `logging.level` | `info` | `debug/info/warn/error` |
 | `logging.console` | `false` | 是否同时输出控制台；静默后台建议 false |
@@ -633,18 +647,18 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 | 文件/路径 | 参数 |
 | --- | --- |
-| `config/persona.json` | `name` 名称、`description` 身份、`speakingStyle` 风格、`goals[]` 目标、`boundaries[]` 边界 |
-| `config/behavior-rules.json` | `denyBreakingPlayerProperty`、`denyOpeningPlayerContainers`、`denyTakingPlayerItems`、`wildernessDevelopmentOnly`、`allowSelfDefense`、`selfDefenseWindowMs`、`stopSelfDefenseWhenThreatEnds`、`allowPlayerOrderedPvp`、`allowDestructiveActionsWhenOwnershipUnknown` 和 `proactiveChat.*` |
-| `config/mods.json` | `sourceDirectory` 外部 mod 文件夹、`syncOnClientStart` 启动自动同步、`excludeFilePatterns[]` 文件名正则排除 |
-| `config/prompts.json` | 旧版兼容提示词；新运行时以 `data/agent-prompts/*.md` 为准 |
+| `userdata/config/persona.json` | `name` 名称、`description` 身份、`speakingStyle` 风格、`goals[]` 目标、`boundaries[]` 边界 |
+| `userdata/config/behavior-rules.json` | `denyBreakingPlayerProperty`、`denyOpeningPlayerContainers`、`denyTakingPlayerItems`、`wildernessDevelopmentOnly`、`allowSelfDefense`、`selfDefenseWindowMs`、`stopSelfDefenseWhenThreatEnds`、`allowPlayerOrderedPvp`、`allowDestructiveActionsWhenOwnershipUnknown` 和 `proactiveChat.*` |
+| `userdata/config/mods.json` | `sourceDirectory` 外部 mod 文件夹、`syncOnClientStart` 启动自动同步、`excludeFilePatterns[]` 文件名正则排除 |
+| `userdata/config/prompts.json` | 旧版兼容提示词；新运行时以 `userdata/data/agent-prompts/*.md` 为准 |
 | `config/agent-prompts.example/` | 新工作区首次启动模板；含五份全局 Markdown、`USER.md` 模板和行为补丁 schema |
-| `config/skin.json` | `enabled`、`model`、`visibilityMode`、`skinFile`、`capeFile`、`onlineProvider.*` |
+| `userdata/config/skin.json` | `enabled`、`model`、`visibilityMode`、`skinFile`、`capeFile`、`onlineProvider.*` |
 
 更完整的允许值、修改效果、记忆自动写入机制和全部运行文件位置见 [`PARAMETERS.md`](PARAMETERS.md)。
-| `.env` | `MINECRAFT_LOGIN_PASSWORD`、`DEEPSEEK_API_KEY`、`ARK_API_KEY`、`OPENAI_API_KEY`；内容绝不提交 |
-| 环境变量 | `MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_WEBUI_PORT` 可覆盖运行/下载位置 |
+| `userdata/.env` | `MINECRAFT_LOGIN_PASSWORD`、`DEEPSEEK_API_KEY`、`ARK_API_KEY`、`OPENAI_API_KEY`；内容绝不提交 |
+| 环境变量 | `MCAI_USERDATA_DIR` 覆盖用户数据目录；`MCAI_MINECRAFT_HOME`、`MCAI_MINECRAFT_LIBRARY_MIRROR`、`MCAI_BMCLAPI_BASE`、`MCAI_HEADLESSMC_DOWNLOAD_URL`、`MCAI_FABRIC_API_URL`、`MCAI_JAVA_HOME`、`MCAI_WEBUI_PORT` 覆盖运行/下载位置 |
 
-总控台保存“全部设置”时校验并写入 bot/persona/旧版 prompts/skin/behavior-rules/mods JSON，同时原子保存五份 Markdown 提示词；单独的玩家画像按钮只写选中玩家的 `USER.md`。“安全保存密钥”只写 `.env`。提示词会在每次模型决策前重新读取，本地直接编辑无需重启；配置项修改仍建议重启。
+总控台保存“全部设置”时校验并写入 bot/persona/旧版 prompts/skin/behavior-rules/mods JSON，同时原子保存五份 Markdown 提示词；单独的玩家画像按钮只写选中玩家的 `USER.md`。“安全保存密钥”只写 `userdata/.env`。提示词会在每次模型决策前重新读取，本地直接编辑无需重启；配置项修改仍建议重启。
 
 ## 故障排查
 
@@ -666,13 +680,13 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 **模型没有回复**
 
-检查 API Key 环境变量、`config\bot.json` 的模型 ID/端点，以及 `logs\bot.log`。近距离且语句像直接指令时可以不点名；远距离、多人含糊聊天或明确叫其他人时不会触发。回复仍受默认 2.5 秒聊天冷却限制。
+检查 API Key 环境变量、`userdata/config/bot.json` 的模型 ID/端点，以及 `logs\bot.log`。近距离且语句像直接指令时可以不点名；远距离、多人含糊聊天或明确叫其他人时不会触发。回复仍受默认 2.5 秒聊天冷却限制。
 
 如果服务器聊天带称号并显示为 `<[称号]玩家名> 内容`，它可能通过 Minecraft 的系统消息通道到达。Fabric 桥会解析这一种受限格式、剥离连续方括号称号，并要求最终玩家名符合 `^[A-Za-z0-9_]{3,16}$` 后才交给 AI；与签名聊天在 1.5 秒内内容相同时自动去重。其他系统提示不会冒充玩家指令。
 
 **移动/复制项目后，页面仍显示旧目录状态**
 
-同一台电脑默认只能有一个控制台占用 `127.0.0.1:3210`。先在旧目录停止 Bot 和 WebUI，再从新目录双击 `Open-WebUI.cmd`。新版 PID 记录包含项目根目录，启动脚本也会核对进程命令行和端口归属；如果旧实例仍占用端口，会明确报错而不会打开旧页面。配置与秘密不会因复制源码自动迁移：新目录仍需检查 `config/*.json` 和被 Git 忽略的 `.env`。
+同一台电脑默认只能有一个控制台占用 `127.0.0.1:3210`。先在旧目录停止 Bot 和 WebUI，再从新目录双击 `Open-WebUI.cmd`。新版 PID 记录包含项目根目录，启动脚本也会核对进程命令行和端口归属；如果旧实例仍占用端口，会明确报错而不会打开旧页面。配置与秘密不会因复制源码自动迁移：新目录仍需检查 `config/*.json` 和被 Git 忽略的 `userdata/.env`。
 
 如果游戏阶段持续更新但两个进程卡片显示“已停止”，旧版可能读取不了 Windows PowerShell 5 写入的带 UTF-8 BOM 的 PID JSON。新版 JSON 读取器会先剥离 BOM，并用项目根目录和 PID 双重核验进程；升级、重新构建并重启 WebUI 后即可恢复准确显示。
 
@@ -721,7 +735,7 @@ npm run probe
 
 使用前确认 WebUI“自主能力与安全”中的“允许 Fabric 动态环境验证”已开启。AI 根据附近结构化状态决定去哪里，Fabric 在执行时逐目标判断；不再填写任何人工坐标范围。关闭此开关会直接拒绝采集、放置、开矿和建房。
 
-运行时会通过本机 Fabric 桥把 Bot 周围已加载方块摘要持续交给 Node 控制器；`resources` 是原木、石头、泥土和矿物等自然资源，`artificial` 是门、木板、楼梯、玻璃、箱子、工作台、灯等疑似人造内容，分类用于辅助保护玩家建筑。完整方块观察只保留在当前进程内存，不写入 `data/runtime-status.json`；该文件只存 WebUI 健康检查需要的轻量摘要，以免 24 小时运行时产生大量磁盘写入。DeepSeek 等纯文本模型仍通过这种结构化状态和正常客户端动作游玩，不依赖画面。
+运行时会通过本机 Fabric 桥把 Bot 周围已加载方块摘要持续交给 Node 控制器；`resources` 是原木、石头、泥土和矿物等自然资源，`artificial` 是门、木板、楼梯、玻璃、箱子、工作台、灯等疑似人造内容，分类用于辅助保护玩家建筑。完整方块观察只保留在当前进程内存，不写入 `userdata/data/runtime-status.json`；该文件只存 WebUI 健康检查需要的轻量摘要，以免 24 小时运行时产生大量磁盘写入。DeepSeek 等纯文本模型仍通过这种结构化状态和正常客户端动作游玩，不依赖画面。
 
 当前可真实执行：
 
@@ -747,7 +761,7 @@ npm run probe
 
 这次复核修复了几类会直接影响真实使用的问题：Fabric 桥现在只有完成令牌和协议握手后才接收世界状态，错误令牌/协议会立即失败，断线和主动关闭不会让控制器永久等待；WebUI 的“停止并原地等待”改为本地零 Token 指令，不再为简单停止额外调用两轮模型；被远处敌对生物锁定时会启动持续追近防御，而不是站在原地间隔挥击；回家长路径不再每 80 Tick 清空有效路线，长时间无进展时会恢复或安全停机；副手食物/物品可以正确使用。
 
-长期后台运行也做了专项收敛：传给 Agent 的完整世界观察仍保留在控制器内存，而 `data/runtime-status.json` 只保存总控页所需摘要，最快每秒写一次、无实质变化时只保留 30 秒心跳；子 Java 进程不再继承大模型和 TTS 密钥；日志会保留 Token 用量数字但继续隐藏认证令牌；WebUI 修改 `.env` 时保留未知变量、注释、顺序、BOM 和换行风格；JWT 脱敏只匹配真正的 `eyJ...` 结构，不再误删 Java 类名和堆栈。
+长期后台运行也做了专项收敛：传给 Agent 的完整世界观察仍保留在控制器内存，而 `userdata/data/runtime-status.json` 只保存总控页所需摘要，最快每秒写一次、无实质变化时只保留 30 秒心跳；子 Java 进程不再继承大模型和 TTS 密钥；日志会保留 Token 用量数字但继续隐藏认证令牌；WebUI 修改 `userdata/.env` 时保留未知变量、注释、顺序、BOM 和换行风格；JWT 脱敏只匹配真正的 `eyJ...` 结构，不再误删 Java 类名和堆栈。
 
 维护者每次交付至少运行：
 

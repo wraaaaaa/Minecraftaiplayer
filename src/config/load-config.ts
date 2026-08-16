@@ -2,6 +2,7 @@ import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { agentWorkspaceConfig, speechConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
 import { parseJsonDocument } from '../core/json.js'
+import { projectPath, resolveUserData, userDataPath } from '../core/user-data.js'
 
 const VALID_EFFORTS = new Set<ReasoningEffort>(['none', 'low', 'medium', 'high', 'xhigh', 'max'])
 
@@ -18,7 +19,7 @@ async function readJson<T>(file: string): Promise<T> {
   return parseJsonDocument<T>(await readFile(file, 'utf8'))
 }
 
-export async function loadEnvFile(file = path.resolve('.env')): Promise<void> {
+export async function loadEnvFile(file = userDataPath('.env')): Promise<void> {
   if (!(await exists(file))) return
   const content = await readFile(file, 'utf8')
   for (const rawLine of content.split(/\r?\n/u)) {
@@ -124,13 +125,13 @@ export function validateConfig(config: BotConfig): void {
   if (config.storage.autonomyFile !== undefined) requireString(config.storage.autonomyFile, 'storage.autonomyFile')
   if (config.storage.progressionFile !== undefined) requireString(config.storage.progressionFile, 'storage.progressionFile')
   if (config.storage.ownedBlocksFile !== undefined) requireString(config.storage.ownedBlocksFile, 'storage.ownedBlocksFile')
-  if (path.resolve(config.storage.memoryFile) === path.resolve(config.storage.experienceFile)) {
+  if (resolveUserData(config.storage.memoryFile) === resolveUserData(config.storage.experienceFile)) {
     throw new Error('记忆文件与经验文件必须分开')
   }
   const workspace = agentWorkspaceConfig(config)
   requireString(workspace.promptDirectory, 'agentWorkspace.promptDirectory')
   requireString(workspace.playerProfilesDirectory, 'agentWorkspace.playerProfilesDirectory')
-  if (path.resolve(workspace.promptDirectory) === path.resolve(workspace.playerProfilesDirectory)) throw new Error('系统提示词目录与玩家画像目录必须分开')
+  if (resolveUserData(workspace.promptDirectory) === resolveUserData(workspace.playerProfilesDirectory)) throw new Error('系统提示词目录与玩家画像目录必须分开')
   if (!Number.isInteger(workspace.contextBudgetChars) || workspace.contextBudgetChars < 8_000 || workspace.contextBudgetChars > 500_000) throw new Error('agentWorkspace.contextBudgetChars 必须是 8000-500000 的整数')
   if (!Number.isFinite(workspace.compressionTriggerRatio) || workspace.compressionTriggerRatio < 0.5 || workspace.compressionTriggerRatio > 0.95) throw new Error('agentWorkspace.compressionTriggerRatio 必须在 0.5-0.95 之间')
   if (!Number.isInteger(workspace.retainRecentEvents) || workspace.retainRecentEvents < 4 || workspace.retainRecentEvents > 64) throw new Error('agentWorkspace.retainRecentEvents 必须是 4-64 的整数')
@@ -215,26 +216,27 @@ export interface LoadedProjectConfig {
 
 export async function loadProjectConfig(options: { allowExample?: boolean } = {}): Promise<LoadedProjectConfig> {
   await loadEnvFile()
-  const configPath = path.resolve(process.env.BOT_CONFIG ?? 'config/bot.json')
+  const configPath = process.env.BOT_CONFIG ? path.resolve(process.env.BOT_CONFIG) : userDataPath('config', 'bot.json')
   const effectiveConfigPath = await exists(configPath)
     ? configPath
     : options.allowExample
-      ? path.resolve('config/bot.example.json')
+      ? projectPath('config', 'bot.example.json')
       : configPath
 
   if (!(await exists(effectiveConfigPath))) {
-    throw new Error('缺少 config/bot.json。请复制 config/bot.example.json 后填写配置。')
+    throw new Error('缺少 userdata/config/bot.json。请复制 config/bot.example.json 后填写配置。')
   }
 
   const config = await readJson<BotConfig>(effectiveConfigPath)
   validateConfig(config)
-  const personaPath = path.resolve(config.personaFile)
-  const effectivePersonaPath = await exists(personaPath) ? personaPath : path.resolve('config/persona.example.json')
+  const personaPath = resolveUserData(config.personaFile)
+  const effectivePersonaPath = await exists(personaPath) ? personaPath : projectPath('config', 'persona.example.json')
   const persona = await readJson<Persona>(effectivePersonaPath)
-  const promptsPath = path.resolve(config.promptsFile)
-  const effectivePromptsPath = await exists(promptsPath) ? promptsPath : path.resolve('config/prompts.example.json')
+  const promptsPath = resolveUserData(config.promptsFile)
+  const effectivePromptsPath = await exists(promptsPath) ? promptsPath : projectPath('config', 'prompts.example.json')
   const prompts = await readJson<PromptTemplates>(effectivePromptsPath)
-  const rules = await readJson<BehaviorRules>(path.resolve(config.policyFile))
+  const rulesPath = resolveUserData(config.policyFile)
+  const rules = await readJson<BehaviorRules>(await exists(rulesPath) ? rulesPath : projectPath('config', 'behavior-rules.example.json'))
   requireString(persona.name, 'persona.name')
 
   const apiKey = process.env[config.model.apiKeyEnv]?.trim() ?? ''

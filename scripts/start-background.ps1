@@ -2,26 +2,27 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $entryPoint = Join-Path $projectRoot 'dist\src\index.js'
-$pidFile = Join-Path $projectRoot 'data\bot.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\bot.pid.json'
 $stdoutLog = Join-Path $projectRoot 'logs\background.stdout.log'
 $stderrLog = Join-Path $projectRoot 'logs\background.stderr.log'
 $configFile = if ([string]::IsNullOrWhiteSpace($env:BOT_CONFIG)) {
-    Join-Path $projectRoot 'config\bot.json'
+    Join-Path $userDataRoot 'config\bot.json'
 } elseif ([System.IO.Path]::IsPathRooted($env:BOT_CONFIG)) {
     $env:BOT_CONFIG
 } else {
-    Join-Path $projectRoot $env:BOT_CONFIG
+    Join-Path $userDataRoot $env:BOT_CONFIG
 }
 
 if (-not (Test-Path -LiteralPath $entryPoint)) {
     throw 'Build output is missing. Run npm run build first.'
 }
 if (-not (Test-Path -LiteralPath $configFile)) {
-    throw 'Config is missing. Copy config/bot.example.json to config/bot.json first.'
+    throw 'Config is missing. Copy config/bot.example.json to userdata/config/bot.json first.'
 }
 
 New-Item -ItemType Directory -Force -Path (Split-Path -Parent $pidFile), (Split-Path -Parent $stdoutLog) | Out-Null
-$bridgeTokenFile = Join-Path $projectRoot 'data\bridge-token.txt'
+$bridgeTokenFile = Join-Path $userDataRoot 'data\bridge-token.txt'
 if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
     $bridgeToken = ([Guid]::NewGuid().ToString('N') + [Guid]::NewGuid().ToString('N'))
     [IO.File]::WriteAllText($bridgeTokenFile, $bridgeToken, [Text.UTF8Encoding]::new($false))

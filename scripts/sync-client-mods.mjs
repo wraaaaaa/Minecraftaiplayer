@@ -4,10 +4,11 @@ import path from 'node:path'
 import process from 'node:process'
 
 const projectRoot = path.resolve(import.meta.dirname, '..')
+const userDataRoot = path.resolve(process.env.MCAI_USERDATA_DIR?.trim() || path.join(projectRoot, 'userdata'))
 const gameDirectory = path.join(projectRoot, '.runtime', 'minecraft')
 const targetDirectory = path.join(gameDirectory, 'mods')
 const manifestFile = path.join(gameDirectory, 'managed-mods.json')
-const localConfigFile = path.join(projectRoot, 'config', 'mods.json')
+const localConfigFile = path.join(userDataRoot, 'config', 'mods.json')
 const exampleConfigFile = path.join(projectRoot, 'config', 'mods.example.json')
 
 async function exists(file) {

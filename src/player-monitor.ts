@@ -4,6 +4,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 import { access, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { userDataPath } from './core/user-data.js'
 
 // Minecraft 26.2 protocol version used for the Server List Ping handshake.
 const PROTOCOL_VERSION = 776
@@ -18,11 +19,11 @@ interface PlayerMonitorState {
 }
 
 const projectRoot = process.cwd()
-const stateFile = path.join(projectRoot, 'data', 'player-monitor-state.json')
-const testFlagFile = path.join(projectRoot, 'data', 'test-mode.flag')
+const stateFile = userDataPath('data', 'player-monitor-state.json')
+const testFlagFile = userDataPath('data', 'test-mode.flag')
 // The Minecraft client is what actually joins the server and occupies a player slot;
 // check its pid (not the Node controller pid) when deciding whether to subtract the bot.
-const botPidFile = path.join(projectRoot, 'data', 'minecraft-client.pid.json')
+const botPidFile = userDataPath('data', 'minecraft-client.pid.json')
 
 function log(message: string): void {
   console.log('[' + new Date().toISOString() + '] ' + message)

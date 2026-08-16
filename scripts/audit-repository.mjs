@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,12 +15,14 @@ const BINARY_EXTENSIONS = new Set([
 ])
 
 const PROTECTED_PATHS = [
+  { path: 'userdata', directory: true },
   { path: '.env', directory: false },
   { path: 'config/bot.json', directory: false },
   { path: 'config/persona.json', directory: false },
   { path: 'config/prompts.json', directory: false },
   { path: 'config/mods.json', directory: false },
   { path: 'config/skin.json', directory: false },
+  { path: 'config/behavior-rules.json', directory: false },
   { path: 'data', directory: true },
   { path: 'logs', directory: true },
   { path: '.runtime', directory: true },
@@ -314,7 +317,8 @@ export async function auditRepository(options = {}) {
   const rootResult = runGit(requestedRoot, ['rev-parse', '--show-toplevel'])
   const root = path.resolve(rootResult.stdout.trim())
   const preflightIssues = []
-  const envFile = path.resolve(root, options.envFile ?? '.env')
+  const userDataEnv = path.resolve(root, process.env.MCAI_USERDATA_DIR?.trim() || 'userdata', '.env')
+  const envFile = path.resolve(root, options.envFile ?? (existsSync(userDataEnv) ? path.relative(root, userDataEnv) : '.env'))
   const knownSecrets = await loadKnownSecrets(root, envFile, preflightIssues)
   const files = trackedFiles(root)
   const current = await inspectCurrent(root, files, knownSecrets)

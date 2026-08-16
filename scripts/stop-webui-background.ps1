@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $entryPoint = Join-Path $projectRoot 'dist\src\webui\server.js'
-$pidFile = Join-Path $projectRoot 'data\webui.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\webui.pid.json'
 if (-not (Test-Path -LiteralPath $pidFile)) { Write-Output 'No WebUI PID file was found.'; exit 0 }
 $record = Get-Content -LiteralPath $pidFile -Raw | ConvertFrom-Json
 $process = Get-Process -Id $record.pid -ErrorAction SilentlyContinue

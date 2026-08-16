@@ -1,10 +1,11 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
 $runtimeRoot = Join-Path $projectRoot '.runtime\skin-pack'
 $staging = Join-Path $runtimeRoot 'staging'
 $zip = Join-Path $runtimeRoot 'Minecraft-AI-Skin-Pack.zip'
-$skinConfigFile = Join-Path $projectRoot 'config\skin.json'
-$botConfigFile = Join-Path $projectRoot 'config\bot.json'
+$skinConfigFile = Join-Path $userDataRoot 'config\skin.json'
+$botConfigFile = Join-Path $userDataRoot 'config\bot.json'
 $loader = Join-Path $projectRoot 'vendor\custom-skin-loader\CustomSkinLoader_Universal-15.0.1.jar'
 $loaderSha256 = '026D8B38EA93EDCCD647F60568193E79801A377B7BD4E916DCFC0D5482B767FC'
 
@@ -14,10 +15,10 @@ foreach ($required in @($skinConfigFile, $botConfigFile, $loader)) {
 if ((Get-FileHash -Algorithm SHA256 -LiteralPath $loader).Hash -ne $loaderSha256) { throw 'CustomSkinLoader SHA256 mismatch.' }
 $skinConfig = Get-Content -LiteralPath $skinConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
 $botConfig = Get-Content -LiteralPath $botConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
-$skinSource = [IO.Path]::GetFullPath((Join-Path $projectRoot ([string]$skinConfig.skinFile)))
-$allowedSkinRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'data\skins'))
+$skinSource = [IO.Path]::GetFullPath((Join-Path $userDataRoot ([string]$skinConfig.skinFile)))
+$allowedSkinRoot = [IO.Path]::GetFullPath((Join-Path $userDataRoot 'data\skins'))
 if (-not $skinSource.StartsWith($allowedSkinRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'Skin file must stay inside data\skins.'
+    throw 'Skin file must stay inside userdata\data\skins.'
 }
 if (-not (Test-Path -LiteralPath $skinSource)) { throw 'Import a skin PNG before building the client pack.' }
 

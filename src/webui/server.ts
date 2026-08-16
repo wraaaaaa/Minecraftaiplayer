@@ -20,6 +20,7 @@ import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prom
 import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
 import { mergeManagedEnv } from './env-file.js'
 import { redactForWebUi } from './redaction.js'
+import { resolveUserData, userDataPath } from '../core/user-data.js'
 
 const execFileAsync = promisify(execFile)
 const projectRoot = path.resolve(process.cwd())
@@ -28,31 +29,31 @@ const port = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
 const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY', 'VOLCENGINE_TTS_APP_ID', 'VOLCENGINE_TTS_ACCESS_TOKEN', 'CUSTOM_TTS_API_KEY'] as const
-const adminInbox = new AdminCommandInbox(path.join(projectRoot, 'data', 'admin-inbox'))
+const adminInbox = new AdminCommandInbox(userDataPath('data', 'admin-inbox'))
 
 type WebUiBotConfig = BotConfig
 
 const files = {
-  config: path.join(projectRoot, 'config', 'bot.json'),
+  config: userDataPath('config', 'bot.json'),
   configExample: path.join(projectRoot, 'config', 'bot.example.json'),
-  persona: path.join(projectRoot, 'config', 'persona.json'),
+  persona: userDataPath('config', 'persona.json'),
   personaExample: path.join(projectRoot, 'config', 'persona.example.json'),
-  prompts: path.join(projectRoot, 'config', 'prompts.json'),
+  prompts: userDataPath('config', 'prompts.json'),
   promptsExample: path.join(projectRoot, 'config', 'prompts.example.json'),
-  skin: path.join(projectRoot, 'config', 'skin.json'),
+  skin: userDataPath('config', 'skin.json'),
   skinExample: path.join(projectRoot, 'config', 'skin.example.json'),
-  rules: path.join(projectRoot, 'config', 'behavior-rules.json'),
-  mods: path.join(projectRoot, 'config', 'mods.json'),
+  rules: userDataPath('config', 'behavior-rules.json'),
+  mods: userDataPath('config', 'mods.json'),
   modsExample: path.join(projectRoot, 'config', 'mods.example.json'),
-  env: path.join(projectRoot, '.env'),
+  env: userDataPath('.env'),
   modManifest: path.join(projectRoot, '.runtime', 'minecraft', 'managed-mods.json'),
-  botPid: path.join(projectRoot, 'data', 'bot.pid.json'),
-  clientPid: path.join(projectRoot, 'data', 'minecraft-client.pid.json'),
-  testFlag: path.join(projectRoot, 'data', 'test-mode.flag'),
-  runtimeStatus: path.join(projectRoot, 'data', 'runtime-status.json'),
-  memory: path.join(projectRoot, 'data', 'memory.json'),
-  experience: path.join(projectRoot, 'data', 'experience.json'),
-  diagnostics: path.join(projectRoot, 'data', 'diagnostics.json'),
+  botPid: userDataPath('data', 'bot.pid.json'),
+  clientPid: userDataPath('data', 'minecraft-client.pid.json'),
+  testFlag: userDataPath('data', 'test-mode.flag'),
+  runtimeStatus: userDataPath('data', 'runtime-status.json'),
+  memory: userDataPath('data', 'memory.json'),
+  experience: userDataPath('data', 'experience.json'),
+  diagnostics: userDataPath('data', 'diagnostics.json'),
   skinVendor: path.join(projectRoot, 'vendor', 'custom-skin-loader', 'CustomSkinLoader_Universal-15.0.1.jar'),
   botLog: path.join(projectRoot, 'logs', 'bot.log'),
   gameLog: path.join(projectRoot, '.runtime', 'minecraft', 'logs', 'latest.log')
@@ -183,23 +184,23 @@ function validateSkin(value: unknown): asserts value is SkinConfig {
 function ensureProjectPaths(config: WebUiBotConfig): void {
   const workspace = agentWorkspaceConfig(config)
   const checks: Array<[string, string]> = [
-    [config.personaFile, path.join(projectRoot, 'config')],
-    [config.promptsFile, path.join(projectRoot, 'config')],
-    [config.policyFile, path.join(projectRoot, 'config')],
-    [config.storage.memoryFile, path.join(projectRoot, 'data')],
-    [config.storage.experienceFile, path.join(projectRoot, 'data')],
-    [config.storage.taskFile ?? 'data/tasks.json', path.join(projectRoot, 'data')],
-    [config.storage.autonomyFile ?? 'data/autonomy-state.json', path.join(projectRoot, 'data')],
-    [config.storage.progressionFile ?? 'data/progression.json', path.join(projectRoot, 'data')],
-    [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', path.join(projectRoot, 'data')],
-    [workspace.promptDirectory, path.join(projectRoot, 'data')],
-    [workspace.playerProfilesDirectory, path.join(projectRoot, 'data')],
-    [config.model.multimodal?.sensoryDirectory ?? 'data/sensory', path.join(projectRoot, 'data')],
+    [config.personaFile, userDataPath('config')],
+    [config.promptsFile, userDataPath('config')],
+    [config.policyFile, userDataPath('config')],
+    [config.storage.memoryFile, userDataPath('data')],
+    [config.storage.experienceFile, userDataPath('data')],
+    [config.storage.taskFile ?? 'data/tasks.json', userDataPath('data')],
+    [config.storage.autonomyFile ?? 'data/autonomy-state.json', userDataPath('data')],
+    [config.storage.progressionFile ?? 'data/progression.json', userDataPath('data')],
+    [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', userDataPath('data')],
+    [workspace.promptDirectory, userDataPath('data')],
+    [workspace.playerProfilesDirectory, userDataPath('data')],
+    [config.model.multimodal?.sensoryDirectory ?? 'data/sensory', userDataPath('data')],
     [config.logging.file, path.join(projectRoot, 'logs')]
   ]
   for (const [configured, allowedRoot] of checks) {
-    const resolved = path.resolve(projectRoot, configured)
-    if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`WebUI 不允许把文件写到项目范围外：${configured}`)
+    const resolved = resolveUserData(configured)
+    if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`WebUI 不允许把文件写到 userdata 范围外：${configured}`)
   }
   if (!['127.0.0.1', 'localhost', '::1'].includes(config.server.bridgeHost)) throw new Error('Fabric 桥必须绑定本机回环地址')
 }
@@ -210,10 +211,10 @@ function promptWorkspace(config: WebUiBotConfig): PromptWorkspace {
 }
 
 function ensureSkinPaths(skin: SkinConfig): void {
-  for (const [configured, allowedRoot] of [[skin.skinFile, path.join(projectRoot, 'data', 'skins')], [skin.capeFile, path.join(projectRoot, 'data', 'capes')]] as Array<[string, string]>) {
+  for (const [configured, allowedRoot] of [[skin.skinFile, userDataPath('data', 'skins')], [skin.capeFile, userDataPath('data', 'capes')]] as Array<[string, string]>) {
     if (!configured) continue
-    const resolved = path.resolve(projectRoot, configured)
-    if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`皮肤或披风文件必须保存在 data 内：${configured}`)
+    const resolved = resolveUserData(configured)
+    if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`皮肤或披风文件必须保存在 userdata/data 内：${configured}`)
   }
 }
 
@@ -254,10 +255,10 @@ async function snapshot(): Promise<unknown> {
   }
   const workspace = promptWorkspace(config)
   await workspace.initialize()
-  const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
-  const experienceFile = path.resolve(projectRoot, config.storage.experienceFile)
-  const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
-  const progressionFile = path.resolve(projectRoot, config.storage.progressionFile ?? 'data/progression.json')
+  const memoryFile = resolveUserData(config.storage.memoryFile)
+  const experienceFile = resolveUserData(config.storage.experienceFile)
+  const taskFile = resolveUserData(config.storage.taskFile ?? 'data/tasks.json')
+  const progressionFile = resolveUserData(config.storage.progressionFile ?? 'data/progression.json')
   const [persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
     readJson<Persona>(files.persona, files.personaExample),
     readJson<PromptTemplates>(files.prompts, files.promptsExample),
@@ -276,13 +277,13 @@ async function snapshot(): Promise<unknown> {
     readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
-  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(path.resolve(projectRoot, skin.skinFile)), imageUrl: await exists(path.resolve(projectRoot, skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(resolveUserData(skin.skinFile)), imageUrl: await exists(resolveUserData(skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
 }
 
 async function centralChatSnapshot(): Promise<unknown> {
   const config = await readJson<WebUiBotConfig>(files.config, files.configExample)
-  const memoryFile = path.resolve(projectRoot, config.storage.memoryFile)
-  const taskFile = path.resolve(projectRoot, config.storage.taskFile ?? 'data/tasks.json')
+  const memoryFile = resolveUserData(config.storage.memoryFile)
+  const taskFile = resolveUserData(config.storage.taskFile ?? 'data/tasks.json')
   const [memory, tasks, diagnostics] = await Promise.all([
     readRuntimeJson<MemoryDocument>(memoryFile).catch(() => null),
     readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
@@ -325,7 +326,7 @@ async function importSkin(value: unknown): Promise<{ width: number; height: numb
   const config = await readJson<BotConfig>(files.config, files.configExample)
   if (!/^[A-Za-z0-9_]{3,16}$/u.test(config.server.username)) throw new Error('Bot 游戏名必须是 3-16 位字母、数字或下划线')
   const relativeSkinFile = `data/skins/${config.server.username}.png`
-  const target = path.join(projectRoot, 'data', 'skins', `${config.server.username}.png`)
+  const target = userDataPath('data', 'skins', `${config.server.username}.png`)
   const runtimeSkin = path.join(projectRoot, '.runtime', 'minecraft', 'CustomSkinLoader', 'LocalSkin', 'skins', `${config.server.username}.png`)
   const packSkin = path.join(projectRoot, '.runtime', 'skin-pack', 'CustomSkinLoader', 'LocalSkin', 'skins', `${config.server.username}.png`)
   const runtimeMod = path.join(projectRoot, '.runtime', 'minecraft', 'mods', path.basename(files.skinVendor))
@@ -365,9 +366,9 @@ async function importMods(value: unknown): Promise<{ imported: string[]; directo
 
 async function sendSkinImage(response: ServerResponse): Promise<void> {
   const skin = await readJson<SkinConfig>(files.skin, files.skinExample)
-  const target = path.resolve(projectRoot, skin.skinFile)
-  const allowedRoot = path.join(projectRoot, 'data', 'skins')
-  if (!target.startsWith(`${allowedRoot}${path.sep}`)) throw new Error('皮肤文件路径不在 data/skins 内')
+  const target = resolveUserData(skin.skinFile)
+  const allowedRoot = userDataPath('data', 'skins')
+  if (!target.startsWith(`${allowedRoot}${path.sep}`)) throw new Error('皮肤文件路径不在 userdata/data/skins 内')
   const content = await readFile(target)
   validateMinecraftSkin(content)
   response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(content.length), 'cache-control': 'no-store' })
@@ -377,9 +378,9 @@ async function sendSkinImage(response: ServerResponse): Promise<void> {
 async function sendStorageDownload(response: ServerResponse, kind: 'memory' | 'experience'): Promise<void> {
   const config = await readJson<BotConfig>(files.config, files.configExample)
   const configured = kind === 'memory' ? config.storage.memoryFile : config.storage.experienceFile
-  const target = path.resolve(projectRoot, configured)
-  const allowedRoot = path.join(projectRoot, 'data')
-  if (!target.startsWith(`${allowedRoot}${path.sep}`)) throw new Error('存储文件路径不在 data 内')
+  const target = resolveUserData(configured)
+  const allowedRoot = userDataPath('data')
+  if (!target.startsWith(`${allowedRoot}${path.sep}`)) throw new Error('存储文件路径不在 userdata/data 内')
   const content = await readFile(target)
   JSON.parse(content.toString('utf8'))
   response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': `attachment; filename="${kind}.json"`, 'cache-control': 'no-store' })

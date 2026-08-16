@@ -53,7 +53,7 @@ test('运行时提示词写入范围不能逃出允许的数据目录', () => {
       playerProfilesDirectory: path.join(root, 'profiles'),
       allowedRoot: root
     }),
-    /必须位于项目 data 目录/u
+    /必须位于项目 userdata 目录/u
   )
 })
 

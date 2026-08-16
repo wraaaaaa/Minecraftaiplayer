@@ -4,10 +4,11 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $headlessJar = Join-Path $projectRoot '.runtime\headlessmc\headlessmc-launcher-2.10.0.jar'
 $gameDirectory = Join-Path $projectRoot '.runtime\minecraft'
 $bridgeJar = Join-Path $gameDirectory 'mods\minecraft-ai-fabric-bridge-0.1.0.jar'
-$pidFile = Join-Path $projectRoot 'data\minecraft-client.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\minecraft-client.pid.json'
 $stdoutLog = Join-Path $projectRoot 'logs\minecraft-client.stdout.log'
 $stderrLog = Join-Path $projectRoot 'logs\minecraft-client.stderr.log'
-$configFile = Join-Path $projectRoot 'config\bot.json'
+$configFile = Join-Path $userDataRoot 'config\bot.json'
 if (-not (Test-Path -LiteralPath $configFile)) {
     $configFile = Join-Path $projectRoot 'config\bot.example.json'
 }
@@ -35,7 +36,7 @@ if (Test-Path -LiteralPath $pidFile) {
     Remove-Item -LiteralPath $pidFile -Force
 }
 
-$envFile = Join-Path $projectRoot '.env'
+$envFile = Join-Path $userDataRoot '.env'
 $envValues = @{}
 if (Test-Path -LiteralPath $envFile) {
     foreach ($rawLine in (Get-Content -LiteralPath $envFile -Encoding UTF8)) {
@@ -60,7 +61,7 @@ if (-not [string]::IsNullOrWhiteSpace($configuredPassword)) {
     $env:MINECRAFT_LOGIN_PASSWORD = $configuredPassword
 }
 
-$modsConfigFile = Join-Path $projectRoot 'config\mods.json'
+$modsConfigFile = Join-Path $userDataRoot 'config\mods.json'
 $skipHandshakeVerification = $false
 if (Test-Path -LiteralPath $modsConfigFile) {
     $modsConfig = Get-Content -LiteralPath $modsConfigFile -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -134,19 +135,19 @@ $env:MCAI_FIRST_HOME_Y = if ($null -eq $config.autonomy.firstHome.y) { '65' } el
 $env:MCAI_FIRST_HOME_Z = if ($null -eq $config.autonomy.firstHome.z) { '199' } else { [string][double]$config.autonomy.firstHome.z }
 $env:MCAI_FIRST_HOME_RADIUS = if ($null -eq $config.autonomy.firstHome.radius) { '10' } else { [string][double]$config.autonomy.firstHome.radius }
 $autonomyStateRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.autonomyFile)) { 'data\autonomy-state.json' } else { [string]$config.storage.autonomyFile }
-$autonomyStatePath = [IO.Path]::GetFullPath((Join-Path $projectRoot $autonomyStateRelative))
-$allowedDataRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot 'data'))
+$autonomyStatePath = [IO.Path]::GetFullPath((Join-Path $userDataRoot $autonomyStateRelative))
+$allowedDataRoot = [IO.Path]::GetFullPath((Join-Path $userDataRoot 'data'))
 if (-not $autonomyStatePath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'storage.autonomyFile must stay inside the project data directory.'
+    throw 'storage.autonomyFile must stay inside the userdata/data directory.'
 }
 $env:MCAI_HOME_FILE = $autonomyStatePath
 $ownedBlocksRelative = if ([string]::IsNullOrWhiteSpace([string]$config.storage.ownedBlocksFile)) { 'data\owned-blocks.json' } else { [string]$config.storage.ownedBlocksFile }
-$ownedBlocksPath = [IO.Path]::GetFullPath((Join-Path $projectRoot $ownedBlocksRelative))
+$ownedBlocksPath = [IO.Path]::GetFullPath((Join-Path $userDataRoot $ownedBlocksRelative))
 if (-not $ownedBlocksPath.StartsWith($allowedDataRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
-    throw 'storage.ownedBlocksFile must stay inside the project data directory.'
+    throw 'storage.ownedBlocksFile must stay inside the userdata/data directory.'
 }
 $env:MCAI_OWNED_BLOCKS_FILE = $ownedBlocksPath
-$bridgeTokenFile = Join-Path $projectRoot 'data\bridge-token.txt'
+$bridgeTokenFile = Join-Path $userDataRoot 'data\bridge-token.txt'
 if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
     throw 'Bridge session token is missing. Start the AI controller first or use start-all-background.ps1.'
 }

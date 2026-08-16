@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $headlessJar = Join-Path $projectRoot '.runtime\headlessmc\headlessmc-launcher-2.10.0.jar'
-$pidFile = Join-Path $projectRoot 'data\minecraft-client.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\minecraft-client.pid.json'
 if (-not (Test-Path -LiteralPath $pidFile)) {
     Write-Output 'No background Minecraft client PID file was found.'
     exit 0

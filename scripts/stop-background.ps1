@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $entryPoint = Join-Path $projectRoot 'dist\src\index.js'
-$pidFile = Join-Path $projectRoot 'data\bot.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\bot.pid.json'
 
 if (-not (Test-Path -LiteralPath $pidFile)) {
     Write-Output 'No background AI controller PID file was found.'

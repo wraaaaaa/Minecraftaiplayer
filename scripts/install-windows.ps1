@@ -7,6 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $runtimeRoot = Join-Path $projectRoot '.runtime'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
 $logDirectory = Join-Path $projectRoot 'logs'
 $logFile = Join-Path $logDirectory 'install-windows.log'
 New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null
@@ -151,14 +152,16 @@ try {
     $env:MCAI_JAVA_HOME = $javaHome
     $env:Path = "$javaHome\bin;$env:Path"
 
-    foreach ($pair in @(@('bot', 'bot'), @('persona', 'persona'), @('mods', 'mods'), @('prompts', 'prompts'), @('skin', 'skin'))) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $userDataRoot 'config') | Out-Null
+    foreach ($pair in @(@('bot', 'bot'), @('persona', 'persona'), @('mods', 'mods'), @('prompts', 'prompts'), @('skin', 'skin'), @('behavior-rules', 'behavior-rules'))) {
         $name = $pair[0]
-        $target = Join-Path $projectRoot "config\$name.json"
+        $target = Join-Path $userDataRoot "config\$name.json"
         if (-not (Test-Path -LiteralPath $target)) { Copy-Item -LiteralPath (Join-Path $projectRoot "config\$name.example.json") -Destination $target }
     }
-    $envFile = Join-Path $projectRoot '.env'
+    New-Item -ItemType Directory -Force -Path $userDataRoot | Out-Null
+    $envFile = Join-Path $userDataRoot '.env'
     if (-not (Test-Path -LiteralPath $envFile)) { Copy-Item -LiteralPath (Join-Path $projectRoot '.env.example') -Destination $envFile }
-    $modsConfig = Join-Path $projectRoot 'config\mods.json'
+    $modsConfig = Join-Path $userDataRoot 'config\mods.json'
     if (-not [string]::IsNullOrWhiteSpace($ModsDirectory)) {
         $resolvedMods = (Resolve-Path -LiteralPath $ModsDirectory).Path
         $mods = Get-Content -LiteralPath $modsConfig -Raw -Encoding UTF8 | ConvertFrom-Json

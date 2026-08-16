@@ -1,6 +1,7 @@
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { deflateSync } from 'node:zlib'
+import { resolveUserData } from '../core/user-data.js'
 import type { BotConfig } from '../config/types.js'
 import type { LlmInputAttachment, ModelCapabilities } from '../llm/types.js'
 import type { WorldState } from './world-state.js'
@@ -96,7 +97,7 @@ export async function sensorySnapshot(config: BotConfig['model'], capabilities: 
   const enabled = config.multimodal ?? {
     autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory'
   }
-  const directory = path.resolve(enabled.sensoryDirectory)
+  const directory = resolveUserData(enabled.sensoryDirectory)
   const attachments: LlmInputAttachment[] = []
   let vision: SensorySnapshot['status']['vision'] = 'disabled'
   let audio: SensorySnapshot['status']['audio'] = 'disabled'

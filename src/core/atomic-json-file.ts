@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { resolveUserData } from './user-data.js'
 
 export class AtomicJsonFile<T> {
   readonly #file: string
@@ -8,7 +9,7 @@ export class AtomicJsonFile<T> {
   #writeChain = Promise.resolve()
 
   constructor(file: string, createDefault: () => T) {
-    this.#file = path.resolve(file)
+    this.#file = resolveUserData(file)
     this.#createDefault = createDefault
   }
 

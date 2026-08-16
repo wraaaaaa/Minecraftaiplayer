@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
 $botWasRunning = $false
-$botPidFile = Join-Path $projectRoot 'data\bot.pid.json'
+$botPidFile = Join-Path $userDataRoot 'data\bot.pid.json'
 $botEntryPoint = Join-Path $projectRoot 'dist\src\index.js'
 if (Test-Path -LiteralPath $botPidFile) {
     try {

@@ -2,7 +2,8 @@ $ErrorActionPreference = 'Stop'
 
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $entryPoint = Join-Path $projectRoot 'dist\src\webui\server.js'
-$pidFile = Join-Path $projectRoot 'data\webui.pid.json'
+$userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
+$pidFile = Join-Path $userDataRoot 'data\webui.pid.json'
 $stdoutLog = Join-Path $projectRoot 'logs\webui.stdout.log'
 $stderrLog = Join-Path $projectRoot 'logs\webui.stderr.log'
 if (-not (Test-Path -LiteralPath $entryPoint)) { throw 'WebUI build output is missing. Run npm run build first.' }

@@ -1,5 +1,6 @@
 import { copyFile, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { projectPath, resolveUserData } from '../core/user-data.js'
 import type { Persona } from '../config/types.js'
 import type { PlayerIdentity, PlayerMemory } from '../memory/memory-store.js'
 
@@ -168,12 +169,12 @@ export class PromptWorkspace {
   readonly #allowedRoot: string
 
   constructor(options: { promptDirectory: string; playerProfilesDirectory: string; exampleDirectory?: string; allowedRoot?: string }) {
-    this.#root = path.resolve(options.promptDirectory)
-    this.#profileRoot = path.resolve(options.playerProfilesDirectory)
-    this.#exampleRoot = path.resolve(options.exampleDirectory ?? 'config/agent-prompts.example')
-    this.#allowedRoot = path.resolve(options.allowedRoot ?? 'data')
+    this.#root = resolveUserData(options.promptDirectory)
+    this.#profileRoot = resolveUserData(options.playerProfilesDirectory)
+    this.#exampleRoot = projectPath(options.exampleDirectory ?? 'config/agent-prompts.example')
+    this.#allowedRoot = resolveUserData(options.allowedRoot ?? 'data')
     if (!inside(this.#allowedRoot, this.#root) || !inside(this.#allowedRoot, this.#profileRoot)) {
-      throw new Error('运行时提示词与玩家画像必须位于项目 data 目录内')
+      throw new Error('运行时提示词与玩家画像必须位于项目 userdata 目录内')
     }
   }
 

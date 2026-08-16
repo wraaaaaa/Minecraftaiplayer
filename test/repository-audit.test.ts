@@ -54,6 +54,8 @@ async function fixture(): Promise<string> {
     'config/prompts.json',
     'config/mods.json',
     'config/skin.json',
+    'config/behavior-rules.json',
+    'userdata/',
     'data/',
     'logs/',
     '.runtime/',

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdir, readdir, readFile, rename, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { parseJsonDocument } from '../core/json.js'
+import { resolveUserData } from '../core/user-data.js'
 
 export type AdminCommandStatus = 'pending' | 'processing' | 'done' | 'error'
 
@@ -24,7 +25,7 @@ function validate(command: AdminCommand): AdminCommand {
 export class AdminCommandInbox {
   readonly directory: string
 
-  constructor(directory = 'data/admin-inbox') { this.directory = path.resolve(directory) }
+  constructor(directory = 'data/admin-inbox') { this.directory = resolveUserData(directory) }
 
   async initialize(): Promise<void> {
     await this.#ensureDirectory()

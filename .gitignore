@@ -1,6 +1,7 @@
 node_modules/
 dist/
 build/
+userdata/
 data/
 logs/
 .env
@@ -9,6 +10,7 @@ config/persona.json
 config/mods.json
 config/prompts.json
 config/skin.json
+config/behavior-rules.json
 *.log
 *.tmp
 *.bak
