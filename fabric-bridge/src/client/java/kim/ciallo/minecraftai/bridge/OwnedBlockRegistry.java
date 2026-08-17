@@ -17,7 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Persistent proof of blocks placed and server-confirmed by this Bot. */
+/** 本 Bot 放置并经服务器确认的方块的持久化凭证。 */
 public final class OwnedBlockRegistry {
     private record OwnedBlock(String dimension, BlockPos position, String blockId) { }
 

@@ -27,9 +27,9 @@ import java.util.PriorityQueue;
 import java.util.Set;
 
 /**
- * Bounded A* navigator over collision-safe positions in the loaded client world.
- * Long routes are split into local segments and replanned as terrain or the goal changes.
- */
+  * 在已加载的客户端世界中，基于碰撞安全位置进行的有界 A* 寻路器。
+  * 长路线会被拆分为本地路段，并随地形或目标变化而重新规划。
+  */
 final class LocalPathNavigator {
     private static final Direction[] HORIZONTAL = {
         Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
@@ -50,7 +50,7 @@ final class LocalPathNavigator {
     private BlockPos closeAfterPassing;
     private long barrierInteractionTick = Long.MIN_VALUE;
 
-    /** Drives one client tick. Returns false only when no safe route could be planned. */
+    /** 驱动一个客户端 tick。仅当无法规划出安全路线时返回 false。 */
     boolean drive(Minecraft client, LocalPlayer player, Vec3 goal, double stopDistance, boolean sprint, long tick) {
         if (client == null || client.level == null || player == null || goal == null) {
             release(client);
@@ -59,9 +59,9 @@ final class LocalPathNavigator {
         }
         closeBarrierAfterPassing(client, player, tick);
 
-        // Horizontal distance alone is not an arrival condition.  Treating a goal one block
-        // below the player as reached made staircase mining report success while standing at
-        // the original Y level.
+        // 仅凭水平距离并不能作为到达条件。将玩家下方一格的目标视为已到达，
+        // 会导致楼梯挖掘在仍停留在原 Y 高度时
+        // 就上报成功。
         if (horizontalDistance(player.position(), goal) <= stopDistance
             && Math.abs(player.getY() - goal.y) <= 0.8D) {
             releaseControls(client);
@@ -73,11 +73,11 @@ final class LocalPathNavigator {
             return true;
         }
 
-        // A freshly placed scaffold can leave the player's body one block above the nearest
-        // graph-supported floor while it overlaps the edge of the old ledge. In that state the
-        // generic start-node projection sees a two-block rise and rejects an otherwise legal
-        // vanilla one-block jump. Validate this very small move against the player's real AABB
-        // and the destination instead of weakening A* transition rules globally.
+        // 刚放好的脚手架可能让玩家身体位于最近的可支撑图地板之上一格，
+        // 同时与旧平台的边缘重叠。在这种状态下，通用的起始节点投影会看到
+        // 两格上升，从而拒绝一个原本合法的原版一格跳跃。应当针对玩家真实的
+        // AABB 与目的地来验证这一极小的移动，而不是全局放宽
+        // A* 的转移规则。
         BlockPos directGoal = BlockPos.containing(goal.x, goal.y, goal.z);
         int dxBlocks = Math.abs(directGoal.getX() - player.blockPosition().getX());
         int dzBlocks = Math.abs(directGoal.getZ() - player.blockPosition().getZ());
@@ -92,8 +92,8 @@ final class LocalPathNavigator {
             Vec3 center = standingCenter(client, player, directGoal);
             lookAt(player, center.x, center.y, center.z, false);
             client.options.keyUp.setDown(true);
-            // Holding jump is intentional: it also handles the tick where the server changes
-            // onGround after the scaffold placement acknowledgement.
+            // 持续按住跳跃是有意为之：它还能处理服务器在脚手架放置确认后
+            // 改变 onGround 的那个 tick。
             client.options.keyJump.setDown(true);
             requestedGoal = goal;
             status = "direct_safe_step_up";
@@ -120,11 +120,11 @@ final class LocalPathNavigator {
             return false;
         }
         boolean collisionNeedsReplan = player.horizontalCollision && tick - lastPlanTick >= 4L;
-        // Do not periodically discard a route that is still making progress. Long indoor
-        // routes often need more than four seconds; repeatedly replacing a valid path before
-        // it finished made static goals (notably return_home) oscillate between two corridors.
-        // Goal movement, an invalid waypoint, a collision, an actual stall, or completion are
-        // already sufficient and deterministic replan triggers.
+        // 不要定期丢弃一条仍在推进的路线。
+        // 较长的室内路线往往需要超过四秒；在路线完成前反复替换有效路径，
+        // 会让静态目标（尤其是 return_home）在两条走廊之间来回震荡。
+        // 目标移动、路点失效、发生碰撞、真正停滞或完成
+        // 都已是充分且确定性的重新规划触发条件。
         if (goalChanged || routeFinished || stuck || waypointInvalid || collisionNeedsReplan) {
             if (!plan(client, player, goal, stopDistance, tick)) {
                 releaseControls(client);
@@ -157,8 +157,8 @@ final class LocalPathNavigator {
         if (closedBarrier != null) {
             BlockPos interactionTarget = closedBarrier.interactionTarget();
             if (closedBarrier.standOn()) {
-                // Pressure plates and tripwires open the barrier by being stepped on, not by a
-                // useItemOn click. Walk onto the actuator and hold there until the barrier opens.
+                // 压力板和绊线是通过被踩踏（而非 useItemOn 点击）来开启屏障的。
+                // 走到触发装置上并停留，直到屏障打开。
                 Vec3 targetCenter = standingCenter(client, player, interactionTarget);
                 double dx = targetCenter.x - player.getX();
                 double dz = targetCenter.z - player.getZ();
@@ -216,7 +216,7 @@ final class LocalPathNavigator {
         boolean clearAhead = client.level.noCollision(player, projected)
             || crouch && client.level.noCollision(player, crouchingBox(projected));
         if (!clearAhead && !stepUp) {
-            // Never keep pressing into a wall. Invalidate immediately; the next tick routes around it.
+            // 永远不要一直往墙上顶。立即作废当前路线；下一个 tick 会绕行。
             path = List.of();
             pathIndex = 0;
             status = "route_blocked_replan";
@@ -252,12 +252,12 @@ final class LocalPathNavigator {
         return consecutivePlanFailures;
     }
 
-    /** Graph node that represents the player's real collision-supported feet position. */
+    /** 表示玩家真实的、由碰撞支撑的脚部位置的图节点。 */
     BlockPos standingBlockPos(Minecraft client, LocalPlayer player) {
-        // When the server says the player is stably grounded/in water, blockPosition is the real
-        // feet cell. Re-projecting the current AABB to the block centre can falsely reject that
-        // cell in a narrow tunnel (the player may legitimately stand near an edge) and select the
-        // floor below, making the excavator repeatedly target the player's current Y as a climb.
+        // 当服务器判定玩家已稳定落地/在水中时，blockPosition 就是真实的脚部所在格。
+        // 把当前 AABB 重新投影到方块中心，可能在狭窄隧道中错误地拒绝该格
+        // （玩家可以合理地站在边缘附近），转而选中下方地板，导致挖掘器反复
+        // 把玩家当前的 Y 高度当作需要攀爬的目标。
         if (player != null && (player.onGround() || player.isInWater())) return player.blockPosition();
         BlockPos resolved = nearestStandableStart(client, player);
         return resolved == null ? player.blockPosition() : resolved;
@@ -519,7 +519,7 @@ final class LocalPathNavigator {
 
     private record BarrierInteraction(BlockPos barrier, BlockPos interactionTarget, boolean closeAfterPassing, boolean standOn) { }
 
-    /** Returns the actual collision-surface height, including slabs and snow layers. */
+    /** 返回实际的碰撞表面高度，包括台阶和雪层。 */
     private static double standingY(Minecraft client, BlockPos position) {
         if (client.level == null) return Double.NaN;
         if (isWaterNode(client, position)) return position.getY();
@@ -531,8 +531,8 @@ final class LocalPathNavigator {
         var sameShape = client.level.getBlockState(position).getCollisionShape(client.level, position);
         if (!sameShape.isEmpty()) {
             double height = sameShape.max(Direction.Axis.Y);
-            // Partial-height blocks occupy the nominal feet cell. Full cubes are represented by
-            // the next BlockPos above so the graph does not create duplicate standing nodes.
+            // 部分高度的方块占据名义上的脚部所在格。完整方块则用其上方一格
+            // BlockPos 表示，这样图就不会产生重复的站立节点。
             if (height > 0.0D && height < 0.99D) {
                 double surface = position.getY() + height;
                 best = Double.isFinite(best) ? Math.max(best, surface) : surface;

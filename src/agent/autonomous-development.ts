@@ -39,8 +39,8 @@ function resourcePlan(
   targetY: number
 ): DevelopmentPlan {
   const gatherKey = `gather_resource:${resource}`
-  // A failed stone route must not force later coal/iron/diamond searches into blind
-  // tunnelling when the requested ore is already visible.
+  // 当请求的矿石已经可见时，之前失败的石头路线绝不能迫使后续的
+  // 煤/铁/钻石搜索进入盲目挖掘。
   const failures = progression?.failures[gatherKey]?.count ?? 0
   if (hasSurveyed(world, category) && failures < 3) {
     return plan(stage, `附近扫描发现 ${category}，直接采集并验证掉落物`, { type: 'gather_resource', resource, count })
@@ -117,9 +117,9 @@ function bedWoolStack(world: WorldState): { itemId: string; count: number } | un
 }
 
 /**
- * Chooses one deterministic, observable step toward durable self-sufficiency.
- * The AI keeps itself fed, sheltered and equipped on its own, but it never pushes
- * toward the End as an autonomous goal; every tool remains available when a player asks.
+ * 选择朝向持久自给自足的一步确定、可观察的行动。
+ * AI 会自行保持进食、庇护和装备，但它绝不会把
+ * 前往末地当作自主目标；当玩家要求时，所有工具仍然可用。
  */
 export function planAutonomousDevelopment(
   config: BotConfig,
@@ -150,11 +150,24 @@ export function planAutonomousDevelopment(
   const fuel = coal + logs + planks
   const lastFailure = progression?.lastResult?.ok === false ? progression.lastResult.detail : ''
 
-  // Survival always pre-empts progression. Hunger below 20 is actionable by design.
+  // 生存始终优先于发展。饥饿值低于 20 时按设计会触发行动。
   if (world.dimension === 'minecraft:the_end' && food < 20 && readyFood === 0 && autonomy.autoDimensionTravel) {
     return plan('survive', '末地没有可获取的普通食物，先经中央出口返回主世界补给', { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
   }
   if (food < 20 && readyFood > 0) return plan('survive', `饥饿值 ${food}/20，立即进食`, { type: 'eat_best_food' })
+
+  // 空闲时若漂在非主世界维度（下界/末地），先返回主世界再回家/安全待机。
+  if (world.dimension === 'minecraft:the_nether' || world.dimension === 'minecraft:the_end') {
+    const dimLabel = world.dimension === 'minecraft:the_nether' ? '下界' : '末地'
+    return plan('survive', `当前在${dimLabel}，空闲先返回主世界`, { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
+  }
+
+  // 陪伴模式默认不做自主自给自足：破坏/采集/狩猎/建造/合成都留给玩家明确指令，
+  // 这里只保留进食等纯生存反射（水下换气、逃生、受击自卫由 Java 本地层负责）。
+  const selfSufficient = autonomy.autoGather || autonomy.autoMine || autonomy.autoHunt
+    || autonomy.autoCraft || autonomy.autoBuildShelter || autonomy.autoSmelt
+    || autonomy.autoTrade || autonomy.autoEnchant
+  if (!selfSufficient) return undefined
   if (food < 20 && raw && hasNearbyOwnedBlock(world, id => id === 'minecraft:furnace') && fuel > 0 && autonomy.autoSmelt) {
     return plan('survive', '安全熟食不足，先把现有生食烹饪成熟食', { type: 'smelt_item', inputItemId: raw, count: Math.min(8, count(world, id => id === raw)) })
   }
@@ -194,7 +207,7 @@ export function planAutonomousDevelopment(
   }
 
   if (world.dimension === 'minecraft:the_end') {
-    // The End is not an autonomous goal; if the AI is already there it just holds a safe position.
+    // 末地不是自主目标；如果 AI 已经在那里，它只会保持一个安全位置。
     return undefined
   }
 
@@ -221,12 +234,12 @@ export function planAutonomousDevelopment(
     if (readyFood < 8 && autonomy.autoHunt) {
       return plan('survive', '下界行动前补充食物掉落物储备', { type: 'hunt_entity', purpose: 'food', count: 8 - readyFood })
     }
-    // Nether self-sufficiency stops at food; the AI no longer farms blaze rods to reach the End.
+    // 下界的自给自足止步于食物；AI 不再为了前往末地而刷烈焰棒。
     return undefined
   }
 
-  // Resource decisions require the Fabric block/structure survey. Waiting for the
-  // next state frame is safer than guessing from an incomplete bridge snapshot.
+  // 资源决策需要 Fabric 的方块/结构勘察。等待
+  // 下一帧状态比从不完整的桥接快照猜测更安全。
   if (!world.blockSurvey) return undefined
 
   if (progression?.lastAction === 'hunt_entity' && /no_safe_(?:loaded_hunt_target|route_to_hunt_(?:target|drop))/iu.test(lastFailure)
@@ -378,7 +391,7 @@ export function planAutonomousDevelopment(
     return resourcePlan(world, progression, 'enchanting', 'coal', 'coal_ore', 4, 32)
   }
 
-  // Self-sufficiency is complete: hold a safe position and let companion behaviours
-  // (follow, protect, chat) take over. No autonomous Nether portal or stronghold hunt.
+  // 自给自足已完成：保持安全位置，让陪伴行为
+  // （跟随、保护、聊天）接管。不再自主寻找下界传送门或要塞。
   return undefined
 }

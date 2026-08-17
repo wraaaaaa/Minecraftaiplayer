@@ -9,11 +9,11 @@ import net.minecraft.world.item.ItemStack;
 import java.util.Set;
 
 /**
- * Deterministic inventory triage used by make_inventory_room and accept_items. The bot may
- * discard the lowest-priority stacks when the backpack is full and it must pick something up.
- * Nothing valuable is ever auto-discarded: enchanted gear, safe food, undamaged tools and
- * unknown items are all off-limits.
- */
+  * 供 make_inventory_room 与 accept_items 使用的确定性背包分诊。当背包已满且
+  * 必须拾取物品时，bot 可以丢弃优先级最低的物品堆。任何有价值的东西都不会被
+  * 自动丢弃：附魔装备、安全食物、未损坏的工具以及未知物品都一律不会被
+  * 动用。
+  */
 final class InventoryCleanup {
     private static final Set<String> UNSAFE_FOOD = Set.of(
         "minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:poisonous_potato",
@@ -27,7 +27,7 @@ final class InventoryCleanup {
         "minecraft:andesite", "minecraft:stone", "minecraft:grass_block", "minecraft:mud"
     );
 
-    /** Reserve kept for scaffolding and emergency building before filler becomes disposable. */
+    /** 在填充方块变得可丢弃之前，为搭脚手架和紧急建造保留的储备。 */
     private static final int FILLER_RESERVE = 16;
 
     private InventoryCleanup() { }
@@ -40,7 +40,7 @@ final class InventoryCleanup {
         return free;
     }
 
-    /** Lower value means discard sooner. Integer.MAX_VALUE means never auto-discard. */
+    /** 数值越小表示越先被丢弃。Integer.MAX_VALUE 表示永不自动丢弃。 */
     static int discardPriority(ItemStack stack, int countInInventory) {
         if (stack.isEmpty()) return Integer.MAX_VALUE;
         if (!stack.getEnchantments().isEmpty()) return Integer.MAX_VALUE;
@@ -65,7 +65,7 @@ final class InventoryCleanup {
         return "filler_excess";
     }
 
-    /** Picks the single worst (lowest-priority) discardable backpack slot, or -1 when none. */
+    /** 挑选单个最差（优先级最低）的可丢弃背包槽位；没有时返回 -1。 */
     static int discardableSlot(LocalPlayer player) {
         int bestSlot = -1;
         int bestPriority = Integer.MAX_VALUE;

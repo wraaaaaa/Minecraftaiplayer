@@ -8,7 +8,7 @@ export interface ServerStatus {
   latencyMs: number | undefined
 }
 
-/** Minecraft protocol VarInt (LEB128, up to 5 bytes). */
+/** Minecraft 协议 VarInt（LEB128，最多 5 字节）。 */
 function writeVarInt(value: number): Buffer {
   const bytes: number[] = []
   let current = value >>> 0
@@ -53,9 +53,9 @@ function readString(buffer: Buffer, offset: number): { value: string; length: nu
 }
 
 /**
- * Queries a Minecraft server's status using the Server List Ping protocol.
- * This is a transient, unauthenticated connection: it never logs in and never
- * occupies a player slot, so it can poll player counts without disturbing the server.
+ * 使用 Server List Ping 协议查询 Minecraft 服务器的状态。
+ * 这是一个短暂的、未经认证的连接：它从不登录，也从不
+ * 占用玩家槽位，因此可以在不打扰服务器的情况下轮询玩家数量。
  */
 export function queryServerStatus(host: string, port: number, protocolVersion: number, timeoutMs = 5000): Promise<ServerStatus> {
   return new Promise((resolve, reject) => {

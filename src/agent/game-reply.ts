@@ -7,9 +7,9 @@ function normalize(value: string): string {
 }
 
 /**
- * Converts an untrusted model answer into the only text allowed to reach Minecraft chat.
- * A model may put a usable final answer after its scratchpad; in that case only the final
- * addressed segment is retained.  Otherwise any internal marker makes the safe fallback win.
+ * 将不可信的模型回答转换为唯一允许进入 Minecraft 聊天的文本。
+ * 模型可能在草稿之后给出可用的最终回答；此时只保留最后
+ * 被称呼的那一段。否则任何内部标记都会让安全回退文本胜出。
  */
 export function naturalGameText(value: string | undefined, fallback: string, recipient?: string): string {
   const raw = value ?? ''
@@ -42,17 +42,103 @@ const ACKNOWLEDGEMENTS = [
   '我知道你想要什么了，现在就开始弄；要是环境有变化，我会自己想办法绕开的喵~',
   '好呀，我已经记住这件事了，先去现场看看，再挑最合适的做法喵。',
   '嗯，我来处理，先给我一点点时间确认路线和背包，马上开始喵~',
-  '明白啦，我不会只站着发呆的，这就根据眼前情况一步步做起来喵。'
+  '明白啦，我不会只站着发呆的，这就根据眼前情况一步步做起来喵。',
+  '包在我身上啦，我先把思路理顺，马上就动手，你就在这儿等我的好消息喵~',
+  '好嘞，这件事我记下了，这就过去看看怎么弄最合适，等我一下下喵。',
+  '嗯嗯，我听到啦，已经在准备了，稍微给我点时间观察一下周围再动手喵~',
+  '放心交给我吧，我会小心点做，遇到麻烦就换别的办法，不会硬来的喵。',
+  '我懂啦，这就去办，路上会留意周围的变化，不会走神的喵~',
+  '好，我先看下手上有什么、附近是什么地形，然后就开工，你等我消息喵。',
+  '收到命令，我这就动起来啦，一边做一边看情况调整，你别担心喵~',
+  '知道啦，这件事不难，我这就过去处理，做完第一时间告诉你喵。'
 ] as const
 
+export const FAILURE_REPLIES = [
+  '唔，我刚才认真试了，可这会儿还是没弄成，有点不甘心。具体卡住的地方我都记在总控台了，等条件合适再陪你试一次喵。',
+  '哎呀，这次没办成，我有点不好意思。原因我已经记下来了，换个时机我再试试看喵。',
+  '对不起呀，这件事现在做不了，我把卡点都记在总控台里了，等你方便的时候我们再一起想办法喵。',
+  '这次碰了壁，不过没关系，我已经把问题记下来了，下次我会换个思路再试，你别失望喵。',
+  '呜，我试过了但没成，具体原因在总控台能看到。等条件好一点，我再陪你试一次好不好喵。',
+  '这次没弄好，我心里也有点急，不过不会乱来的。先歇一歇，等会儿我换个办法再试喵。',
+  '抱歉啦，刚才那步卡住了，细节我都留在总控台了，稍后我再想办法补上喵。',
+  '这件事暂时做不成，我不硬撑了，原因都记下来了，等时机合适我再来喵。',
+  '呜哇，又差一点点，不过失败原因我都记好了，下次一定注意，你等我喵。',
+  '不好意思，这次没能完成，我把遇到的问题都整理到总控台了，回头再陪你试喵。'
+] as const
+
+export const TIMEOUT_REPLIES = [
+  '我刚才脑子卡了一下，你再说一遍？',
+  '诶，刚刚走神了，能再跟我说一次吗？',
+  '刚才我有点卡壳，麻烦你再说一遍，这次一定认真听喵。',
+  '抱歉，刚刚没反应过来，你再讲一次好不好？',
+  '我刚刚愣了一下神，能再重复一遍你的话吗喵？',
+  '呀，刚才好像卡住了，麻烦你再跟我说一次，我马上就来喵。'
+] as const
+
+export const COMPLETION_REPLIES = [
+  '嗯，弄好了。',
+  '好啦，按你说的办完了。',
+  '搞定啦，你看这样行不行？',
+  '做完啦，我在原地等你。',
+  '好啦，已经处理完啦。',
+  '完成啦，还需要我做点别的吗？',
+  '都弄好啦，有什么要补充的随时说喵。',
+  '办妥啦，接下来听你的。'
+] as const
+
+export const LISTENING_REPLIES = [
+  '嗯，我在听。',
+  '我在呢，你说。',
+  '我听着呢，继续讲呀。',
+  '嗯嗯，我在这里。',
+  '在的，怎么啦？',
+  '我在这儿呢，你说吧。',
+  '听着呢，接着说喵。',
+  '我在，怎么啦？'
+] as const
+
+export const SECRET_REFUSAL_REPLIES = [
+  '这个我不能说啦，里面有不能外传的私密设置。你换个话题陪我聊嘛，我还想继续和你一起玩喵~',
+  '这个不能告诉你哦，是私密设置。我们聊点别的吧，我都想你了喵~',
+  '不行哦，这个涉及隐私，我不能说。换个别的话题陪我玩嘛喵。',
+  '这个我不能说啦，是保密的。你想聊游戏还是别的，我都陪你喵。',
+  '私密的东西我不能告诉你哦。来，我们换个开心的话题吧喵~'
+] as const
+
+export const IDLE_REPLIES = [
+  '我在附近，有需要就叫我。',
+  '我就在这附近转悠，有事喊我喵。',
+  '我在旁边待着，想做什么就叫我。',
+  '我在这附近，需要我做什么随时说。',
+  '我在这儿呢，有需要招呼我一声喵。',
+  '我就在不远处，随叫随到喵。',
+  '我在附近守着，有事直接说。',
+  '我在这里等你，有需要叫我。'
+] as const
+
+export function pickVaried(pool: readonly string[], avoid?: string): string {
+  const options = pool.length > 1 && avoid ? pool.filter(reply => reply !== avoid) : pool
+  const poolToUse = options.length > 0 ? options : pool
+  return poolToUse[Math.floor(Math.random() * poolToUse.length)] ?? pool[0]!
+}
+
 export class ReplyComposer {
-  #acknowledgementIndex = 0
+  #lastAcknowledgement = ''
   readonly #lastByPlayer = new Map<string, string>()
 
   acknowledgement(seed = ''): string {
     void seed
-    const index = this.#acknowledgementIndex++ % ACKNOWLEDGEMENTS.length
-    return ACKNOWLEDGEMENTS[index]!
+    const picked = pickVaried(ACKNOWLEDGEMENTS, this.#lastAcknowledgement)
+    this.#lastAcknowledgement = picked
+    return picked
+  }
+
+  varied(pool: readonly string[], playerName = ''): string {
+    const key = playerName.trim().toLowerCase()
+    const previous = key ? this.#lastByPlayer.get(key) : undefined
+    const picked = pickVaried(pool, previous)
+    if (key) this.#lastByPlayer.set(key, picked)
+    return picked
   }
 
   avoidImmediateRepeat(playerName: string, reply: string): string {

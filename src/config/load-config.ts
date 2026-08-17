@@ -188,8 +188,8 @@ export function validateConfig(config: BotConfig): void {
       for (const key of ['x', 'y', 'z'] as const) if (!Number.isFinite(home[key])) throw new Error(`autonomy.firstHome.${key} 必须是有限数字`)
       if (!Number.isFinite(home.radius) || home.radius < 1 || home.radius > 64) throw new Error('autonomy.firstHome.radius 必须在 1-64 之间')
     }
-    // developmentZone is deliberately not validated. It is a removed legacy field,
-    // ignored by autonomyConfig(), and must never block startup or grant permission.
+    // developmentZone 被有意地不做校验。它是一个已移除的遗留字段，
+    // 被 autonomyConfig() 忽略，绝不能阻塞启动或授予权限。
   }
   if (config.playerMonitor !== undefined) {
     if (typeof config.playerMonitor.enabled !== 'boolean') throw new Error('playerMonitor.enabled 必须是布尔值')

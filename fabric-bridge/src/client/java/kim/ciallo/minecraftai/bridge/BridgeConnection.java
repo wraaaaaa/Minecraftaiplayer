@@ -68,7 +68,7 @@ final class BridgeConnection implements AutoCloseable {
                             if (line == null) break;
                             if (line.length() <= 1_000_000) incoming.add(GSON.fromJson(line, JsonObject.class));
                         } catch (SocketTimeoutException ignored) {
-                            // Timeout lets this loop flush outgoing messages and observe shutdown.
+                            // 超时让本循环得以冲刷待发送消息并观察关闭状态。
                         }
                     }
                 }

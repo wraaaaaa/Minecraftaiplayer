@@ -1,8 +1,8 @@
 /**
- * Remove credentials from text before it is exposed by the local WebUI.
+ * 在文本暴露给本地 WebUI 之前移除其中的凭据。
  *
- * JWTs always begin with a base64url encoded JSON header ("eyJ..."). Requiring
- * that prefix avoids treating Java package names and stack-trace frames as JWTs.
+ * JWT 总是以 base64url 编码的 JSON 头（"eyJ..."）开头。要求匹配该前缀，
+ * 可以避免把 Java 包名和堆栈跟踪帧误判为 JWT。
  */
 export function redactForWebUi(value: string): string {
   return value

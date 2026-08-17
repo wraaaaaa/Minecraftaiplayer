@@ -54,12 +54,12 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 /**
- * Tick-driven shelter construction and conservative shelter seeking.
- *
- * <p>This controller never edits world blocks or item stacks directly. Construction uses the
- * normal multiplayer {@code useItemOn} path and regards a placement as complete only after the
- * expected server-synchronised block state remains visible for several client ticks.</p>
- */
+  * 由 tick 驱动的庇护所建造与保守的庇护所寻找。
+  *
+  * <p>该控制器从不直接修改世界方块或物品堆。建造使用正常的多人游戏 {@code useItemOn}
+  * 路径，并且只有在预期的服务器同步方块状态在多个客户端 tick 内保持可见后，
+  * 才视为放置完成。</p>
+  */
 public final class ShelterController {
     private static final int HOME_FORMAT_VERSION = 1;
     private static final long MAX_HOME_FILE_BYTES = 16_384L;
@@ -108,7 +108,7 @@ public final class ShelterController {
         }
     }
 
-    /** A defensive copy-like immutable snapshot of the remembered shelter entrance and interior. */
+    /** 记忆中的庇护所入口与内部的防御性、类拷贝不可变快照。 */
     public record HomeSnapshot(
         String dimension,
         BlockPos position,
@@ -185,7 +185,7 @@ public final class ShelterController {
         persistenceIssue = storage.issue();
     }
 
-    /** Accepts one supported shelter action when no other shelter action is active. */
+    /** 在没有其他庇护所动作处于活动状态时，接受一个受支持的庇护所动作。 */
     public boolean start(String id, JsonObject action, Minecraft client) {
         if (id == null || id.isBlank()) return false;
         if (active != null) {
@@ -223,7 +223,7 @@ public final class ShelterController {
         return true;
     }
 
-    /** Advances the active shelter task once on the Minecraft client thread. */
+    /** 在 Minecraft 客户端线程上推进活动庇护所任务一次。 */
     public void tick(Minecraft client) {
         tick++;
         ShelterTask task = active;
@@ -255,14 +255,14 @@ public final class ShelterController {
         return true;
     }
 
-    /** Returns and clears all terminal results. */
+    /** 返回并清空所有终态结果。 */
     public List<TaskResult> drainResults() {
         List<TaskResult> drained = new ArrayList<>(results);
         results.clear();
         return drained;
     }
 
-    /** Returns an empty string when idle. */
+    /** 空闲时返回空字符串。 */
     public String activeType() {
         return active == null ? "" : active.type;
     }
@@ -283,15 +283,15 @@ public final class ShelterController {
         return approvedZone;
     }
 
-    /** Returns the loaded or newly built home, or {@code null} when none is validly recorded. */
+    /** 返回已加载或新建的家；当没有有效记录时返回 {@code null}。 */
     public HomeSnapshot homeSnapshot() {
         return home;
     }
 
     /**
-     * Sets the wilderness exclusion radius used only by {@code build_shelter}.
-     * Values are conservatively clamped to 8..512 blocks so this safety boundary cannot be disabled.
-     */
+      * 设置仅由 {@code build_shelter} 使用的荒野排除半径。
+      * 数值会被保守地限制在 8..512 格范围内，以使该安全边界无法被禁用。
+      */
     public void setMinimumPlayerDistance(double distance) {
         if (!Double.isFinite(distance)) throw new IllegalArgumentException("minimum player distance must be finite");
         minimumPlayerDistance = Math.max(8.0D, Math.min(512.0D, distance));
@@ -346,7 +346,7 @@ public final class ShelterController {
                 "no safe flat 3x3 build site found in the verified work window without replacing protected blocks"));
             return null;
         }
-        int requiredWorldBlocks = site.targets().size() + 3; // one two-block door and one torch
+        int requiredWorldBlocks = site.targets().size() + 3; // 一扇两格高的门和一支火把
         if (requiredWorldBlocks > blockBudget) {
             results.add(new TaskResult(id, false, "block budget " + blockBudget
                 + " is below the verified safe-shelter requirement " + requiredWorldBlocks));
@@ -1674,7 +1674,7 @@ public final class ShelterController {
                 try {
                     Files.deleteIfExists(temporary);
                 } catch (IOException ignored) {
-                    // The final result already reports the material persistence error, if any.
+                    // 最终结果已经上报了（如果有的话）实质性的持久化错误。
                 }
             }
         }

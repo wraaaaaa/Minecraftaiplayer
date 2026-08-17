@@ -53,9 +53,9 @@ export class AtomicJsonFile<T> {
       await rename(temporary, this.#file)
     } catch (error) {
       if (process.platform !== 'win32') throw error
-      // Windows may briefly deny unlink/rename while the WebUI is polling the file or an
-      // antivirus scanner has an open handle. Retrying keeps the atomic temp+backup contract and
-      // prevents a read-only dashboard from permanently stopping runtime-state persistence.
+      // 当 WebUI 正在轮询该文件或杀毒软件扫描器持有打开句柄时，Windows 可能会短暂地拒绝 unlink/rename。
+      // 重试可以维持原子的 temp+backup 契约，并
+      // 防止只读仪表盘永久停止运行时状态的持久化。
       let lastError: unknown = error
       for (let attempt = 0; attempt < 8; attempt += 1) {
         try {
@@ -69,9 +69,9 @@ export class AtomicJsonFile<T> {
           await new Promise(resolve => setTimeout(resolve, Math.min(25 * (attempt + 1), 250)))
         }
       }
-      // Some Windows scanners keep FILE_SHARE_DELETE disabled for seconds at a time. The backup
-      // above still makes this recoverable, so use an in-place replacement as the bounded final
-      // fallback instead of dropping every subsequent status update forever.
+      // 某些 Windows 扫描器会在数秒内保持 FILE_SHARE_DELETE 禁用。上面的备份
+      // 仍使其可恢复，因此使用原地替换作为有边界的最终
+      // 回退方案，而不是永久丢弃之后每一次状态更新。
       try {
         await writeFile(this.#file, body, 'utf8')
         await rm(temporary, { force: true })

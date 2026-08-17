@@ -3,11 +3,10 @@ import path from 'node:path'
 import process from 'node:process'
 
 /**
- * One-time migration into the single user-data folder. Older versions scattered personal
- * files across config/, data/ and .env; newer versions read them all from userdata/.
- * This script moves each legacy file only when the userdata copy does not yet exist, so it
- * is safe to run repeatedly. Templates (config/*.example.json, config/agent-prompts.example/)
- * stay in the repository and are never moved.
+ * 一次性迁移到统一的用户数据文件夹。旧版本会把个人文件分散在 config/、data/ 和 .env 中；
+ * 新版本则从 userdata/ 中读取所有这些文件。此脚本只会在 userdata 中的副本尚不存在时
+ * 才移动每个旧文件，因此可以安全地重复运行。模板（config/*.example.json、
+ * config/agent-prompts.example/）保留在仓库中，永远不会被移动。
  */
 
 const projectRoot = path.resolve(import.meta.dirname, '..')

@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Runtime-only evidence that a moving work area does not resemble player property. */
+/** 仅在运行时使用的证据，用于判断某个移动中的工作区域不像玩家领地。 */
 public final class WildernessGuard {
     public static final int DEFAULT_SCAN_RADIUS = 10;
     private static final TagKey<Block> COAL_ORES = blockTag("minecraft:coal_ores");
@@ -93,7 +93,7 @@ public final class WildernessGuard {
         );
     }
 
-    /** Per-block rule for autonomous excavation; deliberately excludes every workstation/building family. */
+    /** 自主挖掘的逐方块规则；有意排除所有工作台/建筑类方块。 */
     public static boolean safeNaturalBreak(Minecraft client, BlockPos position) {
         if (client == null || client.level == null || !client.level.isLoaded(position)) return false;
         if (client.level.getBlockEntity(position) != null) return false;
@@ -116,7 +116,7 @@ public final class WildernessGuard {
         ).contains(path) || path.endsWith("_ore") || path.equals("obsidian") && naturalObsidianEvidence(client, position);
     }
 
-    /** Candidate-level placement guard; unlike assess(), it does not reject harmless mining near a structure. */
+    /** 候选级放置守卫；与 assess() 不同，它不会拒绝在结构附近进行的无害挖掘。 */
     public static boolean safePlacementArea(Minecraft client, BlockPos center, int radius) {
         if (client == null || client.level == null || !client.level.isLoaded(center)) return false;
         int scan = Math.max(2, Math.min(8, radius));

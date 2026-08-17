@@ -152,7 +152,7 @@ export class SelfImprovementManager {
     try {
       research = await this.research(`Minecraft 26.2 Fabric AI bot ${input.action.type} ${record.normalizedError}`)
     } catch {
-      // Offline research is non-fatal. The model can still derive a bounded correction from local evidence.
+      // 离线研究是非致命性的。模型仍可根据本地证据推导出有边界的修正。
     }
     const response = await this.#provider.complete({
       system: [

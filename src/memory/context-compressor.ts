@@ -82,8 +82,8 @@ export class ContextCompressor {
     }
     if (!result.conversationSummary) throw new Error('压缩结果缺少 conversationSummary')
     if (result.conversationSummary.includes('[REDACTED]') || result.playerProfileMarkdown.includes('[REDACTED]')) throw new Error('压缩结果包含敏感信息替代符，已拒绝写入')
-    // Persist the derived profile first. If this write fails, no source event is removed.
-    // A later memory write failure may leave a harmless newer profile, but never loses raw context.
+    // 先持久化推导出的画像。如果这次写入失败，不会删除任何源事件。
+    // 后续记忆写入失败最多留下一个无害的较新画像，但绝不会丢失原始上下文。
     await this.#workspace.updateAutoProfile(identity, result.playerProfileMarkdown, candidate.player)
     await this.#memory.compactPlayer(identity, {
       conversationSummary: result.conversationSummary,

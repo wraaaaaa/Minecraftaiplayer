@@ -6,10 +6,10 @@ function assignmentKey(line: string): string | undefined {
 }
 
 /**
- * Updates only keys owned by the WebUI while preserving comments, blank lines,
- * ordering and custom environment variables. Empty-string updates mean "leave
- * unchanged" so the UI can submit masked/blank secret inputs safely; null removes
- * a managed key explicitly.
+ * 仅更新由 WebUI 管理的键，同时保留注释、空行、
+ * 顺序以及自定义环境变量。空字符串更新表示“保持不变”，
+ * 以便 UI 能安全地提交被遮罩/留空的密钥输入；null 则显式移除
+ * 一个受管键。
  */
 export function mergeManagedEnv(
   source: string,

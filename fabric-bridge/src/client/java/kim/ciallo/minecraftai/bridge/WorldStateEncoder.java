@@ -42,7 +42,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
-/** Produces the protocol-v2 structured state consumed by the controller. */
+/** 生成供控制器消费的 protocol-v2 结构化状态。 */
 public final class WorldStateEncoder {
     public static final int SCHEMA_VERSION = 2;
     public static final double ENTITY_SCAN_RADIUS = 24.0D;

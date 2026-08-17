@@ -20,9 +20,9 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Last-resort terrain recovery for a persistent route. It may only break blocks that pass
- * the hard natural-block guard, or place an owned disposable bridge in verified wilderness.
- */
+  * 面向持久路线的最后手段地形恢复。它只能破坏通过严格自然方块守卫的方块，
+  * 或在已验证的荒野中放置一座归 bot 所有的一次性桥梁。
+  */
 final class TraversalRecovery {
     private static final Set<String> BRIDGE_MATERIALS = Set.of(
         "minecraft:cobblestone", "minecraft:cobbled_deepslate", "minecraft:dirt",
@@ -51,7 +51,7 @@ final class TraversalRecovery {
         status = "idle";
     }
 
-    /** Returns true while recovery owns this tick. */
+    /** 当恢复流程占用本 tick 时返回 true。 */
     boolean tick(Minecraft client, LocalPlayer player, Vec3 goal, int planFailures, long tick) {
         if (client == null || client.level == null || client.gameMode == null || player == null || goal == null) {
             reset(client);

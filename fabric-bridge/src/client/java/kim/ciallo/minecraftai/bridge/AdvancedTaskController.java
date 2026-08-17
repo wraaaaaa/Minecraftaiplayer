@@ -47,7 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Tick-driven survival primitives that require entities, containers, or multi-block movement. */
+/** 由 tick 驱动的生存原语，需要实体、容器或多方块移动。 */
 public final class AdvancedTaskController {
     private static final int HUNT_TIMEOUT_TICKS = 4_800;
     private static final int SMELT_TIMEOUT_TICKS = 7_200;
@@ -361,13 +361,13 @@ public final class AdvancedTaskController {
                 }
                 return;
             }
-            // Vanilla pickup is server-authoritative; wait beside the entity and only finish
-            // after the inventory delta is observed on a subsequent tick.
+            // 原版拾取由服务器裁定；在实体旁等待，并且只有在后续 tick 中观察到
+            // 背包增量之后才算完成。
             navigator.release(client);
             clearControls(client);
             if (InventoryCleanup.freeSlots(player) == 0 && tick - pickupWaitStarted > 20L) {
-                // Backpack is full: proactively drop the lowest-priority stack so the offered
-                // item can actually be picked up, then keep waiting for the server delta.
+                // 背包已满：主动丢弃优先级最低的物品堆，以便真正拾取对方提供的物品，
+                // 然后继续等待服务器侧的增量。
                 int discardSlot = InventoryCleanup.discardableSlot(player);
                 if (discardSlot >= 0) {
                     int menuSlot = discardSlot < 9 ? InventoryMenu.USE_ROW_SLOT_START + discardSlot : discardSlot;
@@ -715,8 +715,8 @@ public final class AdvancedTaskController {
             }
             if (direction == null) throw new IllegalArgumentException("no safe natural direction for the first excavation segment; "
                 + excavationDirectionReport(client, client.player, targetY));
-            // Every broken block is verified below. Nearby structures must not turn unrelated
-            // natural stone or ore into an artificial global no-mining zone.
+            // 每个被破坏的方块都会在下方进行验证。附近的结构不应把无关的
+            // 天然石头或矿石变成一个人为的全局禁挖区。
         }
 
         @Override
@@ -765,19 +765,19 @@ public final class AdvancedTaskController {
             if (stepGoal == null) return;
             BlockPos feet = standing;
             if (stable && verticalDirection != 0 && Math.abs(stepGoal.getY() - feet.getY()) > 1) {
-                // The Bot slid or fell off a completed stair. Discard the now unreachable stale
-                // goal and continue from the real landing cell instead of repeatedly walking into
-                // the wall below it.
+                // Bot 从已完成的楼梯上滑落或摔落。丢弃现在已不可达的陈旧目标，
+                // 并从真实的落点格继续，而不是反复撞向其下方的
+                // 墙壁。
                 stepGoal = null;
                 navigator.release(client);
                 return;
             }
             double stepDx = player.getX() - (stepGoal.getX() + 0.5D);
             double stepDz = player.getZ() - (stepGoal.getZ() + 0.5D);
-            // A jump briefly raises blockPosition before the server confirms a landing. Counting
-            // that airborne tick as a completed stair made the next goal two blocks above the
-            // real floor, after which the Bot fell back and A* correctly refused the impossible
-            // jump. Only persist progress once grounded (water movement is handled separately).
+            // 跳跃会在服务器确认落地之前短暂抬高 blockPosition。把那个腾空的 tick
+            // 计为一阶已完成的楼梯，会让下一个目标位于真实地板之上两格，随后 Bot
+            // 掉落，A* 也会正确地拒绝这次不可能完成的跳跃。只有在落地之后才持久化
+            // 进度（水中移动另行处理）。
             boolean verifiedGoalY = feet.getY() == stepGoal.getY()
                 || Math.abs(player.getY() - stepGoal.getY()) <= 0.25D;
             if ((player.onGround() || player.isInWater())
@@ -799,9 +799,9 @@ public final class AdvancedTaskController {
             BlockPos current = navigator.standingBlockPos(client, player);
             int dy = Integer.compare(targetY, current.getY());
             if (dy != 0) {
-                // Re-evaluate all four directions at every stair. A direction which was solid
-                // six blocks ago can open into a cave; continuing blindly would excavate a feet
-                // cell over air and leave the collision navigator with no legal landing.
+                // 每一级楼梯都要重新评估全部四个方向。六格前还是实心的方向可能通向洞穴；
+                // 盲目继续会在空气上方挖出脚部所在格，导致碰撞寻路器没有合法的
+                // 落点。
                 Direction safeDirection = chooseExcavationDirection(client, player, targetY);
                 if (safeDirection == null && dy > 0) safeDirection = chooseScaffoldDirection(client, player);
                 if (safeDirection == null) {
@@ -834,10 +834,10 @@ public final class AdvancedTaskController {
                     finish(client, this, false, "upward_stair_has_no_solid_support at " + support.toShortString());
                     return;
                 }
-                // Clear every ceiling cell touched by the real player AABB, not only the block
-                // containing the feet. A player standing close to an X/Z boundary overlaps two
-                // columns; clearing one column made the collision planner correctly reject the
-                // jump forever even though the nominal tunnel cell looked open.
+                // 清除真实玩家 AABB 触及的每一个天花板格，而不仅仅是包含脚部的那一个方块。
+                // 紧靠 X/Z 边界站立的玩家会与两列方块重叠；只清除一列会让碰撞规划器
+                // 永远正确地拒绝这次跳跃，即便名义上的隧道格
+                // 看起来是畅通的。
                 var body = player.getBoundingBox();
                 int minX = (int) Math.floor(body.minX + 1.0E-5D);
                 int maxX = (int) Math.floor(body.maxX - 1.0E-5D);
@@ -967,8 +967,8 @@ public final class AdvancedTaskController {
         ExploreTask(String id, JsonObject action, LocalPlayer player) {
             super(id, "explore_frontier", EXPLORE_TIMEOUT_TICKS);
             purpose = string(action, "purpose", "resource");
-            // One action is one bounded route segment. Long exploration is resumed by the
-            // persistent planner, preventing the Node action timeout from cancelling real progress.
+            // 一个动作对应一个有界的路线段。较长的探索由持久化规划器恢复执行，
+            // 从而避免 Node 动作超时取消真实进度。
             radius = Math.min(48.0D, integer(action, "radius", 8, 256, 32));
             goal = frontierGoal(player, radius, frontierSequence++);
         }
@@ -1189,7 +1189,7 @@ public final class AdvancedTaskController {
                     useBlock(client, player, emptyFrame);
                     return;
                 }
-                // Every visible frame has an eye; allow the server one moment to form the portal.
+                // 每个可见的框架都已放入末影之眼；给服务器一点时间来生成传送门。
                 if (tick - lastFrameScan > 60L) finish(client, this, false, "all visible frames contain eyes but no end portal formed");
                 return;
             }
@@ -1705,9 +1705,9 @@ public final class AdvancedTaskController {
             BlockPos cursor = player.blockPosition();
             double score = direction == preferred ? 0.0D : direction == preferred.getOpposite() ? 1.5D : 0.75D;
             boolean unsafe = false;
-            // Upward routes may need to turn around gravel pockets or the previously excavated
-            // corridor. Validate the next supported stair here and reselect again after every
-            // successful step instead of rejecting a usable exit because step two differs.
+            // 向上路线可能需要绕过砾石层或此前挖出的走廊。在此验证下一个有支撑的
+            // 楼梯，并在每次成功迈步后重新选择，而不是因为第二步不同就拒绝
+            // 一个可用的出口。
             int lookAhead = targetY > player.blockPosition().getY() ? 1 : 6;
             for (int step = 0; step < lookAhead; step++) {
                 int dy = Integer.compare(targetY, cursor.getY());
@@ -1715,9 +1715,9 @@ public final class AdvancedTaskController {
                 if (dy != 0) {
                     BlockPos support = cursor.below();
                     BlockState supportState = client.level.getBlockState(support);
-                    // Both ascending and descending stairs need a real collision floor. In
-                    // particular, never break the next lower feet cell when it hangs over a
-                    // cave: choose another direction instead of walking into air or looping.
+                    // 上楼梯和下楼梯都需要真实的碰撞地板。尤其不要在下一格较低的脚部格
+                    // 悬于洞穴上方时去破坏它：应当选择其他方向，而不是走入空中或
+                    // 原地打转。
                     if (supportState.isAir() || !supportState.getFluidState().isEmpty()
                         || supportState.getCollisionShape(client.level, support).isEmpty()) {
                         unsafe = true;

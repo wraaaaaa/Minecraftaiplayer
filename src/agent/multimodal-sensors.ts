@@ -118,7 +118,7 @@ export async function sensorySnapshot(config: BotConfig['model'], capabilities: 
         attachments.push({ type: 'audio', mimeType: descriptor.mimeType, dataBase64: bytes.toString('base64') })
         audio = 'voice_frame'
       }
-    } catch { /* Voice Chat integration is optional; absence is an explicit status, not an error. */ }
+    } catch { /* Voice Chat 集成是可选的；缺失是一种明确的状态，而不是错误。 */ }
   }
   return { attachments, status: { vision, audio, attachmentBytes: attachments.reduce((sum, item) => sum + Buffer.byteLength(item.dataBase64, 'base64'), 0) } }
 }

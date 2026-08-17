@@ -20,8 +20,8 @@ export function buildSystemPrompt(persona: Persona, prompts: PromptTemplates): s
     ...prompts.capabilityRules,
     ...prompts.memoryRules,
     prompts.actionContract,
-    // Keep upgraded installations capable even when their ignored prompts.json still contains an
-    // older action contract. This adds an action alias, never an authorization bypass.
+    // 即使升级后的安装中，其被忽略的 prompts.json 仍包含
+    // 旧版动作契约，也要保持其能力可用。这只是新增一个动作别名，绝不是授权绕过。
     SAFE_MINING_COMPATIBILITY_RULE,
     VERIFIED_WORLD_ACTION_RULE,
     ADVANCED_SURVIVAL_ACTION_RULE,
@@ -53,8 +53,8 @@ export function buildPlayerRequest(input: {
 }
 
 /**
- * Native tool Agent goals deliberately exclude the world snapshot. ToolAgent appends one
- * compact observation and subsequent deltas, avoiding the former double-send of 50-80 KB.
+ * 原生工具 Agent 的目标有意排除世界快照。ToolAgent 会追加一条
+ * 紧凑观察和后续增量，从而避免以往重复发送 50-80 KB 的问题。
  */
 export function buildToolAgentGoal(input: {
   player: PlayerMemory

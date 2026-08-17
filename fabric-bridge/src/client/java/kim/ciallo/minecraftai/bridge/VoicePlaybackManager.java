@@ -13,10 +13,10 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.function.Consumer;
 
 /**
- * Feeds synthetic PCM into the authenticated Simple Voice Chat client connection.
- * The integration deliberately uses reflection for internal packet transport so the
- * bridge remains buildable without redistributing the proprietary runtime mod JAR.
- */
+  * 将合成的 PCM 送入已认证的 Simple Voice Chat 客户端连接。
+  * 该集成有意使用反射进行内部数据包传输，从而使桥接层无需再分发专有运行时
+  * Mod JAR 即可保持可构建。
+  */
 final class VoicePlaybackManager {
     private static final int VOICECHAT_SAMPLE_RATE = 48_000;
     private static final int FRAME_SAMPLES = 960;

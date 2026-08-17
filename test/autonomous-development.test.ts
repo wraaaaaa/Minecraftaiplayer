@@ -11,7 +11,7 @@ const config = {
   chat: { requireMention: false, replyPrefix: '', cooldownMs: 0, proactiveEnabled: false, proactiveIdleMs: 1000, proactiveMinIntervalMs: 1000 },
   storage: { memoryFile: 'memory.json', experienceFile: 'experience.json', maxEvents: 10 },
   policyFile: 'rules.json', personaFile: 'persona.json', promptsFile: 'prompts.json', logging: { file: 'bot.log', level: 'error', console: false },
-  autonomy: { ...DEFAULT_AUTONOMY_CONFIG, enabled: true, autoGather: true, autoCraft: true, developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: 0, minY: 60, minZ: 0, maxX: 10, maxY: 70, maxZ: 10 } }
+  autonomy: { ...DEFAULT_AUTONOMY_CONFIG, enabled: true, autoGather: true, autoCraft: true, autoBuildShelter: true, autoHunt: true, autoMine: true, autoSmelt: true, autoTrade: true, autoEnchant: true, autoDimensionTravel: true, discardWornTools: true, developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: 0, minY: 60, minZ: 0, maxX: 10, maxY: 70, maxZ: 10 } }
 } satisfies BotConfig
 
 function surveyed(inventory: WorldState['inventory'] = []): WorldState {

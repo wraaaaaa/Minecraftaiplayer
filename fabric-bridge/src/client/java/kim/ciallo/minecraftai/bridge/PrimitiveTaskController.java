@@ -60,12 +60,12 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * A single-active-task, tick-driven executor for protocol-v2 primitive actions.
- *
- * <p>Every successful result is guarded by an observable client state transition that came back
- * through the normal multiplayer client. Calling a game-mode method is never itself considered
- * task completion.</p>
- */
+  * 面向 protocol-v2 原语动作的、单活动任务、由 tick 驱动的执行器。
+  *
+  * <p>每个成功结果都由一个通过正常多人游戏客户端返回的、可观察的客户端状态
+  * 转变来把关。调用某个游戏模式方法本身
+  * 永远不会被视为任务完成。</p>
+  */
 public final class PrimitiveTaskController {
     private static final int CLICK_CONFIRM_TICKS = 40;
     private static final int USE_TIMEOUT_TICKS = 160;
@@ -117,7 +117,7 @@ public final class PrimitiveTaskController {
     private PrimitiveTask active;
     private long tick;
 
-    /** Accepts a supported action when no other primitive is active. */
+    /** 在没有其他原语处于活动状态时，接受一个受支持的动作。 */
     public boolean start(String id, JsonObject action, Minecraft client) {
         if (id == null || id.isBlank()) return false;
         if (active != null) {
@@ -162,7 +162,7 @@ public final class PrimitiveTaskController {
         return true;
     }
 
-    /** Advances the active task by one client tick. */
+    /** 将活动任务推进一个客户端 tick。 */
     public void tick(Minecraft client) {
         tick++;
         pruneOwnedDrops(client);
@@ -194,14 +194,14 @@ public final class PrimitiveTaskController {
         return true;
     }
 
-    /** Returns and clears all terminal task results. */
+    /** 返回并清空所有终态任务结果。 */
     public List<TaskResult> drainResults() {
         List<TaskResult> drained = new ArrayList<>(results);
         results.clear();
         return drained;
     }
 
-    /** Returns an empty string when no primitive is active. */
+    /** 当没有原语处于活动状态时返回空字符串。 */
     public String activeType() {
         return active == null ? "" : active.type;
     }
@@ -226,7 +226,7 @@ public final class PrimitiveTaskController {
         minimumPlayerDistance = Math.max(0.0D, Math.min(512.0D, distance));
     }
 
-    /** Explicitly marks an observed item entity as bot-owned provenance. */
+    /** 显式地将某个观察到的物品实体标记为归 bot 所有的来源。 */
     public void registerOwnedDrop(ItemEntity entity) {
         if (entity == null || entity.isRemoved() || entity.getItem().isEmpty()) return;
         ownedDrops.put(entity.getId(), new OwnedDrop(
@@ -237,7 +237,7 @@ public final class PrimitiveTaskController {
         ));
     }
 
-    /** Explicit registration overload for an integration that already has stable identifiers. */
+    /** 为已拥有稳定标识符的集成提供的显式注册重载。 */
     public void registerOwnedDrop(int entityId, String itemId) {
         if (entityId < 0 || itemId == null || itemId.isBlank()) return;
         ownedDrops.put(entityId, new OwnedDrop(
@@ -275,8 +275,8 @@ public final class PrimitiveTaskController {
         ApprovedZone taskZone = approvedZone;
         boolean dynamicNaturalOnly = taskZone == null && verifiedWilderness;
         if (taskZone == null && verifiedWilderness) {
-            // Natural extraction is authorized per target below. Nearby structures do not make
-            // every natural ore/log illegal, and no manual coordinate box is required.
+            // 自然采集在下方按目标逐一授权。附近的结构并不会让每一处天然矿石/原木
+            // 都变得非法，也无需手动划定坐标范围。
             taskZone = WildernessGuard.workZone(client, player.blockPosition(), 16, 24);
         }
         if (taskZone == null) {
@@ -610,7 +610,7 @@ public final class PrimitiveTaskController {
         }
     }
 
-    /** Removes worn armor into the backpack so a player can hand over replacements. */
+    /** 将已穿着的盔甲脱下放入背包，以便玩家能交出替换装备。 */
     private final class UnequipArmorTask extends PrimitiveTask {
         private int armorIndex;
         private long phaseStartedTick;
@@ -657,9 +657,9 @@ public final class PrimitiveTaskController {
     }
 
     /**
-     * Frees backpack slots by throwing away the lowest-priority stacks. Used proactively when
-     * the backpack is full and the model still needs to pick up items.
-     */
+      * 通过丢弃优先级最低的物品堆来腾出背包槽位。当背包已满且模型仍需拾取物品时，
+      * 会主动使用该任务。
+      */
     private final class MakeInventoryRoomTask extends PrimitiveTask {
         private final int wantedFreeSlots;
         private int pendingSlot = -1;
@@ -1054,9 +1054,9 @@ public final class PrimitiveTaskController {
                 return;
             }
             BlockState current = client.level.getBlockState(target);
-            // BREAK owns the server-change postcondition below. Handling it here would mistake a
-            // successful break for an externally changed target, seek another block, and keep
-            // mining until the whole dynamically verified work window is exhausted.
+            // 服务器变更的后置条件归下方的 BREAK 阶段所有。在这里处理会把一次成功的破坏
+            // 误判为外部改变的目标，转而寻找另一个方块，并一直挖到整个动态验证的
+            // 工作窗口被耗尽为止。
             if (phase != Phase.BREAK && (!blockId(current).equals(expectedBlockId) || !matcher.matches(current))) {
                 completedPositions.add(target.immutable());
                 phase = Phase.SEEK;
@@ -1141,8 +1141,8 @@ public final class PrimitiveTaskController {
                     phaseStartedTick = tick;
                     return;
                 }
-                // Move close enough that ordinary block drops are normally picked up
-                // during the server-confirmed break, including a one-block depression.
+                // 移动得足够近，使普通方块掉落物通常在服务器确认破坏期间即被拾取，
+                // 包括一格凹陷的情况。
                 if (!navigator.drive(client, player, Vec3.atCenterOf(target), 1.85D, false, tick)
                     && navigator.consecutivePlanFailures() >= 3) {
                     finish(client, this, false, "no collision-safe route to verified resource block " + target.toShortString());
@@ -2106,7 +2106,7 @@ public final class PrimitiveTaskController {
         if (stack == null || stack.isEmpty() || !stack.has(DataComponents.FOOD)) return false;
         Consumable consumable = stack.get(DataComponents.CONSUMABLE);
         if (consumable == null) return false;
-        // A full player cannot eat ordinary food right now, but it is still valid future combat supply.
+        // 已饱腹的玩家此刻无法食用普通食物，但食物仍然是有效的未来战斗补给。
         if (!consumable.canConsume(player, stack) && player.getFoodData().needsFood()) return false;
         for (ConsumeEffect effect : consumable.onConsumeEffects()) {
             if (!(effect instanceof ApplyStatusEffectsConsumeEffect statusEffects)) return false;
@@ -2224,8 +2224,8 @@ public final class PrimitiveTaskController {
         for (BlockPos mutable : BlockPos.betweenClosed(minX, minY, minZ, maxX, maxY, maxZ)) {
             BlockPos position = mutable.immutable();
             if (excluded.contains(position) || !client.level.isLoaded(position)) continue;
-            // Never remove the vertical support column directly below the bot. Falling into the
-            // freshly mined hole can strand the pathing loop and is unlike deliberate human play.
+            // 永远不要移除 bot 正下方的垂直支撑柱。掉进刚挖出的洞里会让
+            // 寻路循环停滞，这也不像人类刻意的游玩行为。
             if (position.getX() == center.getX() && position.getZ() == center.getZ()
                 && position.getY() <= center.getY()) continue;
             BlockState state = client.level.getBlockState(position);

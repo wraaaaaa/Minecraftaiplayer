@@ -35,7 +35,7 @@ const SENSITIVE_ENV_NAME = /(?:api[_-]?key|authorization|password|secret|token)/
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu
 const DIRECTIONAL_OR_ZERO_WIDTH = /[\u061C\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/gu
 
-// Keep these signatures escaped so this scanner does not flag its own source.
+// 将这些签名转义，避免此扫描器标记自身的源代码。
 const MOJIBAKE_SIGNATURES = [
   '\u6D63\u72B5',
   '\u7487\u950B',
@@ -196,8 +196,8 @@ async function loadKnownSecrets(root, envFile, issues) {
 }
 
 function trackedFiles(root) {
-  // Include non-ignored untracked files: newly created source/tests are exactly
-  // where a pre-commit secret or encoding leak can otherwise evade the audit.
+  // 纳入未被忽略的未跟踪文件：新创建的源代码/测试正是
+  // 提交前秘密或编码泄漏可能规避审计的地方。
   const output = runGit(root, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { binary: true }).stdout
   return splitNull(output)
 }

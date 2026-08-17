@@ -210,10 +210,10 @@ class ChatCompletionsProvider implements LlmProvider {
     if (firstText) return { text: firstText, model: this.#options.model, requestedEffort: requested, effectiveEffort: effective, ...(usage ? { usage } : {}) }
     if (this.#provider !== 'deepseek') return { text: requireChatText(payload), model: this.#options.model, requestedEffort: requested, effectiveEffort: effective, ...(usage ? { usage } : {}) }
 
-    // DeepSeek documents that JSON Output may occasionally return an empty content field.
-    // Retry once with a changed prompt and thinking disabled: this caps extra spend, avoids
-    // treating reasoning_content as the final answer, and still keeps the normal request at
-    // the administrator-selected reasoning effort.
+    // DeepSeek 文档说明 JSON Output 偶尔会返回空的 content 字段。
+    // 以修改后的提示词并禁用思考重试一次：这样可控制额外开销、避免
+    // 把 reasoning_content 当作最终答案，同时仍让正常请求保持
+    // 管理员选择的推理强度。
     this.#options.logger.warn('DeepSeek JSON Output 返回空内容，使用非思考模式重试一次', emptyChatMetadata(payload))
     const retryBody: Record<string, unknown> = {
       ...body,

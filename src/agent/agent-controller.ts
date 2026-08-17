@@ -21,7 +21,7 @@ import type { SelfImprovementManager } from '../self-improvement/self-improvemen
 import { agentWorkspaceConfig } from '../config/types.js'
 import { ToolAgent } from './tool-agent.js'
 import { sensorySnapshot } from './multimodal-sensors.js'
-import { naturalGameText, ReplyComposer } from './game-reply.js'
+import { COMPLETION_REPLIES, FAILURE_REPLIES, IDLE_REPLIES, LISTENING_REPLIES, naturalGameText, ReplyComposer, SECRET_REFUSAL_REPLIES, TIMEOUT_REPLIES } from './game-reply.js'
 
 export interface ActionExecutor {
   execute(action: AgentAction): Promise<{ ok: boolean; detail: string }>
@@ -62,8 +62,8 @@ function isCompanionInviteAccept(message: string): boolean {
 
 function insideHome(world: WorldState): boolean {
   if (!world.home || !world.position || world.dimension !== world.home.dimension) return false
-  // Java routes between block centres while configured homes use decimal world coordinates.
-  // A sub-block tolerance prevents an endless return-home state at the radius boundary.
+  // Java 在方块中心之间寻路，而配置的家使用小数的世界坐标。
+  // 亚方块容差可防止在半径边界处出现无限回家状态。
   return Math.hypot(world.position.x - world.home.x, world.position.z - world.home.z) <= (world.home.radius ?? 2) + 0.75
 }
 
@@ -74,8 +74,8 @@ function isTransientClientDisconnect(detail: string): boolean {
 function gatherWasAutoCollected(detail: string): boolean {
   const verifiedBroken = Number(detail.match(/verified_broken_blocks=(\d+)/u)?.[1] ?? 0)
   const inventoryDelta = Number(detail.match(/inventory_delta=(\d+)/u)?.[1] ?? 0)
-  // A drop entity may be observed and then picked up before the follow-up collector
-  // starts. The confirmed inventory increase is then the authoritative postcondition.
+  // 掉落物实体可能在后续收集器启动之前就被观察到并拾取。
+  // 此时经确认的背包增量就是权威的后置条件。
   return verifiedBroken > 0 && inventoryDelta >= verifiedBroken
 }
 
@@ -110,8 +110,6 @@ const AUTONOMOUS_ACTION_TYPES = new Set<AgentAction['type']>([
   'travel_to_dimension', 'build_nether_portal', 'use_item', 'seek_shelter', 'build_shelter', 'prepare_for'
 ])
 
-const GENERIC_FAILURE_REPLY = '唔，我刚才认真试了，可这会儿还是没弄成，有点不甘心。具体卡住的地方我都记在总控台了，等条件合适再陪你试一次喵。'
-const SECRET_REFUSAL_REPLY = '这个我不能说啦，里面有不能外传的私密设置。你换个话题陪我聊嘛，我还想继续和你一起玩喵~'
 export const AGENT_V2_SYSTEM_RULES = `
 <minecraft_agent_v2>
 你是持续运行的 Minecraft 玩家 Agent，不是关键词脚本选择器。理解完整目标和当前环境后，自主制定策略并选择工具或连续技能；不要输出旧版动作 JSON 或虚构工具。
@@ -200,8 +198,8 @@ export class AgentController {
     this.#nearbyPlayersLastTick.add(identity.name.toLowerCase())
     this.#lastInviteByPlayer.set(identity.name.toLowerCase(), Date.now())
     const safeMessage = this.#secrets.sanitizeForPersistence(message).slice(0, 1000)
-    // Any newly addressed player message releases an older hold. A new explicit hold below
-    // establishes it again. This is a control-plane state, not an action selected by keywords.
+    // 任何新的、被称呼到的玩家消息都会解除之前的保持。下面新的显式保持
+    // 会重新建立它。这是一种控制面状态，而不是由关键词选择的动作。
     this.#manualHold = requestsPersistentHold(safeMessage)
     await this.#memory.recordPlayerMessage(identity, safeMessage)
     await this.#promptWorkspace?.ensurePlayerProfile(identity)
@@ -243,7 +241,7 @@ export class AgentController {
     if (!this.#drainPausedForDisconnect && (await this.#tasks.load()).tasks.some(task => task.status === 'queued')) await this.#drainTasks()
   }
 
-  /** Local WebUI commands preempt every player task and enter the same audited Agent loop. */
+  /** 本地 WebUI 指令会抢占每个玩家任务，并进入同一个受审计的 Agent 循环。 */
   async handleAdminMessage(message: string, world: WorldState = this.#latestWorld): Promise<void> {
     const clean = this.#secrets.sanitizeForPersistence(message).replace(/[\r\n\t]+/gu, ' ').trim().slice(0, 1000)
     if (!clean) throw new Error('管理指令不能为空')
@@ -316,10 +314,10 @@ export class AgentController {
     }
     const invited = await this.#maybeInvitePassingPlayer(world, autonomy)
     if (invited) return
-    // Continuous player modes such as follow_player are owned by the Fabric client and
-    // intentionally outlive the request that started them. Idle development must never
-    // replace them; immediate danger above, an explicit stop, a conflicting player action,
-    // death or disconnect remains allowed to cancel the mode.
+    // 诸如 follow_player 之类的连续玩家模式由 Fabric 客户端持有，并且
+    // 有意地比启动它们的请求存活得更久。空闲开发绝不能
+    // 替换它们；上面的即时危险、显式停止、冲突的玩家动作、
+    // 死亡或断线仍被允许取消该模式。
     if (world.activePrimitive && !['idle', ''].includes(world.activePrimitive)) return
     await this.#runUnifiedIdle(world, autonomy)
     return
@@ -336,9 +334,9 @@ export class AgentController {
       return
     }
     if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false)) {
-      // Without a recorded home, repeatedly scanning for an imaginary shelter only produces the
-      // same failure and prevents resource progression. Keep developing until a real home can be
-      // built; only then use seek_shelter as a high-priority return action.
+      // 没有记录的家时，反复寻找想象中的避难所只会产生
+      // 相同的失败并阻碍资源发展。持续发展直到能建造真正的家；
+      // 到那时才把 seek_shelter 用作高优先级返回动作。
       if (world.home) {
         const shelter = await this.#executeProactive({ type: 'seek_shelter' })
         if (shelter.ok) return
@@ -474,7 +472,7 @@ export class AgentController {
         }
       }
       if (actionSucceeded && decision.reply && !(await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) {
-        await this.#safeChat(naturalGameText(decision.reply, '我在附近，有需要就叫我。'))
+        await this.#safeChat(naturalGameText(decision.reply, this.#replyComposer.varied(IDLE_REPLIES)))
       }
     } catch (error) {
       this.#logger.warn('主动空闲聊天已跳过', error)
@@ -612,13 +610,13 @@ export class AgentController {
     const message = task.request
     if (this.#secrets.isExtractionRequest(message)) {
       await this.#markFailed(task, '敏感信息提取请求已由本地安全层拒绝')
-      await this.#bestEffortReply(identity, SECRET_REFUSAL_REPLY)
+      await this.#bestEffortReply(identity, this.#replyComposer.varied(SECRET_REFUSAL_REPLIES, identity.name))
       return
     }
 
-    // Production providers use the native multi-turn tool loop. The old one-shot JSON
-    // branch below remains only as a compatibility shim for third-party/mock providers
-    // that have not implemented toolTurn; it is not used by DeepSeek/Volcengine/OpenAI.
+    // 生产供应商使用原生的多轮工具循环。下面旧的一次性 JSON
+    // 分支仅作为尚未实现 toolTurn 的第三方/mock 供应商的兼容垫片保留；
+    // DeepSeek/Volcengine/OpenAI 不会使用它。
     if (this.#provider.toolTurn) {
       await this.#processToolTask(task, identity, message, cancellationEpoch)
       return
@@ -660,7 +658,7 @@ export class AgentController {
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
       if (decision.validationError) {
         await this.#markFailed(task, decision.validationError)
-        await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+        await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
         return
       }
 
@@ -688,7 +686,7 @@ export class AgentController {
         if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
           const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${assessment.reasons.join('；') || '能力评估未通过'}`
           await this.#markFailed(task, detail)
-          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+          await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
           return
         }
 
@@ -696,7 +694,7 @@ export class AgentController {
         if (!policy.allowed) {
           const detail = `第 ${index + 1}/${actions.length} 步 ${action.type}：${policy.reason}`
           await this.#markFailed(task, detail)
-          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+          await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
           return
         }
 
@@ -716,7 +714,7 @@ export class AgentController {
             await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步准备失败：${safeDetail}`)
             await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次先核对装备、耐久、食物和当前计划步骤；条件不足时停止后续步骤。', tags: ['plan', action.type, preparationPurpose] })
             void this.#learnFromFailure({ type: 'prepare_for', purpose: preparationPurpose }, safeDetail, message)
-            await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+            await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
             return
           }
         } else if (this.#proactiveActionRunning) {
@@ -752,7 +750,7 @@ export class AgentController {
           await this.#markFailed(task, `第 ${index + 1}/${actions.length} 步 ${action.type} 失败：${safeDetail}`)
           await this.#bestEffortExperience({ task: JSON.stringify(action), context: message, outcome: 'failure', lesson: safeDetail, correction: '下次根据已经完成的步骤和最新背包/世界状态重建剩余计划，不能继续执行后续动作。', tags: ['plan', action.type] })
           void this.#learnFromFailure(action, safeDetail, message)
-          await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+          await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
           return
         }
         await this.#diagnose({
@@ -781,7 +779,7 @@ export class AgentController {
           await this.#promptWorkspace?.appendPlayerFact(identity, fact).catch(error => this.#logger.warn('长期事实已写入统一记忆，但 USER.md 更新失败', error))
         }
       }
-      const completedFallback = actions.length === 0 ? '嗯，我在听。' : '嗯，弄好了。'
+      const completedFallback = this.#replyComposer.varied(actions.length === 0 ? LISTENING_REPLIES : COMPLETION_REPLIES, identity.name)
       const reply = naturalGameText(decision.reply, completedFallback)
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
       this.#logger.info('任务已完成', { taskId: task.id, player: identity.name, model: decisionModel, actions: actions.map(action => action.type) })
@@ -793,7 +791,7 @@ export class AgentController {
         return
       }
       const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
-      const fallback = timedOut ? '我刚才脑子卡了一下，你再说一遍？' : GENERIC_FAILURE_REPLY
+      const fallback = this.#replyComposer.varied(timedOut ? TIMEOUT_REPLIES : FAILURE_REPLIES, identity.name)
       await this.#markFailed(task, detail || fallback)
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${fallback}`)
     }
@@ -807,9 +805,9 @@ export class AgentController {
       const experiences = await this.#experience.relevant(message)
       const systemPrompt = await this.#systemPrompt(identity, true)
       const playerRequest = buildToolAgentGoal({ ...context, message, experiences })
-      // World observations used to be counted as memory pressure and synchronously sent to
-      // the compression model before every command. Only actual memory is considered now,
-      // and compression runs after the player-visible task has left the critical path.
+      // 世界观察过去被计入记忆压力，并在每次命令之前同步发送给
+      // 压缩模型。现在只考虑真正的记忆，
+      // 且压缩会在玩家可见的任务离开关键路径之后才运行。
       deferredCompressionEstimate = systemPrompt.length + JSON.stringify(context).length + JSON.stringify(experiences).length
       if (this.#proactiveActionRunning) await this.#executor.execute({ type: 'stop' })
       const initialWorld = this.#executor.snapshot?.() ?? this.#latestWorld
@@ -888,7 +886,7 @@ export class AgentController {
       if (cancellationEpoch !== this.#cancellationEpoch || !(await this.#taskIsCurrentAttempt(task))) return
       if (!result.ok) {
         await this.#markFailed(task, result.detail)
-        await this.#bestEffortReply(identity, naturalGameText(result.reply, GENERIC_FAILURE_REPLY, identity.name))
+        await this.#bestEffortReply(identity, naturalGameText(result.reply, this.#replyComposer.varied(FAILURE_REPLIES, identity.name), identity.name))
         return
       }
       await this.#tasks.complete(task.id, result.detail)
@@ -903,7 +901,7 @@ export class AgentController {
         }
       })
       if (result.steps > 0) void this.#learnFromSuccess(message, successSteps)
-      const reply = naturalGameText(result.reply, result.steps > 0 ? '嗯，这一轮弄好了。' : '嗯，我在听。', identity.name)
+      const reply = naturalGameText(result.reply, this.#replyComposer.varied(result.steps > 0 ? COMPLETION_REPLIES : LISTENING_REPLIES, identity.name), identity.name)
       if (result.steps > 0) void this.#executor.execute({ type: 'gesture', gesture: 'happy' })
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${reply}`)
       this.#logger.info('原生 Agent 任务已结束', { taskId: task.id, player: identity.name, model: result.model, steps: result.steps, apiCalls: result.apiCalls, tokens: result.usage.totalTokens, elapsedMs: result.elapsedMs })
@@ -915,7 +913,7 @@ export class AgentController {
       }
       await this.#markFailed(task, detail)
       const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
-      await this.#bestEffortReply(identity, timedOut ? '我刚才脑子卡了一下，你再说一遍？' : GENERIC_FAILURE_REPLY)
+      await this.#bestEffortReply(identity, this.#replyComposer.varied(timedOut ? TIMEOUT_REPLIES : FAILURE_REPLIES, identity.name))
     } finally {
       if (this.#contextCompressor && deferredCompressionEstimate !== undefined) {
         void delay(1_500).then(() => this.#contextCompressor!.maybeCompress(identity, deferredCompressionEstimate!)).then(async compression => {
@@ -959,7 +957,7 @@ export class AgentController {
       await this.#bestEffortReply(identity, reply)
     } else {
       await this.#markFailed(stopTask, detail || '停止动作失败')
-      await this.#bestEffortReply(identity, GENERIC_FAILURE_REPLY)
+      await this.#bestEffortReply(identity, this.#replyComposer.varied(FAILURE_REPLIES, identity.name))
     }
   }
 
@@ -994,7 +992,7 @@ export class AgentController {
 
   async #bestEffortReply(identity: PlayerIdentity, message: string): Promise<void> {
     try {
-      const trimmed = this.#replyComposer.avoidImmediateRepeat(identity.name, naturalGameText(message, '我在。', identity.name))
+      const trimmed = this.#replyComposer.avoidImmediateRepeat(identity.name, naturalGameText(message, this.#replyComposer.varied(LISTENING_REPLIES, identity.name), identity.name))
       const mention = `@${identity.name}`
       const addressed = trimmed.toLowerCase().startsWith(mention.toLowerCase()) ? trimmed : `${mention} ${trimmed}`
       const sent = await this.#safeChat(addressed)
@@ -1069,7 +1067,7 @@ export class AgentController {
 
   async #safeChat(message: string): Promise<string> {
     const leadingMention = message.trim().match(/^@([\p{L}\p{N}_-]{1,32})\s+/u)
-    const body = naturalGameText(message, '我在。', leadingMention?.[1])
+    const body = naturalGameText(message, this.#replyComposer.varied(LISTENING_REPLIES), leadingMention?.[1])
     const gameFacing = leadingMention ? `@${leadingMention[1]} ${body}` : body
     const guarded = this.#secrets.safeChat(gameFacing)
     const waitMs = Math.max(0, this.#config.chat.cooldownMs - (Date.now() - this.#lastChatAt))

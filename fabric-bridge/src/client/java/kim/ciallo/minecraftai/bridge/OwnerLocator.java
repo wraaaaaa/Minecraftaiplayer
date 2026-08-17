@@ -9,7 +9,7 @@ import net.minecraft.world.waypoints.TrackedWaypoint;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** Reads Minecraft's server-synchronised locator-bar waypoint for the configured owner. */
+/** 读取 Minecraft 为已配置所有者提供的、服务器同步的定位栏路标。 */
 final class OwnerLocator {
     record Fix(String name, UUID uuid, double bearingDegrees, double distance, String precision) {
         Vec3 segmentGoal(LocalPlayer player, double maximumDistance) {

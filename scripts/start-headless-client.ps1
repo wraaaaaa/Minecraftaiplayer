@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $headlessJar = Join-Path $projectRoot '.runtime\headlessmc\headlessmc-launcher-2.10.0.jar'
 $gameDirectory = Join-Path $projectRoot '.runtime\minecraft'
-$bridgeJar = Join-Path $gameDirectory 'mods\minecraft-ai-fabric-bridge-1.0.0.jar'
+$bridgeJar = Join-Path $gameDirectory 'mods\minecraft-ai-fabric-bridge-1.1.0.jar'
 $userDataRoot = if ([string]::IsNullOrWhiteSpace($env:MCAI_USERDATA_DIR)) { Join-Path $projectRoot 'userdata' } else { $env:MCAI_USERDATA_DIR }
 $pidFile = Join-Path $userDataRoot 'data\minecraft-client.pid.json'
 $stdoutLog = Join-Path $projectRoot 'logs\minecraft-client.stdout.log'
@@ -154,8 +154,8 @@ if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
 $env:MCAI_BRIDGE_TOKEN = (Get-Content -LiteralPath $bridgeTokenFile -Raw -Encoding UTF8).Trim()
 if ([string]::IsNullOrWhiteSpace($env:MCAI_BRIDGE_TOKEN)) { throw 'Bridge session token is empty.' }
 
-# The Minecraft JVM and every third-party client mod inherit this process environment.
-# Remove model credentials before Start-Process; only the Node controller is allowed to hold them.
+# Minecraft JVM 及所有第三方客户端模组都会继承此进程的环境变量。
+# 在 Start-Process 之前移除模型凭据；只允许 Node 控制器持有它们。
 $modelSecretNames = @(
     'DEEPSEEK_API_KEY',
     'ARK_API_KEY',

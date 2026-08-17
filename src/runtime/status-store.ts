@@ -11,9 +11,9 @@ export interface RuntimeStatus {
 }
 
 /**
- * Runtime status is a dashboard/health-check snapshot, not the Agent's observation store.
- * Keep it small so the one-second Fabric state stream cannot rewrite tens of gigabytes of
- * nearby-block data per day. The controller still retains the complete in-memory WorldState.
+ * 运行时状态是仪表盘/健康检查快照，而不是 Agent 的观察存储。
+ * 保持它足够小，以免每秒一次的 Fabric 状态流每天重写数十 GB 的
+ * 附近方块数据。控制器仍保留完整的内存 WorldState。
  */
 export function compactRuntimeWorld(world: WorldState): WorldState {
   return {
@@ -84,7 +84,7 @@ export class RuntimeStatusStore {
     try {
       await this.#file.save({ schemaVersion: 1, phase, adapter, server, updatedAt: new Date(now).toISOString(), world: compactWorld })
     } catch (error) {
-      // A transient Windows file lock must not suppress the next report for 30 seconds.
+      // 短暂的 Windows 文件锁不得让下一次上报被抑制 30 秒。
       this.#lastPhase = undefined
       this.#lastFingerprint = ''
       this.#lastSavedAt = 0

@@ -35,12 +35,12 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Deterministic, client-side emergency survival actions.
- *
- * <p>This controller intentionally does not navigate. It only consumes safe food that is already in
- * the hotbar and retaliates against a recently observed, non-neutral hostile that is already within
- * legal attack range. All inventory and combat mutations go through the normal multiplayer APIs.</p>
- */
+  * 确定性的客户端紧急生存动作。
+  *
+  * <p>该控制器有意不进行寻路。它只会食用已在快捷栏中的安全食物，并对最近观察到、
+  * 已处于合法攻击范围内的非中立敌对生物进行反击。所有背包与战斗变更都通过
+  * 正常的多人游戏 API 完成。</p>
+  */
 public final class SurvivalController {
     public static final float DEFAULT_EAT_HEALTH_THRESHOLD = 10.0F;
     public static final int DEFAULT_EAT_FOOD_THRESHOLD = 14;
@@ -123,7 +123,7 @@ public final class SurvivalController {
         this.protectPlayer = protectPlayer && !this.protectedPlayerName.isBlank();
     }
 
-    /** Records the responsible entity from a client damage event. */
+    /** 从客户端受伤事件中记录责任实体。 */
     public void noteThreat(DamageSource source) {
         if (source == null) return;
         Entity responsible = source.getEntity();
@@ -131,13 +131,13 @@ public final class SurvivalController {
         noteThreat(responsible);
     }
 
-    /** Records a hostile as an active threat for a short, bounded self-defense window. */
+    /** 在一个短暂且有界的自卫时间窗内，将某个敌对生物记录为活动威胁。 */
     public void noteThreat(Entity attacker) {
         if (attacker == null || !(attacker instanceof Enemy) || excludedFromAutomaticCombat(attacker)) return;
         recentThreats.put(attacker.getId(), System.currentTimeMillis() + threatMemoryMs);
     }
 
-    /** Runs one deterministic survival tick on the Minecraft client thread. */
+    /** 在 Minecraft 客户端线程上运行一个确定性的生存 tick。 */
     public void tick(Minecraft client) {
         localTick++;
         LocalPlayer player = client == null ? null : client.player;
@@ -225,7 +225,7 @@ public final class SurvivalController {
         publish(Mode.IDLE, null, "idle");
     }
 
-    /** Cancels survival-owned inputs and forgets short-lived combat state. */
+    /** 取消由生存逻辑控制的输入，并遗忘短暂的战斗状态。 */
     public void reset(Minecraft client) {
         LocalPlayer player = client == null ? null : client.player;
         if (player != null) cancelEating(client, player);
@@ -247,7 +247,7 @@ public final class SurvivalController {
         return snapshot.safeToIdle();
     }
 
-    /** Dynamically protects the player currently being followed, in addition to the owner. */
+    /** 除所有者外，动态保护当前正在跟随的玩家。 */
     public void setEscortPlayerName(String playerName) {
         escortPlayerName = playerName == null ? "" : playerName.trim();
     }
@@ -260,7 +260,7 @@ public final class SurvivalController {
         return successfulAttacks;
     }
 
-    /** Releases a pending long-use state when its RPC deadline expires. */
+    /** 当 RPC 截止时间到期时，释放处于待定状态的长按使用。 */
     public void cancelFoodUse(Minecraft client) {
         LocalPlayer player = client == null ? null : client.player;
         if (player != null) cancelEating(client, player);
@@ -272,7 +272,7 @@ public final class SurvivalController {
         return snapshot.safetyReasons();
     }
 
-    /** Releases every key this controller may own. */
+    /** 释放该控制器可能占用的所有按键。 */
     public static void releaseControls(Minecraft client) {
         if (client == null) return;
         client.options.keyUse.setDown(false);
@@ -280,7 +280,7 @@ public final class SurvivalController {
         client.options.keyJump.setDown(false);
     }
 
-    /** Neutral/high-risk hostiles are deliberately never selected for automatic retaliation. */
+    /** 中立/高风险的敌对生物有意永远不会被选中进行自动反击。 */
     public static boolean excludedFromAutomaticCombat(Entity entity) {
         return entity instanceof Creeper
             || entity instanceof EnderMan
@@ -288,7 +288,7 @@ public final class SurvivalController {
             || entity instanceof ZombifiedPiglin;
     }
 
-    /** Computes whether remaining still is currently a safe action. */
+    /** 计算当前保持静止是否是一个安全的动作。 */
     public static SafetyAssessment assessSafety(Minecraft client) {
         LocalPlayer player = client == null ? null : client.player;
         if (client == null || player == null || client.level == null) {
@@ -354,7 +354,6 @@ public final class SurvivalController {
         if (expiresAt != null && expiresAt >= now) return true;
         if (player.getLastHurtByMob() == entity) return true;
         if (!(entity instanceof Mob mob)) return false;
-        if (mob.getTarget() == player) return true;
         if (!(mob.getTarget() instanceof Player target)) return false;
         String targetName = target.getGameProfile().name();
         return protectPlayer && targetName.equalsIgnoreCase(protectedPlayerName)
@@ -411,9 +410,9 @@ public final class SurvivalController {
         Consumable consumable = stack.get(DataComponents.CONSUMABLE);
         if (food == null || consumable == null || !consumable.canConsume(player, stack)) return null;
         String id = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
-        // Component-based mod foods are accepted unless they are one of the vanilla foods with a
-        // known harmful/random side effect. This keeps Farmer's Delight and similar cooked meals
-        // usable without trusting translated display names.
+        // 基于组件的 Mod 食物会被接受，除非它们是已知具有有害/随机副作用的那几种原版食物。
+        // 这样无需信任翻译后的显示名称，就能让 Farmer's Delight 及类似的熟食
+        // 保持可用。
         if (List.of(
             "minecraft:rotten_flesh", "minecraft:spider_eye", "minecraft:poisonous_potato",
             "minecraft:pufferfish", "minecraft:chicken", "minecraft:suspicious_stew",
@@ -450,9 +449,9 @@ public final class SurvivalController {
         }
 
         ItemStack selected = player.getInventory().getSelectedItem();
-        // A held use key can immediately begin using the next item in the same stack. Observe the
-        // server-synchronised stack mutation before isUsingItem(), otherwise a completed meal can
-        // remain reported as "consuming_safe_food" until the explicit action times out.
+        // 持续按下的使用键可能立即开始使用同一物品堆中的下一个物品。应在调用 isUsingItem()
+        // 之前观察服务器同步的物品堆变化，否则一顿已完成的进食可能一直上报为
+        // "consuming_safe_food"，直到显式动作超时为止。
         if (selected.isEmpty()
             || selected.getItem() != eatingInitialItem
             || selected.getCount() < eatingInitialCount
@@ -469,9 +468,9 @@ public final class SurvivalController {
         }
 
         if (player.isUsingItem() && player.getUsedItemHand() == InteractionHand.MAIN_HAND) {
-            // A normal food use completes well before this point. A server/mod can reject the
-            // long-use completion while leaving the local client in isUsingItem(); release that
-            // stale state so the next explicit attempt is a genuinely new network interaction.
+            // 正常的食物使用会在到达此处之前就完成。服务器/Mod 可能拒绝长按使用完成，
+            // 却让本地客户端仍停留在 isUsingItem() 状态；释放该陈旧状态，以便下一次显式
+            // 尝试成为一次真正全新的网络交互。
             if (localTick - eatingStartedTick > 60L) {
                 cancelEating(client, player);
                 eatingRetryAfterTick = localTick + 10L;

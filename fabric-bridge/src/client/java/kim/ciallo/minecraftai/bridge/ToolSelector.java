@@ -11,14 +11,14 @@ import net.minecraft.world.level.block.state.BlockState;
 
 import java.util.List;
 
-/** Selects the correct mining family from the entire inventory, not merely the hotbar. */
+/** 从整个背包（而非仅快捷栏）中选择正确的挖掘工具类别。 */
 final class ToolSelector {
     private ToolSelector() { }
 
     /**
-     * Returns true only when the best available tool is already server-selected. A false
-     * result after a backpack swap tells the caller to wait one tick before mining.
-     */
+      * 仅当最佳可用工具已由服务器选中时返回 true。背包交换后返回 false
+      * 表示调用方应在挖掘前等待一个 tick。
+      */
     static boolean ensureBestMiningTool(Minecraft client, LocalPlayer player, BlockState state) {
         if (client == null || client.gameMode == null || player == null || state == null) return false;
         Candidate best = bestCandidate(player, state);
@@ -75,12 +75,12 @@ final class ToolSelector {
         int remaining = stack.isDamageableItem() ? stack.getMaxDamage() - stack.getDamageValue() : Integer.MAX_VALUE;
         if (remaining <= 0) return Double.NEGATIVE_INFINITY;
         double score = stack.getDestroySpeed(state);
-        // Correct drop capability dominates raw speed, preventing shovel-on-stone and
-        // pickaxe-on-dirt choices whenever the matching tool exists.
+        // 正确的掉落能力优先于纯速度，从而在存在匹配工具时避免出现铲子挖石头、
+        // 镐子挖泥土的选择。
         if (stack.isCorrectToolForDrops(state)) score += 10_000.0D;
         int enchantments = stack.getEnchantments().entrySet().stream().mapToInt(entry -> entry.getIntValue()).sum();
-        // Prefer finishing a nearly worn-out correct tool instead of permanently hoarding it.
-        // Minecraft removes the stack itself after the final legal use.
+        // 更倾向于用完一件即将损坏的正确工具，而不是一直囤积它。
+        // Minecraft 会在最后一次合法使用后自动移除该物品堆。
         double wearOutBonus = remaining <= 3 ? 100.0D : 0.0D;
         return score + wearOutBonus + enchantments * 0.01D;
     }

@@ -55,12 +55,12 @@ export interface LlmToolTurnRequest {
   system: string
   user: string
   tools: LlmToolDefinition[]
-  /** Provider-owned continuation. Callers must return it unchanged on the next turn. */
+  /** 供应商拥有的续接状态。调用方必须在下一轮原样返回它。 */
   continuation?: unknown
   toolResults?: LlmToolResult[]
-  /** Only sent with the first user turn. */
+  /** 仅随第一个用户轮次发送。 */
   attachments?: LlmInputAttachment[]
-  /** Per-turn cost/latency controls used by the Agent loop. */
+  /** Agent 循环使用的每轮成本/延迟控制。 */
   maxOutputTokens?: number
   reasoningEffort?: ReasoningEffort
 }
@@ -68,7 +68,7 @@ export interface LlmToolTurnRequest {
 export interface LlmToolTurnResponse {
   text: string
   toolCalls: LlmToolCall[]
-  /** Opaque provider state containing assistant tool calls and private reasoning linkage. */
+  /** 不透明的供应商状态，包含助手工具调用和私有推理关联。 */
   continuation?: unknown
   model: string
   requestedEffort: ReasoningEffort

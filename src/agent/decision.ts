@@ -82,9 +82,9 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
       const resource = [action.resource, action.block, action.blockId]
         .find(candidate => typeof candidate === 'string' && candidate.trim())
       if (typeof resource !== 'string') return { action: { type: 'none' }, error: `${type} 缺少 resource 或 block` }
-      // Every model-facing mining alias is deliberately normalised to the same guarded primitive.
-      // The model cannot provide ownership evidence or a coordinate; Fabric selects and verifies
-      // the matching natural block inside the administrator-approved development zone.
+      // 所有面向模型的采矿别名都被有意地归一化为同一个受保护的原子动作。
+      // 模型无法提供归属证据或坐标；由 Fabric 在管理员批准的开发区域内
+      // 选择并验证匹配的天然方块。
       return { action: { type: 'gather_resource', resource: resource.trim().slice(0, 80), count: integer(action.count, 1, 64, 1) } }
     }
     case 'craft_item':

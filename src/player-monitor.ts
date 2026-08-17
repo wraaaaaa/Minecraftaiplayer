@@ -6,7 +6,7 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { userDataPath } from './core/user-data.js'
 
-// Minecraft 26.2 protocol version used for the Server List Ping handshake.
+// 用于服务器列表 Ping 握手的 Minecraft 26.2 协议版本。
 const PROTOCOL_VERSION = 776
 
 interface PlayerMonitorState {
@@ -21,8 +21,8 @@ interface PlayerMonitorState {
 const projectRoot = process.cwd()
 const stateFile = userDataPath('data', 'player-monitor-state.json')
 const testFlagFile = userDataPath('data', 'test-mode.flag')
-// The Minecraft client is what actually joins the server and occupies a player slot;
-// check its pid (not the Node controller pid) when deciding whether to subtract the bot.
+// Minecraft 客户端才是真正加入服务器并占用玩家槽位的进程；
+// 判断是否要减去 Bot 时，应检查它的 pid（而不是 Node 控制器的 pid）。
 const botPidFile = userDataPath('data', 'minecraft-client.pid.json')
 
 function log(message: string): void {

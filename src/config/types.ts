@@ -6,7 +6,7 @@ export type SpeechProtocol = 'volcengine_v1' | 'openai_speech' | 'openai_chat_au
 export interface SpeechConfig {
   enabled: boolean
   provider: SpeechProvider
-  /** Protocol is mainly useful for custom gateways; known providers select their native protocol. */
+  /** 协议主要用于自定义网关；已知供应商会选择其原生协议。 */
   protocol: SpeechProtocol
   model: string
   apiKeyEnv: string
@@ -21,10 +21,10 @@ export interface SpeechConfig {
   maxAudioSeconds: number
   queueLimit: number
   cacheEntries: number
-  /** Volcengine online TTS uses an AppID in addition to its Access Token. */
+  /** 火山引擎在线 TTS 除了 Access Token 之外还需要一个 AppID。 */
   volcengineAppIdEnv: string
   volcengineCluster: string
-  /** Custom endpoints never store the credential itself here, only its environment-variable name. */
+  /** 自定义端点从不在此处存储凭据本身，只存储其环境变量名。 */
   customAuthHeader: string
   customAuthScheme: string
   customAudioJsonPath: string
@@ -62,19 +62,19 @@ export interface BotConfig {
     reasoningEffort: ReasoningEffort
     timeoutMs: number
     maxOutputTokens?: number
-    /** Maximum observe/tool/result turns for a player-issued Agent task. */
+    /** 玩家发起的 Agent 任务所允许的最大 observe/tool/result 轮数。 */
     agentMaxSteps?: number
-    /** Smaller per-heartbeat budget for idle self-development. */
+    /** 用于空闲自我开发的、每次心跳更小的预算。 */
     autonomousAgentMaxSteps?: number
-    /** Hard provider-call budget for one player task. */
+    /** 单个玩家任务的硬性供应商调用预算。 */
     agentMaxApiCalls?: number
-    /** Hard total input+output token budget for one player task. */
+    /** 单个玩家任务的硬性输入+输出 token 总预算。 */
     agentMaxTaskTokens?: number
-    /** Estimated/actual input ceiling for any single Agent request. */
+    /** 任意单次 Agent 请求的估算/实际输入上限。 */
     agentMaxInputTokensPerCall?: number
-    /** Smaller output ceiling for one Agent decision. */
+    /** 单次 Agent 决策的更小输出上限。 */
     agentMaxOutputTokens?: number
-    /** Successful tool follow-ups normally do not need another long chain of thought. */
+    /** 成功的工具后续调用通常不需要再走一长串思考链。 */
     agentFollowupReasoningEffort?: ReasoningEffort
     multimodal?: {
       autoDetect: boolean
@@ -277,17 +277,17 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   autoInviteNearbyPlayers: true,
   inviteRadius: 7,
   inviteCooldownMs: 30 * 60_000,
-  discardWornTools: true,
+  discardWornTools: false,
   wornToolRemainingDurability: 1,
-  autoGather: true,
-  autoCraft: true,
-  autoBuildShelter: true,
-  autoHunt: true,
-  autoSmelt: true,
-  autoMine: true,
-  autoTrade: true,
-  autoEnchant: true,
-  autoDimensionTravel: true,
+  autoGather: false,
+  autoCraft: false,
+  autoBuildShelter: false,
+  autoHunt: false,
+  autoSmelt: false,
+  autoMine: false,
+  autoTrade: false,
+  autoEnchant: false,
+  autoDimensionTravel: false,
   autoSleep: true,
   protectOwner: true,
   allowVerifiedWilderness: true,

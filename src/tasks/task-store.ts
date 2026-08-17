@@ -135,8 +135,8 @@ export class TaskStore {
   }
 
   /**
-   * Atomically selects and reserves the next task. A non-null result is already
-   * in the running state, so two callers cannot start different tasks at once.
+   * 原子地选择并预留下一个任务。非空结果已经处于
+   * 运行状态，因此两个调用方无法同时启动不同的任务。
    */
   async takeNext(resolveDistance: PlayerDistanceResolver = () => undefined): Promise<TaskRecord | null> {
     return this.#exclusive(async (document) => {
@@ -197,7 +197,7 @@ export class TaskStore {
     })
   }
 
-  /** Requeues every orphaned running task after a controller/client reconnect. */
+  /** 在控制器/客户端重连后，把所有孤立的运行中任务重新排队。 */
   async recoverRunning(reason = 'controller_recovery'): Promise<number> {
     return this.#exclusive(async (document) => {
       const running = document.tasks.filter(task => task.status === 'running')
@@ -218,7 +218,7 @@ export class TaskStore {
     })
   }
 
-  /** Marks the current task failed so an out-of-band stop command can preempt it. */
+  /** 将当前任务标记为失败，以便带外停止命令可以抢占它。 */
   async cancelRunning(reason = 'cancelled_by_player'): Promise<TaskRecord | null> {
     return this.#exclusive(async (document) => {
       const task = document.tasks.find(candidate => candidate.status === 'running')

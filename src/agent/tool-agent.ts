@@ -57,9 +57,9 @@ const integer = (description: string, minimum?: number, maximum?: number): Recor
 const string = (description: string): Record<string, unknown> => ({ type: 'string', description })
 
 /**
- * The model sees concrete atomic affordances plus cancellable continuous motor skills.
- * Skills accelerate repetitive ticks; they never start from chat keywords or choose the
- * player's overall goal, order, parameters, or recovery strategy on the model's behalf.
+ * 模型看到的是具体的原子能力，外加可取消的连续运动技能。
+ * 技能用于加速重复的 tick；它们从不因聊天关键词而启动，也不替模型
+ * 决定玩家的总体目标、顺序、参数或恢复策略。
  */
 export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'observe_world', description: '刷新状态；工具回执已有新状态时勿重复调用。', parameters: objectSchema({}) },

@@ -39,7 +39,7 @@ function initialDocument(): ProgressionDocument {
   }
 }
 
-/** Persistent, atomic checkpoint for autonomous survival progression. */
+/** 自主生存进度的持久化、原子化检查点。 */
 export class ProgressionStore {
   readonly #file: AtomicJsonFile<ProgressionDocument>
 
@@ -53,8 +53,8 @@ export class ProgressionStore {
 
   async notePlan(stage: ProgressionStage, action: string, reason: string): Promise<void> {
     await this.#file.update(document => {
-      // Safety/food detours are expected throughout the journey. They must not make the durable
-      // handoff checkpoint appear to regress from iron/diamond/Nether back to "survive" or wood.
+      // 旅途中出现安全/食物方面的绕行是正常的。它们不能让持久化的
+      // 交接检查点看起来从铁器/钻石/下界阶段倒退回“survive”或木器阶段。
       if (STAGE_ORDER.indexOf(stage) >= STAGE_ORDER.indexOf(document.stage)) document.stage = stage
       document.lastAction = action
       document.lastReason = reason

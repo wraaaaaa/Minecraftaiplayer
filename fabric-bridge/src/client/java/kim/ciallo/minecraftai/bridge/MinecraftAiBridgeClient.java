@@ -134,7 +134,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             shelter.cancel(client, "bridge_disconnected");
             voicePlayback.cancel("bridge_disconnected");
             while (bridge.poll() != null) {
-                // Discard commands from the dead controller session; they must never replay.
+                // 丢弃来自已失效控制器会话的命令；它们绝不能被重放。
             }
             drainPrimitiveResults();
             drainAdvancedResults();
@@ -166,18 +166,19 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             easyAuthSent = false;
             easyAuthPromptSeen = false;
             joinedTick = tick;
-            String dimension = client.level.dimension().identifier().toString();
-            if (!lastWorldDimension.isEmpty() && !lastWorldDimension.equals(dimension)) {
-                movementNavigator.release(client);
-                traversalRecovery.reset(client);
-                followPortal = null;
-                followTargetMissingSince = -1;
-            }
-            lastWorldDimension = dimension;
             JsonObject event = baseMessage("joined_world");
             event.addProperty("name", player.getGameProfile().name());
             event.addProperty("uuid", player.getUUID().toString());
             bridge.send(event);
+        }
+        String currentDimension = client.level.dimension().identifier().toString();
+        if (!lastWorldDimension.isEmpty() && !lastWorldDimension.equals(currentDimension)) {
+            // 跨越传送门 / 切换维度：释放旧维度路径状态，但保留持续跟随，进入新维度后重新定位被跟随玩家。
+            movementNavigator.release(client);
+            traversalRecovery.reset(client);
+            followPortal = null;
+            followTargetMissingSince = -1;
+            lastWorldDimension = currentDimension;
         }
         if (handleDeath(client, player)) return;
         if (!easyAuthSent && !easyAuthPromptSeen && tick - joinedTick >= 100 && tick % 20 == 0) sendEasyAuth(player);
@@ -265,7 +266,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                 airRescueBreaking = null;
             }
         }
-        // Continue rising while looking for an edge or bringing a natural ice/snow roof into reach.
+        // 继续上浮，同时寻找边缘，或把天然的冰/雪顶棚纳入可触及范围。
         client.options.keyJump.setDown(true);
     }
 
@@ -366,8 +367,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         primitives.setMinimumPlayerDistance(minimumPlayerDistance);
         advanced.setMinimumPlayerDistance(minimumPlayerDistance);
         shelter.setMinimumPlayerDistance(minimumPlayerDistance);
-        // Manual AABB authorization was removed. Model intent is evaluated from live world state,
-        // while PrimitiveTaskController/WildernessGuard still validate every world mutation.
+        // 手动 AABB 授权已移除。模型意图改由实时世界状态评估，
+        // 而 PrimitiveTaskController/WildernessGuard 仍然验证每一次世界变更。
         primitives.clearApprovedZone();
         shelter.clearApprovedZone();
     }
@@ -594,9 +595,9 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             action.add("targetBlock", target);
         } else if ("craft_recipe".equals(type)) {
             action.addProperty("type", "craft_item");
-            // Agent-v2 has no model-controlled authorization flag. CreateCraftTask will
-            // still derive a short-lived WildernessGuard work window and require a
-            // ledger-verified crafting table before any 3x3 recipe can run.
+            // Agent-v2 没有由模型控制的授权标志。CreateCraftTask 仍会推导出一个
+            // 短时效的 WildernessGuard 工作窗口，并要求工作台经过账本验证后，
+            // 任何 3x3 配方才能运行。
             action.addProperty("verifiedWilderness", true);
         } else if ("use_held_item".equals(type)) {
             action.addProperty("type", "use_item");
@@ -1105,10 +1106,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                     }
                 }
                 if (!target.playerName().equalsIgnoreCase(ownerName)) {
-                    // A followed player can briefly leave the loaded entity set at a chunk edge.
-                    // Keep the persistent mode and the last confirmed coordinate instead of
-                    // silently dropping follow. Continue toward that coordinate; once reached,
-                    // the normal stop-distance branch waits safely while visibility is retried.
+                    // 被跟随的玩家可能在区块边缘短暂离开已加载的实体集合。
+                    // 保留持久跟随模式与最后确认的坐标，而不是悄悄中断跟随。
+                    // 继续朝该坐标前进；一旦到达，正常的停止距离分支会在重试可见性期间
+                    // 安全等待。
                 }
                 double segmentDistance = Math.sqrt(
                     Math.pow(target.x() - player.getX(), 2.0D) + Math.pow(target.z() - player.getZ(), 2.0D)
@@ -1123,8 +1124,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
                             if (!target.follow()) movement = null;
                             return;
                         }
-                        // A transient locator miss must not strand a long-distance follow.
-                        // Finish the last confirmed segment, then wait and retry above.
+                        // 一次短暂的定位器未命中不应让长距离跟随陷入停滞。
+                        // 先走完最后确认的路段，然后等待并在上方重试。
                     } else {
                         Vec3 goal = fix.segmentGoal(player, 22.0D);
                         target = new MovementTarget(target.playerName(), goal.x, goal.y, goal.z, target.follow(), target.stopDistance());

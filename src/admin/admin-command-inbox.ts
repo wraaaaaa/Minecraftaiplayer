@@ -21,7 +21,7 @@ function validate(command: AdminCommand): AdminCommand {
   return command
 }
 
-/** Cross-process inbox: every command owns one atomically-renamed file, avoiding JSON races. */
+/** 跨进程收件箱：每条命令拥有一个原子重命名的文件，避免 JSON 竞争。 */
 export class AdminCommandInbox {
   readonly directory: string
 

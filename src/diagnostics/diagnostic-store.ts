@@ -28,7 +28,7 @@ export type NewDiagnosticEvent = Omit<DiagnosticEvent, 'id' | 'at'>
 
 function now(): string { return new Date().toISOString() }
 
-/** Persistent, local-only execution timeline consumed by the WebUI central chat. */
+/** 由 WebUI 中央聊天消费的、仅本地的持久化执行时间线。 */
 export class DiagnosticStore {
   readonly #file: AtomicJsonFile<DiagnosticDocument>
   readonly #maxEvents: number

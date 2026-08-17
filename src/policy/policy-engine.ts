@@ -35,8 +35,8 @@ export type AgentAction =
   | { type: 'prepare_for'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
   | { type: 'break_block'; block: string; ownership: 'natural' | 'player' | 'unknown'; evidence?: 'fabric_verified_zone' | 'bot_placement_ledger' }
   | { type: 'open_container'; ownership: 'player' | 'unknown' }
-  // Agent-v2 concrete affordances. Each call performs one bounded game operation and
-  // returns a postcondition; workflows are chosen by the model, not by a planner script.
+  // Agent-v2 的具体能力。每次调用执行一个有边界的游戏操作并
+  // 返回后置条件；工作流由模型选择，而不是由规划脚本决定。
   | { type: 'navigate_to'; x: number; y: number; z: number; stopDistance: number; sprint: boolean }
   | { type: 'look_at'; x: number; y: number; z: number }
   | { type: 'select_hotbar'; slot: number }
