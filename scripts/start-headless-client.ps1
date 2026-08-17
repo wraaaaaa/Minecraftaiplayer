@@ -154,8 +154,8 @@ if (-not (Test-Path -LiteralPath $bridgeTokenFile)) {
 $env:MCAI_BRIDGE_TOKEN = (Get-Content -LiteralPath $bridgeTokenFile -Raw -Encoding UTF8).Trim()
 if ([string]::IsNullOrWhiteSpace($env:MCAI_BRIDGE_TOKEN)) { throw 'Bridge session token is empty.' }
 
-# Minecraft JVM 及所有第三方客户端模组都会继承此进程的环境变量。
-# 在 Start-Process 之前移除模型凭据；只允许 Node 控制器持有它们。
+# The Minecraft JVM and every third-party client mod inherit this process environment.
+# Remove model credentials before Start-Process; only the Node controller is allowed to hold them.
 $modelSecretNames = @(
     'DEEPSEEK_API_KEY',
     'ARK_API_KEY',
