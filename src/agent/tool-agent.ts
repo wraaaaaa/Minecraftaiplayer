@@ -483,7 +483,8 @@ export class ToolAgent {
         const returned = await returnToStart()
         recovery = `; automatic_return=${returned.ok}; ${returned.detail}`
       }
-      return result(false, '唔，我先停一下，不想傻乎乎地一直空耗下去。刚才做到哪里我都记住了，等条件合适再陪你接着试一次喵。', `${detail}${recovery}`)
+      const budgetPicks = ['唔，我先停一下，不想傻乎乎地一直空耗下去。刚才做到哪里我都记住了，等条件合适再陪你接着试一次喵。', '先到这里吧，我不想没头没脑地空转。已经完成的部分我都记下了，等你准备好再继续喵。', '我停一停，免得白费力气。做到哪一步我都记在总控台了，回头接着来喵。']
+      return result(false, budgetPicks[Math.floor(Math.random() * budgetPicks.length)] ?? budgetPicks[0]!, `${detail}${recovery}`)
     }
 
     for (let turn = 0; turn <= this.#maxSteps; turn++) {

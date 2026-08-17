@@ -116,6 +116,107 @@ export const IDLE_REPLIES = [
   '我在这里等你，有需要叫我。'
 ] as const
 
+export const BUDGET_EXHAUSTED_REPLIES = [
+  '唔，我先停一下，不想傻乎乎地一直空耗下去。刚才做到哪里我都记住了，等条件合适再陪你接着试一次喵。',
+  '先到这里吧，我不想没头没脑地空转。已经完成的部分我都记下了，等你准备好再继续喵。',
+  '我停一停，免得白费力气。做到哪一步我都记在总控台了，回头接着来喵。',
+  '好，我先歇一下，不硬撑啦。进度我都记下了，条件合适再继续喵。'
+] as const
+
+// 按工具/动作生成贴合语境的“开工回应”，让回复不总是同一句话。
+const TOOL_ACKNOWLEDGEMENTS: Record<string, readonly string[]> = {
+  return_home: [
+    '好的呢，我现在正在往家走喵~',
+    '收到，我这就回家，到了再告诉你。',
+    '好，我往家里走啦，路上会注意安全的。',
+    '知道啦，我现在回家，你等我一下哦。'
+  ],
+  gather_resource: [
+    '好的，我这就去采{resource}，稍等我一下喵~',
+    '收到，我去收集{resource}，弄好就来找你。',
+    '好呀，我马上去采{resource}，一会儿给你。',
+    '明白啦，我去采{resource}，你等我消息。'
+  ],
+  follow_player_continuously: [
+    '好，我来跟着你，你在前面走。',
+    '收到，我跟着你走，不会跟丢的。',
+    '好的，我跟着你，随时听你指挥。'
+  ],
+  navigate_to: [
+    '好的，我这就过去。',
+    '收到，我马上过去。',
+    '好，我朝那个方向走啦。'
+  ],
+  give_item_to_player: [
+    '好，我把它拿给你。',
+    '收到，我把东西送过去给你。',
+    '好的，我拿过去给你。'
+  ],
+  craft_item: [
+    '好的，我来制作。',
+    '收到，我这就去合成。',
+    '好，我做一下，马上好。'
+  ],
+  build_shelter: [
+    '好的，我来建房子。',
+    '收到，我这就去搭小屋。',
+    '好，我建个安全的小屋。'
+  ],
+  excavate_safely: [
+    '好的，我来挖矿道，会注意安全的。',
+    '收到，我这就往下挖，你在上面等我。',
+    '好，我开挖了，有情况随时停。'
+  ],
+  eat_safe_food: [
+    '好的，我先吃点东西补充体力。',
+    '收到，我吃口东西，马上回来。'
+  ],
+  attack_entity: [
+    '好的，我来处理它。',
+    '收到，我这就去对付它。'
+  ],
+  hunt_for: [
+    '好的，我去狩猎，给你带点物资回来。',
+    '收到，我去找吃的啦。'
+  ],
+  break_block: [
+    '好的，我来挖掉这个方块。',
+    '收到，我这就挖。'
+  ],
+  place_block: [
+    '好的，我来放这个方块。',
+    '收到，我这就放好。'
+  ],
+  collect_own_drops: [
+    '好的，我来把掉落物捡起来。',
+    '收到，我捡一下东西。'
+  ],
+  craft_recipe: [
+    '好的，我来合成这个配方。',
+    '收到，我这就去制作。'
+  ],
+  smelt_items: [
+    '好的，我来熔炼/烹饪。',
+    '收到，我这就去处理。'
+  ],
+  equip_for: [
+    '好的，我来穿戴装备。',
+    '收到，我换上最好的装备。'
+  ],
+  accept_items_from_player: [
+    '好的，我来拿你丢的东西。',
+    '收到，我捡起来。'
+  ],
+  interact_block: [
+    '好的，我来操作这个方块。',
+    '收到，我这就过去按一下。'
+  ],
+  look_at: [
+    '好的，我看一下。',
+    '收到，我看看。'
+  ]
+}
+
 export function pickVaried(pool: readonly string[], avoid?: string): string {
   const options = pool.length > 1 && avoid ? pool.filter(reply => reply !== avoid) : pool
   const poolToUse = options.length > 0 ? options : pool
@@ -129,6 +230,26 @@ export class ReplyComposer {
   acknowledgement(seed = ''): string {
     void seed
     const picked = pickVaried(ACKNOWLEDGEMENTS, this.#lastAcknowledgement)
+    this.#lastAcknowledgement = picked
+    return picked
+  }
+
+  // 根据所选工具/动作生成随机且贴合语境的开工回应。
+  acknowledgeTool(tool: string, args?: string): string {
+    const pool = TOOL_ACKNOWLEDGEMENTS[tool] ?? ACKNOWLEDGEMENTS
+    let parsed: Record<string, unknown> = {}
+    try { parsed = args ? JSON.parse(args) as Record<string, unknown> : {} } catch { /* ignore */ }
+    const resource = typeof parsed.resource === 'string' && parsed.resource ? parsed.resource : '需要的资源'
+    const player = typeof parsed.player === 'string' && parsed.player ? parsed.player : '你'
+    const item = typeof parsed.item_id === 'string' && parsed.item_id ? parsed.item_id : '物品'
+    const fill = (template: string): string => template
+      .replace('{resource}', resource)
+      .replace('{player}', player)
+      .replace('{item}', item)
+    const filled = pool.map(fill)
+    const options = filled.length > 1 ? filled.filter(reply => reply !== this.#lastAcknowledgement) : filled
+    const poolToUse = options.length > 0 ? options : filled
+    const picked = poolToUse[Math.floor(Math.random() * poolToUse.length)] ?? filled[0]!
     this.#lastAcknowledgement = picked
     return picked
   }

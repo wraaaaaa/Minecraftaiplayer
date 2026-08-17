@@ -34,9 +34,10 @@ final class LocalPathNavigator {
     private static final Direction[] HORIZONTAL = {
         Direction.NORTH, Direction.SOUTH, Direction.WEST, Direction.EAST
     };
-    private static final int PLAN_RADIUS = 24;
-    private static final int PLAN_VERTICAL_RADIUS = 6;
-    private static final int MAX_EXPANDED_NODES = 6_000;
+    // 扩大 A* 搜索半径，让 Bot 能绕过较宽的玩家建筑/围墙等障碍，而不是卡在家门口。
+    private static final int PLAN_RADIUS = 40;
+    private static final int PLAN_VERTICAL_RADIUS = 12;
+    private static final int MAX_EXPANDED_NODES = 12_000;
     private static final long STUCK_REPLAN_TICKS = 18L;
 
     private List<BlockPos> path = List.of();

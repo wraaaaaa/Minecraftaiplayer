@@ -827,11 +827,11 @@ export class AgentController {
         maxInputTokensPerCall: this.#config.model.agentMaxInputTokensPerCall ?? 48_000,
         maxOutputTokens: this.#config.model.agentMaxOutputTokens ?? 1024,
         followupReasoningEffort: this.#config.model.agentFollowupReasoningEffort ?? 'none',
-        onToolSelected: async () => {
+        onToolSelected: async event => {
           if (acknowledged) return
           acknowledged = true
           await Promise.allSettled([
-            this.#bestEffortReply(identity, this.#replyComposer.acknowledgement(`${task.id}:${message}`)),
+            this.#bestEffortReply(identity, this.#replyComposer.acknowledgeTool(event.tool, event.arguments)),
             this.#executor.execute({ type: 'gesture', gesture: 'acknowledge' })
           ])
         },
