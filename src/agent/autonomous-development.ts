@@ -323,7 +323,12 @@ export function planAutonomousDevelopment(
     const bed = firstItem(world, id => id.endsWith('_bed'))
     return plan('stone_age', '在自己的安全工作点放置床', { type: 'place_block', count: 1, ...(bed ? { itemId: bed } : {}) })
   }
-  if (hasBed && world.environment?.isNight && autonomy.autoSleep) return plan('stone_age', '夜间在床上睡觉并设置重生点', { type: 'sleep_in_bed' })
+  if (world.environment?.isNight && autonomy.autoSleep) {
+    const sleepFailures = progression?.failures['sleep_in_bed']?.count ?? 0
+    if (hasBed || sleepFailures < 3) {
+      return plan('stone_age', hasBed ? '夜间在床上睡觉并设置重生点' : '夜间寻找附近的床睡觉并设置重生点', { type: 'sleep_in_bed' })
+    }
+  }
 
   if (rawIron + iron < 24 && autonomy.autoMine) return resourcePlan(world, progression, 'iron_age', 'iron', 'iron_ore', 8, 16)
   if (rawIron > 0 && hasFurnace && fuel > 0 && autonomy.autoSmelt) return plan('iron_age', '冶炼粗铁用于全套铁工具和装备', { type: 'smelt_item', inputItemId: 'minecraft:raw_iron', outputItemId: 'minecraft:iron_ingot', count: Math.min(rawIron, 16) })

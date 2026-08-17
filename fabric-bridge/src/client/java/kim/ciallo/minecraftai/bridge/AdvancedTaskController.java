@@ -34,6 +34,7 @@ import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.trading.MerchantOffer;
 import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.BedBlock;
 import net.minecraft.world.level.block.EndPortalFrameBlock;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
@@ -656,8 +657,10 @@ public final class AdvancedTaskController {
                 return;
             }
             if (bed == null) {
+                // 优先使用 Bot 自己放置的床；找不到时再寻找附近未被占用的床（村庄/玩家基地等）。
                 bed = findOwnedBlock(client, player.blockPosition(), 16, state -> state.is(BlockTags.BEDS));
-                if (bed == null) { finish(client, this, false, "no_loaded_bot_owned_bed"); return; }
+                if (bed == null) bed = findNearbyUnoccupiedBed(client, player, 16);
+                if (bed == null) { finish(client, this, false, "no_loaded_bed_nearby"); return; }
             }
             if (player.distanceToSqr(Vec3.atCenterOf(bed)) > 12.25D) {
                 navigator.drive(client, player, Vec3.atCenterOf(bed), 2.2D, true, tick);
@@ -670,6 +673,21 @@ public final class AdvancedTaskController {
             }
             if (tick - startedTick > 160L) finish(client, this, false, "server did not confirm sleeping; it may be daytime, obstructed, or unsafe");
         }
+    }
+
+    private static BlockPos findNearbyUnoccupiedBed(Minecraft client, LocalPlayer player, int radius) {
+        BlockPos origin = player.blockPosition();
+        List<BlockPos> beds = new ArrayList<>();
+        int vertical = Math.min(6, radius / 2);
+        for (BlockPos cursor : BlockPos.betweenClosed(origin.offset(-radius, -vertical, -radius), origin.offset(radius, vertical, radius))) {
+            if (!client.level.isLoaded(cursor)) continue;
+            BlockState state = client.level.getBlockState(cursor);
+            if (!state.is(BlockTags.BEDS) || !(state.getBlock() instanceof BedBlock)) continue;
+            if (state.hasProperty(BedBlock.OCCUPIED) && state.getValue(BedBlock.OCCUPIED)) continue;
+            beds.add(cursor.immutable());
+        }
+        beds.sort(Comparator.comparingDouble(position -> player.distanceToSqr(Vec3.atCenterOf(position))));
+        return beds.isEmpty() ? null : beds.get(0);
     }
 
     private final class ExcavateTask extends Task {
