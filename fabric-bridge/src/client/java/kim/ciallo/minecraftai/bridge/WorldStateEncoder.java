@@ -497,7 +497,9 @@ public final class WorldStateEncoder {
         String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
         if (Set.of("dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud").contains(path)) return "soil";
         if (Set.of("sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice").contains(path)) return "surface";
-        return null;
+        // 其余非玩家建造的原版方块（植物、作物、菌类、藤蔓、珊瑚等）也识别为可采集资源，
+        // 不再依赖“天然方块白名单”逐条比对。
+        return looksPlayerBuilt(id) ? null : path;
     }
 
     private static String interactableKind(String id) {

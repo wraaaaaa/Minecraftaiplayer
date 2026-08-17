@@ -94,40 +94,16 @@ public final class WildernessGuard {
     }
 
     /** 自主挖掘的逐方块规则；有意排除所有工作台/建筑类方块。 */
+    /** 环境改造的逐方块规则：不比对“天然方块白名单”，只排除明显属于玩家建造的方块。 */
     public static boolean safeNaturalBreak(Minecraft client, BlockPos position) {
         if (client == null || client.level == null || !client.level.isLoaded(position)) return false;
         if (client.level.getBlockEntity(position) != null) return false;
         BlockState state = client.level.getBlockState(position);
         if (state.isAir() || !state.getFluidState().isEmpty()) return false;
-        String id = blockId(state);
-        if (looksPlayerBuilt(id)) return false;
-        if (state.is(BlockTags.LOGS) || state.is(BlockTags.LEAVES)
-            || state.is(BlockTags.BASE_STONE_OVERWORLD) || state.is(BlockTags.BASE_STONE_NETHER)
-            || state.is(COAL_ORES) || state.is(BlockTags.IRON_ORES)
-            || state.is(BlockTags.COPPER_ORES) || state.is(BlockTags.GOLD_ORES)
-            || state.is(DIAMOND_ORES) || state.is(LAPIS_ORES)
-            || state.is(REDSTONE_ORES) || state.is(EMERALD_ORES)) return true;
-        String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
-        if (Set.of(
-            "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud",
-            "sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice",
-            "netherrack", "basalt", "blackstone", "soul_sand", "soul_soil", "end_stone",
-            "tuff", "calcite", "dripstone_block"
-        ).contains(path)) return true;
-        if (path.endsWith("_ore")) return true;
-        if (path.equals("obsidian") && naturalObsidianEvidence(client, position)) return true;
-        // 自然可采集的植物/作物：甘蔗、竹子、仙人掌、西瓜、南瓜、海带、菌类、藤蔓等。
-        return state.is(BlockTags.CROPS) || Set.of(
-            "sugar_cane", "cactus", "bamboo", "bamboo_sapling", "kelp", "kelp_plant",
-            "sea_pickle", "seagrass", "tall_seagrass", "melon", "pumpkin", "carved_pumpkin",
-            "sweet_berry_bush", "nether_wart", "cocoa", "brown_mushroom", "red_mushroom",
-            "brown_mushroom_block", "red_mushroom_block", "mushroom_stem", "chorus_plant",
-            "chorus_flower", "vine", "cave_vines", "cave_vines_plant", "weeping_vines",
-            "weeping_vines_plant", "twisting_vines", "twisting_vines_plant", "glow_lichen"
-        ).contains(path);
+        // 具体采什么由 gather_resource 的 ResourceMatcher 决定；这里只排除“像玩家建筑”的方块。
+        return !looksPlayerBuilt(blockId(state));
     }
 
-    /** 候选级放置守卫；与 assess() 不同，它不会拒绝在结构附近进行的无害挖掘。 */
     public static boolean safePlacementArea(Minecraft client, BlockPos center, int radius) {
         if (client == null || client.level == null || !client.level.isLoaded(center)) return false;
         int scan = Math.max(2, Math.min(8, radius));
@@ -161,7 +137,23 @@ public final class WildernessGuard {
             || path.contains("redstone") || path.contains("rail") || path.contains("torch")
             || path.contains("lantern") || path.contains("ladder") || path.contains("bookshelf")
             || path.contains("sign") || path.contains("banner") || path.contains("anvil")
-            || path.contains("enchanting_table") || path.contains("beacon") || path.contains("hopper");
+            || path.contains("enchanting_table") || path.contains("beacon") || path.contains("hopper")
+            || path.contains("polished") || path.contains("smooth") || path.contains("purpur")
+            || path.contains("prismarine") || path.contains("sea_lantern") || path.contains("mossy")
+            || path.contains("shulker") || path.contains("piston") || path.contains("dispenser")
+            || path.contains("dropper") || path.contains("observer") || path.contains("lever")
+            || path.contains("button") || path.contains("pressure_plate") || path.contains("repeater")
+            || path.contains("comparator") || path.contains("daylight_detector") || path.contains("tnt")
+            || path.contains("note_block") || path.contains("jukebox") || path.contains("lectern")
+            || path.contains("campfire") || path.contains("candle") || path.contains("flower_pot")
+            || path.contains("bell") || path.contains("grindstone") || path.contains("stonecutter")
+            || path.contains("smoker") || path.contains("blast_furnace") || path.contains("cartography_table")
+            || path.contains("fletching_table") || path.contains("smithing_table") || path.contains("loom")
+            || path.contains("composter") || path.contains("cauldron") || path.contains("brewing_stand")
+            || path.contains("scaffolding") || path.contains("amethyst") || path.contains("crying_obsidian")
+            || path.contains("glowstone") || path.contains("respawn_anchor") || path.contains("lodestone")
+            || path.contains("conduit") || path.contains("target") || path.contains("lightning_rod")
+            || path.contains("chain") || path.contains("chiseled");
     }
 
     private static String blockId(BlockState state) {
