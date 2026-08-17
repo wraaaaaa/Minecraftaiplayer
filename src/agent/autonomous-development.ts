@@ -162,12 +162,6 @@ export function planAutonomousDevelopment(
     return plan('survive', `当前在${dimLabel}，空闲先返回主世界`, { type: 'travel_to_dimension', dimension: 'minecraft:overworld' })
   }
 
-  // 陪伴模式默认不做自主自给自足：破坏/采集/狩猎/建造/合成都留给玩家明确指令，
-  // 这里只保留进食等纯生存反射（水下换气、逃生、受击自卫由 Java 本地层负责）。
-  const selfSufficient = autonomy.autoGather || autonomy.autoMine || autonomy.autoHunt
-    || autonomy.autoCraft || autonomy.autoBuildShelter || autonomy.autoSmelt
-    || autonomy.autoTrade || autonomy.autoEnchant
-  if (!selfSufficient) return undefined
   if (food < 20 && raw && hasNearbyOwnedBlock(world, id => id === 'minecraft:furnace') && fuel > 0 && autonomy.autoSmelt) {
     return plan('survive', '安全熟食不足，先把现有生食烹饪成熟食', { type: 'smelt_item', inputItemId: raw, count: Math.min(8, count(world, id => id === raw)) })
   }

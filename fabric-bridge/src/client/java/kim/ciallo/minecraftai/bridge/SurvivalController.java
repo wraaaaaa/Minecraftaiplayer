@@ -354,6 +354,7 @@ public final class SurvivalController {
         if (expiresAt != null && expiresAt >= now) return true;
         if (player.getLastHurtByMob() == entity) return true;
         if (!(entity instanceof Mob mob)) return false;
+        if (mob.getTarget() == player) return true;
         if (!(mob.getTarget() instanceof Player target)) return false;
         String targetName = target.getGameProfile().name();
         return protectPlayer && targetName.equalsIgnoreCase(protectedPlayerName)

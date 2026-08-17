@@ -63,30 +63,34 @@ export function assessAction(config: BotConfig, action: AgentAction, world: Worl
     case 'attack_hostile':
       return (world.nearbyHostiles?.length ?? 0) > 0 ? { status: 'ready', reasons: [] } : { status: 'blocked', reasons: ['附近没有可确认的敌对生物'], remediation: '靠近明确的敌对生物后再试；Bot 不会把玩家或中立生物当作目标。' }
     case 'gather_resource':
+      if (!autonomy.autoGather) return { status: 'forbidden', reasons: ['配置已关闭自主采集'], remediation: '在 WebUI 的自主能力设置中启用自主采集。' }
       if (!autonomy.allowVerifiedWilderness) return { status: 'blocked', reasons: ['未启用 Fabric 动态环境验证'], remediation: '启用 allowVerifiedWilderness。' }
       return { status: 'ready', reasons: ['实际方块仍将由 Fabric 安全层逐块验证'] }
     case 'craft_item':
-      return { status: 'ready', reasons: ['玩家明确要求合成时直接执行，实际配方仍由 Fabric 验证'] }
+      return autonomy.autoCraft ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭自主合成'], remediation: '在 WebUI 的自主能力设置中启用自主合成。' }
     case 'place_block':
       if (!autonomy.allowVerifiedWilderness) return { status: 'blocked', reasons: ['未启用 Fabric 动态环境验证'], remediation: '启用 allowVerifiedWilderness。' }
       if (!world.inventory.some(item => item.placeableBlockId && (!action.itemId || item.itemId === action.itemId))) return { status: 'blocked', reasons: [action.itemId ? `背包里没有可安全放置的 ${action.itemId}` : '背包里没有可识别的方块物品'], remediation: '先准备泥土、圆石、石头或木板等普通建筑方块。' }
       return { status: 'ready', reasons: ['实际放置位置仍由 Fabric 根据环境和服务器回传逐格验证'] }
     case 'hunt_entity':
+      if (!autonomy.autoHunt) return { status: 'forbidden', reasons: ['配置已关闭自主狩猎'] }
       return { status: 'ready', reasons: ['Fabric 会在游戏内再次排除幼体、驯化、拴绳、命名和靠近玩家设施的目标'] }
     case 'smelt_item':
-      return { status: 'ready', reasons: [] }
+      return autonomy.autoSmelt ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭自主冶炼/烹饪'] }
     case 'trade_villager':
-      return { status: 'ready', reasons: [] }
+      return autonomy.autoTrade ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭村民交易'] }
     case 'enchant_item':
-      return { status: 'ready', reasons: [] }
+      return autonomy.autoEnchant ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭自主附魔'] }
     case 'sleep_in_bed':
-      return { status: 'ready', reasons: [] }
+      return autonomy.autoSleep ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭自主睡觉'] }
     case 'excavate_tunnel':
+      if (!autonomy.autoMine) return { status: 'forbidden', reasons: ['配置已关闭自主下矿'] }
       if (!autonomy.allowVerifiedWilderness) return { status: 'blocked', reasons: ['未启用可验证环境开矿'] }
       return { status: 'ready', reasons: ['Fabric 会逐格检查天然方块、危险流体、方块实体、玩家距离和撤退路径'] }
     case 'travel_to_dimension':
-      return { status: 'ready', reasons: ['Fabric 会寻找附近已加载的传送门并完成跨维度旅行'] }
+      return autonomy.autoDimensionTravel ? { status: 'ready', reasons: [] } : { status: 'forbidden', reasons: ['配置已关闭自主维度旅行'] }
     case 'build_nether_portal':
+      if (!autonomy.autoDimensionTravel) return { status: 'forbidden', reasons: ['配置已关闭自主维度旅行'] }
       if (!autonomy.allowVerifiedWilderness) return { status: 'blocked', reasons: ['没有启用逐目标安全建造验证'] }
       if (world.inventory.reduce((sum, item) => sum + (item.itemId === 'minecraft:obsidian' ? item.count : 0), 0) < 14) return { status: 'blocked', reasons: ['建造完整安全门框需要 14 个黑曜石'] }
       if (!world.inventory.some(item => item.itemId === 'minecraft:flint_and_steel')) return { status: 'blocked', reasons: ['缺少打火石'] }
@@ -96,6 +100,7 @@ export function assessAction(config: BotConfig, action: AgentAction, world: Worl
       if (!world.inventory.some(item => item.count > 0 && (!action.itemId || item.itemId === action.itemId))) return { status: 'blocked', reasons: [action.itemId ? `背包里没有 ${action.itemId}` : '背包中没有可丢出的物品'], remediation: '先把对应物品放进 Bot 背包。' }
       return { status: 'ready', reasons: ['Fabric 会接近指定玩家并验证自身背包数量实际减少'] }
     case 'build_shelter':
+      if (!autonomy.autoBuildShelter) return { status: 'forbidden', reasons: ['配置已关闭自主建造庇护所'], remediation: '在 WebUI 中启用自主建造；实际施工点仍会由 Fabric 验证并避开玩家建筑。' }
       if (!autonomy.allowVerifiedWilderness) return { status: 'blocked', reasons: ['未启用动态环境验证'], remediation: '启用 allowVerifiedWilderness。' }
       return { status: 'ready', reasons: ['Fabric 必须逐块确认目标是安全天然地形或 Bot 自有方块，并检查玩家结构和撤退路线'] }
     case 'prepare_for':

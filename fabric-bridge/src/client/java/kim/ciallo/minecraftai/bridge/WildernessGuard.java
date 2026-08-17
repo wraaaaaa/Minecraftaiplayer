@@ -108,12 +108,23 @@ public final class WildernessGuard {
             || state.is(DIAMOND_ORES) || state.is(LAPIS_ORES)
             || state.is(REDSTONE_ORES) || state.is(EMERALD_ORES)) return true;
         String path = id.substring(id.indexOf(':') + 1).toLowerCase(Locale.ROOT);
-        return Set.of(
+        if (Set.of(
             "dirt", "grass_block", "coarse_dirt", "rooted_dirt", "podzol", "mud",
             "sand", "red_sand", "gravel", "clay", "snow", "snow_block", "ice",
             "netherrack", "basalt", "blackstone", "soul_sand", "soul_soil", "end_stone",
             "tuff", "calcite", "dripstone_block"
-        ).contains(path) || path.endsWith("_ore") || path.equals("obsidian") && naturalObsidianEvidence(client, position);
+        ).contains(path)) return true;
+        if (path.endsWith("_ore")) return true;
+        if (path.equals("obsidian") && naturalObsidianEvidence(client, position)) return true;
+        // 自然可采集的植物/作物：甘蔗、竹子、仙人掌、西瓜、南瓜、海带、菌类、藤蔓等。
+        return state.is(BlockTags.CROPS) || Set.of(
+            "sugar_cane", "cactus", "bamboo", "bamboo_sapling", "kelp", "kelp_plant",
+            "sea_pickle", "seagrass", "tall_seagrass", "melon", "pumpkin", "carved_pumpkin",
+            "sweet_berry_bush", "nether_wart", "cocoa", "brown_mushroom", "red_mushroom",
+            "brown_mushroom_block", "red_mushroom_block", "mushroom_stem", "chorus_plant",
+            "chorus_flower", "vine", "cave_vines", "cave_vines_plant", "weeping_vines",
+            "weeping_vines_plant", "twisting_vines", "twisting_vines_plant", "glow_lichen"
+        ).contains(path);
     }
 
     /** 候选级放置守卫；与 assess() 不同，它不会拒绝在结构附近进行的无害挖掘。 */

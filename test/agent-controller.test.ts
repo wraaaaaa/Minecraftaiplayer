@@ -253,7 +253,6 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
     autoInviteNearbyPlayers: false,
-    discardWornTools: true,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -16, minY: 60, minZ: -16, maxX: 16, maxY: 90, maxZ: 16 }
   }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
@@ -286,8 +285,6 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
   testConfig.autonomy = {
     ...DEFAULT_AUTONOMY_CONFIG,
     autoInviteNearbyPlayers: false,
-    discardWornTools: true,
-    autoGather: true,
     developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
   }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
@@ -410,7 +407,7 @@ test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟�
 test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-standby`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, commandArbitrationMs: 0, discardWornTools: true }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, commandArbitrationMs: 0 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
