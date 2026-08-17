@@ -19,7 +19,7 @@
 | 目标服务器 | Fabric 26.2 模组服（offline-mode:false） | 也可用“局域网兼容模式”加入本地/局域网 LAN 世界 |
 | 网络 | 可访问 npm 镜像、BMCLAPI/CERNET 资源镜像、GitHub 镜像 | 中国大陆已内置回退下载路线 |
 
-版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.1.0`。
+版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.1.5`。
 
 ### 二、一键安装（推荐）
 
@@ -45,7 +45,7 @@
    .\gradlew.bat build --no-daemon
    ```
 
-   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.1.0.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
+   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.1.5.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
 5. 初始化用户数据目录（只复制模板，不覆盖已有文件）：
 
    ```powershell
@@ -162,6 +162,9 @@
 - 路径与水下生存：有界 A* 记录逐格路线、重新规划、绕开危险落脚点；阶梯挖掘可清理头顶、在洞穴内放置自有垫脚块并以稳定落地作为后置条件；游泳时搜索可呼吸水面，冰下无出口时可破坏天然冰/雪顶部自救。
 - 最高优先玩家定位状态仍可提供方位/距离线索；“跟着我”会由模型启动一次 `follow_player_continuously` 持续技能，Fabric 随玩家实时位置长期重规划，不再反复追逐旧坐标。第一次局部规划无路也不会把持续跟随判为失败；短暂离开实体加载范围时保留最后目标并继续等待，空闲自主发展不会覆盖它。明确停止、冲突的新任务、危险抢占、死亡或断线才会结束；远距离仍可分段寻路，或在管理员授权并开启开关后尝试 TP。
 - 自有方块账本：工作台、熔炉、床、附魔台、住所和上行垫脚块按维度/坐标写入 `userdata/data/owned-blocks.json`；只把账本中仍与服务端实际方块一致的设施当作自己的，避免借用或破坏玩家设施。
+- 环境改造识别所有原版方块：`gather_resource` 去掉了“天然方块白名单”，只排除玩家建筑、容器、红石等人工方块，可采集甘蔗、作物、植物、矿物等任意原版方块，支持“采集甘蔗并给我”这类完整指令。
+- 找床睡觉：夜间自动寻找附近的空床（自己的或村庄/基地的）睡觉并设置重生点，找不到再尝试合成床。
+- 语境化随机回复：开工、失败、超时等回复按指令和所选工具随机生成（如回家会说“正在往家走”、采集会说“去采 X”），不再固定同一句。
 
 当前明确限制：
 
