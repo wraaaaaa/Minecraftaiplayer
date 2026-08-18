@@ -321,7 +321,7 @@ export class PromptWorkspace {
     await atomicText(path.join(this.#root, 'behavior-patches.json'), `${JSON.stringify(document, null, 2)}\n`)
   }
 
-  async buildSystemPrompt(persona: Persona, identity?: PlayerIdentity, options: { toolAgent?: boolean } = {}): Promise<string> {
+  async buildSystemPrompt(persona: Persona, identity?: PlayerIdentity, options: { toolAgent?: boolean; ownerName?: string } = {}): Promise<string> {
     const documents = await this.readDocuments()
     const profile = identity ? await this.ensurePlayerProfile(identity) : undefined
     const patchDocument = await this.readBehaviorPatches()
@@ -333,6 +333,7 @@ export class PromptWorkspace {
       .replaceAll('{{speakingStyle}}', persona.speakingStyle)
       .replaceAll('{{goals}}', persona.goals.join('；'))
       .replaceAll('{{boundaries}}', persona.boundaries.join('；'))
+      .replaceAll('{{owner}}', options.ownerName ?? 'admin')
     return [
       substitute(documents['rules.md']),
       substitute(documents['IDENTITY.md']),

@@ -86,7 +86,7 @@
     "maxEvents": 5000
   },
   "playerMonitor": {
-    "enabled": false,
+    "enabled": true,
     "pollIntervalMs": 15000,
     "onlineAfterMs": 60000,
     "offlineAfterMs": 1800000,
@@ -112,7 +112,7 @@
   },
   "autonomy": {
     "enabled": true,
-    "ownerName": "wraaaaaa",
+    "ownerName": "admin",
     "commandArbitrationMs": 350,
     "contextualAddressing": true,
     "directAddressDistance": 8,

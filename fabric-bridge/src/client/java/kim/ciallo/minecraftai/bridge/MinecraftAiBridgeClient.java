@@ -39,6 +39,7 @@ import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 public final class MinecraftAiBridgeClient implements ClientModInitializer {
@@ -73,6 +74,8 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
     private PendingStepOn pendingStepOn;
     private String activeGesture = "";
     private int gestureStartedTick;
+    private String gestureTargetName;
+    private int gestureCircleStep;
     private final String ownerName = environment("MCAI_OWNER_NAME", "wraaaaaa");
     private final boolean autonomyEnabled = Boolean.parseBoolean(environment("MCAI_AUTONOMY_ENABLED", "true"));
     private final boolean firstHomeEnabled = Boolean.parseBoolean(environment("MCAI_FIRST_HOME_ENABLED", "true"));
@@ -1057,33 +1060,104 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private ActionResult startGesture(JsonObject action) {
         String gesture = string(action, "gesture").trim().toLowerCase(Locale.ROOT);
-        if (!gesture.equals("acknowledge") && !gesture.equals("happy") && !gesture.equals("afraid")) {
+        if (!Set.of("acknowledge", "happy", "afraid", "angry", "excited").contains(gesture)) {
             return new ActionResult(false, "unsupported gesture");
         }
         activeGesture = gesture;
         gestureStartedTick = tick;
+        gestureTargetName = action.has("target") && !action.get("target").isJsonNull() ? action.get("target").getAsString() : null;
+        gestureCircleStep = 0;
         return new ActionResult(true, "gesture_started=" + gesture);
     }
 
     private void tickGesture(Minecraft client) {
         if (activeGesture.isEmpty()) return;
+        LocalPlayer player = client.player;
+        if (player == null || client.level == null) { releaseGesture(client); return; }
         int elapsed = tick - gestureStartedTick;
-        boolean done = elapsed >= (activeGesture.equals("afraid") ? 30 : 20);
-        if (done) {
-            client.options.keyShift.setDown(false);
-            client.options.keyJump.setDown(false);
-            client.options.keySprint.setDown(false);
-            activeGesture = "";
-            return;
-        }
+        int duration = switch (activeGesture) {
+            case "afraid" -> 30;
+            case "excited" -> 200;
+            case "angry" -> 16;
+            default -> 20;
+        };
+        if (elapsed >= duration) { releaseGesture(client); return; }
         switch (activeGesture) {
             case "acknowledge" -> client.options.keyShift.setDown((elapsed >= 1 && elapsed <= 4) || (elapsed >= 9 && elapsed <= 12));
-            case "happy" -> client.options.keyJump.setDown((elapsed >= 1 && elapsed <= 3) || (elapsed >= 11 && elapsed <= 13));
+            case "happy" -> {
+                // 高兴：边跑边跳
+                client.options.keySprint.setDown(true);
+                client.options.keyJump.setDown(elapsed % 8 <= 2);
+            }
             case "afraid" -> {
                 client.options.keySprint.setDown(true);
                 client.options.keyJump.setDown(elapsed % 9 <= 3);
             }
-            default -> activeGesture = "";
+            case "angry" -> tickAngryGesture(client, player, elapsed);
+            case "excited" -> tickExcitedGesture(client, player, elapsed);
+            default -> releaseGesture(client);
+        }
+    }
+
+    private void tickAngryGesture(Minecraft client, LocalPlayer player, int elapsed) {
+        AbstractClientPlayer target = resolveGestureTarget(client, player);
+        if (target == null) { releaseGesture(client); return; }
+        if (elapsed >= 1 && elapsed <= 5) client.options.keyUp.setDown(true);
+        if (elapsed == 6) selectEmptyHand(client, player);
+        if (elapsed == 9 && player.distanceToSqr(target) <= 9.0D) {
+            client.gameMode.attack(player, target);
+            player.swing(InteractionHand.MAIN_HAND);
+        }
+    }
+
+    private void tickExcitedGesture(Minecraft client, LocalPlayer player, int elapsed) {
+        AbstractClientPlayer target = resolveGestureTarget(client, player);
+        if (target == null) { releaseGesture(client); return; }
+        if (elapsed % 20 == 0) gestureCircleStep++;
+        double angle = gestureCircleStep * (Math.PI / 2.0D);
+        double radius = 2.5D;
+        double cx = target.getX() + Math.cos(angle) * radius;
+        double cz = target.getZ() + Math.sin(angle) * radius;
+        movementNavigator.drive(client, player, new Vec3(cx, target.getY(), cz), 1.1D, true, tick);
+    }
+
+    private AbstractClientPlayer resolveGestureTarget(Minecraft client, LocalPlayer player) {
+        if (gestureTargetName != null && !gestureTargetName.isBlank()) {
+            AbstractClientPlayer named = findPlayer(client, gestureTargetName);
+            if (named != null) return named;
+        }
+        AbstractClientPlayer nearest = null;
+        double nearestDistance = Double.POSITIVE_INFINITY;
+        for (AbstractClientPlayer candidate : client.level.players()) {
+            if (candidate == player) continue;
+            double distance = candidate.distanceToSqr(player);
+            if (distance < nearestDistance) { nearestDistance = distance; nearest = candidate; }
+        }
+        return nearest;
+    }
+
+    private void releaseGesture(Minecraft client) {
+        client.options.keyShift.setDown(false);
+        client.options.keyJump.setDown(false);
+        client.options.keySprint.setDown(false);
+        client.options.keyUp.setDown(false);
+        client.options.keyLeft.setDown(false);
+        client.options.keyRight.setDown(false);
+        movementNavigator.release(client);
+        activeGesture = "";
+        gestureTargetName = null;
+        gestureCircleStep = 0;
+    }
+
+    private static void selectEmptyHand(Minecraft client, LocalPlayer player) {
+        for (int slot = 0; slot < 9; slot++) {
+            if (player.getInventory().getItem(slot).isEmpty()) {
+                if (player.getInventory().getSelectedSlot() != slot) {
+                    player.getInventory().setSelectedSlot(slot);
+                    player.connection.send(new ServerboundSetCarriedItemPacket(slot));
+                }
+                return;
+            }
         }
     }
 

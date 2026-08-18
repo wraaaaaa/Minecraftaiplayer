@@ -1,6 +1,6 @@
 {
   "name": "minecraft-ai-player",
-  "version": "1.1.5",
+  "version": "1.2.0",
   "private": true,
   "description": "Headless, API-driven AI player for Minecraft Java Edition",
   "type": "module",

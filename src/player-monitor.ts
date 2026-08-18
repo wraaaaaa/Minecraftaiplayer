@@ -16,6 +16,9 @@ interface PlayerMonitorState {
   lastPollAt: number
   lastOnlineAt: number | null
   lastOfflineAt: number | null
+  onlineCount: number
+  maxPlayers: number
+  humanCount: number
 }
 
 const projectRoot = process.cwd()
@@ -68,10 +71,13 @@ async function readState(): Promise<PlayerMonitorState> {
       botOnline: raw.botOnline === true,
       lastPollAt: typeof raw.lastPollAt === 'number' ? raw.lastPollAt : 0,
       lastOnlineAt: typeof raw.lastOnlineAt === 'number' ? raw.lastOnlineAt : null,
-      lastOfflineAt: typeof raw.lastOfflineAt === 'number' ? raw.lastOfflineAt : null
+      lastOfflineAt: typeof raw.lastOfflineAt === 'number' ? raw.lastOfflineAt : null,
+      onlineCount: typeof raw.onlineCount === 'number' ? raw.onlineCount : 0,
+      maxPlayers: typeof raw.maxPlayers === 'number' ? raw.maxPlayers : 0,
+      humanCount: typeof raw.humanCount === 'number' ? raw.humanCount : 0
     }
   } catch {
-    return { humanSeenAt: null, zeroSince: null, botOnline: false, lastPollAt: 0, lastOnlineAt: null, lastOfflineAt: null }
+    return { humanSeenAt: null, zeroSince: null, botOnline: false, lastPollAt: 0, lastOnlineAt: null, lastOfflineAt: null, onlineCount: 0, maxPlayers: 0, humanCount: 0 }
   }
 }
 
@@ -112,6 +118,9 @@ async function main(): Promise<void> {
       }
       const status = await queryServerStatus(host, port, PROTOCOL_VERSION, timeoutMs)
       const humans = Math.max(0, status.online - (online ? 1 : 0))
+      state.onlineCount = status.online
+      state.maxPlayers = status.max
+      state.humanCount = humans
       log('在线 ' + status.online + '/' + status.max + '，人类玩家 ' + humans + '，AI ' + (online ? '在线' : '离线'))
 
       if (humans >= 1) {

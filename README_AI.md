@@ -7,6 +7,13 @@
 
 > **用户数据统一目录 `userdata/`**：`.env`、`config/*.json`、`data/` 已全部合并到项目根目录的 `userdata/`（可用 `MCAI_USERDATA_DIR` 覆盖位置）。升级版本 = 只替换 `userdata/` 一个文件夹。配置字段里的相对路径（如 `data/memory.json`、`config/persona.json`）仍按原字符串填写，由 `src/core/user-data.ts` 的 `resolveUserData()` 解析到 `userdata/` 下；仓库模板 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 留在根目录。旧目录可跑 `node scripts/migrate-userdata.mjs` 一次性迁移。
 
+> **v1.2.0 交付（拟人化行为）**：
+> - 情绪-动作联动：高兴边跑边跳、生气空手轻拍玩家、疑惑/同意蹲两下、激动绕着玩家小跑，动作与语言同步表达情绪。
+> - 最高指令玩家 ID 可配置：默认 `admin`（主工作区本地仍为 `wraaaaaa`），提示词用 `{{owner}}` 占位符随 ownerName 自动更新。
+> - WebUI 运行状态新增实时在线人数（总数/上限/人类玩家数），与玩家监听自动上下线联动；“正常启动”默认先监听人数、≥1 人自动进服、0 人 30 分钟后自动离线，“测试启动”跳过监听。
+> - 跟随系统：跟随中不再向路人发跟随邀请、改为自然打招呼；跟随中可闲聊卖萌不中断跟随；检测到敌对怪物攻击附近玩家时协助击杀，玩家离开则跳过并继续跟随。
+> - 版本号 1.2.0。
+
 > **v1.1.5 交付**：
 > - 回复随机化 + 语境化：开工回应按所选工具生成（如回家→“好的呢，我现在正在往家走”、采集→“好的，我这就去采 X”），失败/超时/预算耗尽均从多样化池随机选取，同一玩家避免立即重复。
 > - 环境改造识别所有原版方块：去掉“天然方块白名单”，只排除玩家建筑/容器/红石等人工方块；`gather_resource` 可采集任意原版方块（甘蔗/作物/植物/矿物等），支持“采集甘蔗并给我”这类完整指令。
@@ -1018,7 +1025,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-fabric-clien
 
 1. 查看 `userdata/data/bot.pid.json`、`userdata/data/minecraft-client.pid.json` 是否属于当前项目根。
 2. 查看 `logs/background.stderr.log`、`logs/minecraft-client.stderr.log`。
-3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.1.5.jar` 存在。
+3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.2.0.jar` 存在。
 4. 用 `Start-Bot.cmd` 成对启动，不要只开 Java 或只开 Node。
 5. 确认桥 host/port 相同且 `userdata/data/bridge-token.txt` 非空。
 6. 如果项目移动过，删除已经停止进程遗留的 PID 文件；停止脚本会做所有权检查，不要手工杀不明 PID。
@@ -1203,7 +1210,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 
 - TypeScript：`npm run check` 成功。
 - Node：最终候选工作树 `npm test` 为 74 tests、74 pass、0 fail；数量只代表本快照，后续以当次输出为准。
-- Fabric：Java 25 下 `gradlew.bat clean build --no-daemon` 成功，新 jar 已复制到 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.1.5.jar`。
+- Fabric：Java 25 下 `gradlew.bat clean build --no-daemon` 成功，新 jar 已复制到 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.2.0.jar`。
 - 生产与审计：`npm run build` 成功；`npm run audit` 扫描 110 个跟踪文件，0 个秘密、编码、乱码、控制字符或 JSON 问题；`git diff --check` 成功。
 - 真实服扫描和动作验证只记录动作后置条件，不在公开文档保存服务器地址或实际测试坐标。
 - 第一次采集暴露并复现连续挖掘状态机 bug；测试区产生的旧圆石掉落属于此授权测试遗留物。
@@ -1261,7 +1268,7 @@ TaskStore 原有串行仲裁不变。`AgentController.#bestEffortReply` 统一�
 - `npm test`：76 tests、76 pass、0 fail；新增测试验证诊断文件持久化，以及完整动作名/参数/错误只进入诊断而不进入游戏聊天。
 - `node --check public/webui/app.js`：通过。
 - `npm run build`：通过。
-- Fabric Java 25 build：通过；新 jar 已覆盖 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.1.5.jar`。
+- Fabric Java 25 build：通过；新 jar 已覆盖 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.2.0.jar`。
 - 后台完整重启后，Node 控制器、Minecraft 客户端和 WebUI 均运行，Fabric 重新握手并达到 `in_world`。初次位于石砖/楼梯围场且已加载方块内无出口时，连续两次 `return_to_zone` 都立即返回 `no collision-safe loaded route`，没有把开始移动误报成成功；完整原因进入诊断。重生到自然地形后，状态上报出现 `following_path 3/13`、`19/30` 等逐段进度，坐标持续改变；玩家随后发出的 `come_to_player` 也由同一规划器接受。最终玩家要求停止移动后，实测 `activePrimitive=""`、`navigationStatus="idle"`。这证明安全拒绝、路线驱动和停止释放按键均工作，但尚未建立固定长墙/U 形墙的可重复实服测试地图，不能把任意复杂地形宣称为已验证。
 - 最新一次完整重启还包含住所控制器 A* 接入；Java 编译通过，运行 jar 与构建 jar SHA-256 一致。自动避难的路线行为需等服务器再次进入夜间或人工下达可触发 `seek_shelter` 的条件继续实测。
 - 浏览器回归：WebUI 显示运行进程、`in_world`、实时 `navigationStatus`、总聊天导航/说明/时间线/任务侧栏；“仅警告与错误”筛选工作，能展开最新任务的完整本机错误，操作后仍为“设置已同步”；浏览器控制台 0 warning/error。

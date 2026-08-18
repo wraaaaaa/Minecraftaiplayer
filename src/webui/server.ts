@@ -51,6 +51,7 @@ const files = {
   botPid: userDataPath('data', 'bot.pid.json'),
   clientPid: userDataPath('data', 'minecraft-client.pid.json'),
   testFlag: userDataPath('data', 'test-mode.flag'),
+  playerMonitorState: userDataPath('data', 'player-monitor-state.json'),
   runtimeStatus: userDataPath('data', 'runtime-status.json'),
   memory: userDataPath('data', 'memory.json'),
   experience: userDataPath('data', 'experience.json'),
@@ -278,7 +279,8 @@ async function snapshot(): Promise<unknown> {
     readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
   ])
-  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(resolveUserData(skin.skinFile)), imageUrl: await exists(resolveUserData(skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  const monitor = await readMonitorSnapshot()
+  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(resolveUserData(skin.skinFile)), imageUrl: await exists(resolveUserData(skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, monitor, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
 }
 
 async function centralChatSnapshot(): Promise<unknown> {
@@ -291,6 +293,13 @@ async function centralChatSnapshot(): Promise<unknown> {
     readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null)
   ])
   return { ok: true, memory, tasks, diagnostics }
+}
+
+async function readMonitorSnapshot(): Promise<unknown> {
+  try {
+    const raw = JSON.parse(await readFile(files.playerMonitorState, 'utf8')) as { onlineCount?: number; maxPlayers?: number; humanCount?: number; botOnline?: boolean; lastPollAt?: number }
+    return { online: raw.onlineCount ?? 0, max: raw.maxPlayers ?? 0, humans: raw.humanCount ?? 0, botOnline: raw.botOnline === true, lastPollAt: raw.lastPollAt ?? 0 }
+  } catch { return null }
 }
 
 async function runPowerShell(script: string): Promise<string> {
@@ -451,9 +460,14 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     await writeFile(files.testFlag, 'test-mode\n', 'utf8')
     return json(response, 200, { ok: true, testMode: true, output: await runPowerShell('start-all-background.ps1') })
   }
-  if (request.method === 'POST' && pathname === '/api/runtime/start') return json(response, 200, { ok: true, output: await runPowerShell('start-all-background.ps1') })
+  if (request.method === 'POST' && pathname === '/api/runtime/start') {
+    const runtimeConfig = await readJson<BotConfig>(files.config, files.configExample)
+    const monitoring = runtimeConfig.playerMonitor?.enabled === true
+    return json(response, 200, { ok: true, monitoring, output: await runPowerShell(monitoring ? 'start-player-monitor.ps1' : 'start-all-background.ps1') })
+  }
   if (request.method === 'POST' && pathname === '/api/runtime/stop') {
     const output = await runPowerShell('stop-all-background.ps1')
+    await runPowerShell('stop-player-monitor.ps1').catch(() => '')
     await rm(files.testFlag, { force: true })
     return json(response, 200, { ok: true, testMode: false, output })
   }

@@ -263,7 +263,7 @@ export interface AutonomyConfig {
 
 export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   enabled: true,
-  ownerName: 'wraaaaaa',
+  ownerName: 'admin',
   commandArbitrationMs: 350,
   contextualAddressing: true,
   directAddressDistance: 8,
@@ -311,7 +311,7 @@ export interface PlayerMonitorConfig {
 }
 
 export const DEFAULT_PLAYER_MONITOR_CONFIG: Readonly<PlayerMonitorConfig> = Object.freeze({
-  enabled: false,
+  enabled: true,
   pollIntervalMs: 15_000,
   onlineAfterMs: 60_000,
   offlineAfterMs: 30 * 60_000,

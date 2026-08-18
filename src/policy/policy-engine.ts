@@ -51,7 +51,7 @@ export type AgentAction =
   | { type: 'use_held_item'; hand: 'main' | 'off' }
   | { type: 'drop_inventory_item'; slot: number; count: number }
   | { type: 'discard_worn_tools'; remainingDurability: number }
-  | { type: 'gesture'; gesture: 'acknowledge' | 'happy' | 'afraid' }
+  | { type: 'gesture'; gesture: 'acknowledge' | 'happy' | 'afraid' | 'angry' | 'excited'; target?: string }
   | { type: 'craft_recipe'; itemId: string; count: number }
   | { type: 'send_server_command'; command: string }
 

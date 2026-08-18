@@ -304,6 +304,12 @@ export class AgentController {
       await this.#executeProactive({ type: 'attack_hostile', targetId: directThreat.id })
       return
     }
+    // 跟随/陪伴时协助附近玩家：攻击正在锁定其他玩家（而非 Bot）的敌对生物。
+    const escortThreat = world.nearbyHostiles?.find(hostile => hostile.targetPlayerName && !hostile.targetingBot && hostile.targetPlayerName.toLowerCase() !== autonomy.ownerName.toLowerCase())
+    if (escortThreat && (world.health ?? 20) > autonomy.criticalHealthThreshold) {
+      await this.#executeProactive({ type: 'attack_hostile', targetId: escortThreat.id })
+      return
+    }
     if (this.#manualHold) {
       const survivalEmergency = world.onFire === true
         || (world.health ?? 20) <= autonomy.lowHealthThreshold
@@ -508,7 +514,15 @@ export class AgentController {
       || ['idle', ''].includes(world.activePrimitive)
       || (world.activePrimitive === 'return_home' && insideHome(world))
     if (!movementCanBeReplaced) {
+      // 已经在跟随/执行其他移动原语：不再发起新的跟随邀请，只向新路过的玩家自然打个招呼。
+      const passer = world.nearbyPlayers
+        .filter(player => player.distance <= autonomy.inviteRadius)
+        .filter(player => !this.#nearbyPlayersLastTick.has(player.name.toLowerCase()))
+        .sort((left, right) => left.distance - right.distance)[0]
       this.#nearbyPlayersLastTick = current
+      if (passer) {
+        await this.#bestEffortReply({ name: passer.name, ...(passer.uuid ? { uuid: passer.uuid } : {}) }, `嗨，${passer.name}，小默现在正陪着人走，先不跟你啦，玩得开心喵~`).catch(() => {})
+      }
       return false
     }
     const candidate = world.nearbyPlayers
@@ -533,7 +547,7 @@ export class AgentController {
     this.#standbyEngaged = false
     await Promise.allSettled([
       this.#bestEffortReply(identity, `嗨，${candidate.name}，小默看到你经过啦。我先陪你走一小段好不好？如果不需要，跟我说一声，我就回家等着喵~`),
-      this.#executor.execute({ type: 'gesture', gesture: 'happy' })
+      this.#executor.execute({ type: 'gesture', gesture: 'excited', target: candidate.name })
     ])
     await this.#diagnose({
       type: 'result', level: 'success', title: '已向路过玩家发出陪伴邀请', summary: candidate.name,
@@ -793,6 +807,7 @@ export class AgentController {
       const timedOut = error instanceof Error && (error.name === 'TimeoutError' || /timeout|timed out|超时/iu.test(error.message))
       const fallback = this.#replyComposer.varied(timedOut ? TIMEOUT_REPLIES : FAILURE_REPLIES, identity.name)
       await this.#markFailed(task, detail || fallback)
+      if (!timedOut) void this.#executor.execute({ type: 'gesture', gesture: 'angry', target: identity.name })
       await this.#bestEffortReply(identity, `${this.#config.chat.replyPrefix}${fallback}`)
     }
   }
@@ -1021,7 +1036,7 @@ export class AgentController {
 
   async #systemPrompt(identity?: PlayerIdentity, toolAgent = false): Promise<string> {
     return this.#promptWorkspace
-      ? await this.#promptWorkspace.buildSystemPrompt(this.#persona, identity, { toolAgent })
+      ? await this.#promptWorkspace.buildSystemPrompt(this.#persona, identity, { toolAgent, ownerName: autonomyConfig(this.#config).ownerName })
       : buildSystemPrompt(this.#persona, this.#prompts)
   }
 

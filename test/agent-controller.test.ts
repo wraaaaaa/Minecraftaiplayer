@@ -302,7 +302,7 @@ test('安全空闲时模型只能串行执行一个经过逐目标验证的自�
     { type: 'discard_worn_tools', remainingDurability: 1 },
     { type: 'wait_safe' },
     { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'wraaaaaa', verifiedWilderness: true },
+    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'admin', verifiedWilderness: true },
     { type: 'collect_own_drops', count: 2, radius: 16 }
   ])
   await logger.flush()
@@ -333,7 +333,7 @@ test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止�
   assert.equal(providerCalls, 0)
   assert.deepEqual(actions, [
     { type: 'follow_player', target: 'Alice' },
-    { type: 'gesture', gesture: 'happy' },
+    { type: 'gesture', gesture: 'excited', target: 'Alice' },
     { type: 'stop' },
     { type: 'return_home' }
   ])
@@ -397,7 +397,7 @@ test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟�
 
   assert.deepEqual(actions, [
     { type: 'follow_player', target: 'Alice' },
-    { type: 'gesture', gesture: 'happy' },
+    { type: 'gesture', gesture: 'excited', target: 'Alice' },
     { type: 'stop' },
     { type: 'return_home' }
   ])
