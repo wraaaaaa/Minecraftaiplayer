@@ -160,6 +160,8 @@ export class AgentController {
   #nearbyPlayersLastTick = new Set<string>()
   #lastWornToolCleanupAt = 0
   readonly #replyComposer = new ReplyComposer()
+  #followedPlayer: string | null = null
+  #pendingFollowSwitch: { requesterName: string; askedAt: number } | null = null
 
   constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore; promptWorkspace?: PromptWorkspace; contextCompressor?: ContextCompressor; selfImprovement?: SelfImprovementManager }) {
     this.#config = options.config
@@ -223,7 +225,23 @@ export class AgentController {
           this.#executor.execute({ type: 'follow_player', target: identity.name }),
           this.#executor.execute({ type: 'gesture', gesture: 'acknowledge' })
         ])
+        this.#followedPlayer = identity.name
         await this.#bestEffortReply(identity, '好呀，那小默就跟紧你啦。你慢一点点走，我会自己绕过障碍，不会乱跑丢掉的喵~')
+        return
+      }
+    }
+    const followSwitch = this.#pendingFollowSwitch
+    if (followSwitch && this.#followedPlayer && this.#followedPlayer.toLowerCase() === identity.name.toLowerCase() && Date.now() - followSwitch.askedAt <= 60_000) {
+      if (/(?:同意|可以|行|去吧|你跟他|你跟她)/u.test(safeMessage) || isImmediateStop(safeMessage)) {
+        this.#pendingFollowSwitch = null
+        await this.#executor.execute({ type: 'follow_player', target: followSwitch.requesterName }).catch(() => ({ ok: false, detail: 'switch_failed' }))
+        this.#followedPlayer = followSwitch.requesterName
+        await this.#bestEffortReply(identity, '好，那我过去跟着他/她啦，你有事随时叫我喵~')
+        return
+      }
+      if (/(?:不同意|不行|别去|不用)/u.test(safeMessage)) {
+        this.#pendingFollowSwitch = null
+        await this.#bestEffortReply(identity, '好，那我继续跟着你，不去啦喵~')
         return
       }
     }
@@ -535,6 +553,7 @@ export class AgentController {
 
     const identity: PlayerIdentity = { name: candidate.name, ...(candidate.uuid ? { uuid: candidate.uuid } : {}) }
     const followed = await this.#executor.execute({ type: 'follow_player', target: candidate.name })
+    if (followed.ok) this.#followedPlayer = candidate.name
     this.#lastInviteByPlayer.set(candidate.name.toLowerCase(), now)
     if (!followed.ok) {
       await this.#diagnose({
@@ -834,7 +853,7 @@ export class AgentController {
       const successSteps: Array<{ tool: string; args: string }> = []
       const agent = new ToolAgent({
         provider: this.#provider,
-        executor: this.#executor,
+        executor: { execute: action => this.#executeWithFollowGuard(action), chat: message => this.#executor.chat(message), snapshot: () => this.#executor.snapshot?.() ?? this.#latestWorld },
         authorize: action => this.#policy.authorize(action),
         maxSteps: this.#config.model.agentMaxSteps ?? 12,
         maxApiCalls: this.#config.model.agentMaxApiCalls ?? 8,
@@ -1032,6 +1051,21 @@ export class AgentController {
     await this.#diagnostics.append(safe).catch(error => {
       this.#logger.warn('本机诊断时间线写入失败', { error: this.#secrets.sanitizeForPersistence(error instanceof Error ? error.message : String(error)) })
     })
+  }
+
+  async #executeWithFollowGuard(action: AgentAction): Promise<{ ok: boolean; detail: string }> {
+    if ((action.type === 'follow_player') && action.target) {
+      const owner = autonomyConfig(this.#config).ownerName
+      if (this.#followedPlayer && this.#followedPlayer.toLowerCase() !== action.target.toLowerCase() && action.target.toLowerCase() !== owner.toLowerCase()) {
+        this.#pendingFollowSwitch = { requesterName: action.target, askedAt: Date.now() }
+        await this.#bestEffortReply({ name: this.#followedPlayer }, `${action.target} 想让我跟着他/她，我可以过去吗？你说“同意”或“脱离跟随”我就过去，说“不同意”我就继续陪你喵~`).catch(() => {})
+        return { ok: false, detail: `pending_follow_switch_consent; waiting_for=${this.#followedPlayer}` }
+      }
+    }
+    const result = await this.#executor.execute(action)
+    if (action.type === 'follow_player') this.#followedPlayer = action.target ?? null
+    if (action.type === 'stop') this.#followedPlayer = null
+    return result
   }
 
   async #systemPrompt(identity?: PlayerIdentity, toolAgent = false): Promise<string> {
