@@ -185,7 +185,7 @@ function validateSkin(value: unknown): asserts value is SkinConfig {
 
 function ensureProjectPaths(config: WebUiBotConfig): void {
   const workspace = agentWorkspaceConfig(config)
-  const checks: Array<[string, string]> = [
+  const userDataChecks: Array<[string, string]> = [
     [config.personaFile, userDataPath('config')],
     [config.promptsFile, userDataPath('config')],
     [config.policyFile, userDataPath('config')],
@@ -197,13 +197,18 @@ function ensureProjectPaths(config: WebUiBotConfig): void {
     [config.storage.ownedBlocksFile ?? 'data/owned-blocks.json', userDataPath('data')],
     [workspace.promptDirectory, userDataPath('data')],
     [workspace.playerProfilesDirectory, userDataPath('data')],
-    [config.model.multimodal?.sensoryDirectory ?? 'data/sensory', userDataPath('data')],
-    [config.logging.file, path.join(projectRoot, 'logs')]
+    [config.model.multimodal?.sensoryDirectory ?? 'data/sensory', userDataPath('data')]
   ]
-  for (const [configured, allowedRoot] of checks) {
+  for (const [configured, allowedRoot] of userDataChecks) {
     const resolved = resolveUserData(configured)
     if (resolved !== allowedRoot && !resolved.startsWith(`${allowedRoot}${path.sep}`)) throw new Error(`WebUI 不允许把文件写到 userdata 范围外：${configured}`)
   }
+  // logging.file 相对于项目根目录解析（如 logs/bot.log → <project>/logs/bot.log），
+  // 而不是 userdata 根目录；此前把它交给 resolveUserData 会把相对日志路径错误地
+  // 解析到 userdata/logs 下，导致任何保存都报“写到 userdata 范围外”。
+  const logRoot = path.join(projectRoot, 'logs')
+  const resolvedLog = path.isAbsolute(config.logging.file) ? path.resolve(config.logging.file) : path.resolve(projectRoot, config.logging.file)
+  if (resolvedLog !== logRoot && !resolvedLog.startsWith(`${logRoot}${path.sep}`)) throw new Error(`日志文件必须位于项目 logs 目录内：${config.logging.file}`)
   if (!['127.0.0.1', 'localhost', '::1'].includes(config.server.bridgeHost)) throw new Error('Fabric 桥必须绑定本机回环地址')
 }
 
@@ -241,6 +246,18 @@ async function secretState(): Promise<Record<string, boolean>> {
   }))
 }
 
+/**
+ * 回读当前 EasyAuth 进服密码，用于在 WebUI 中“映射”当前值（而非只留空输入框）。
+ * 优先读取 .env 文件本身（WebUI 是独立进程，未必加载过 .env 到 process.env）。
+ */
+async function easyAuthPasswordValue(): Promise<string> {
+  const text = await readFile(files.env, 'utf8').catch(() => '')
+  const match = text.match(/^MINECRAFT_LOGIN_PASSWORD=(.*)$/mu)
+  let value = process.env.MINECRAFT_LOGIN_PASSWORD?.trim() || match?.[1]?.trim() || ''
+  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) value = value.slice(1, -1)
+  return value
+}
+
 async function snapshot(): Promise<unknown> {
   const storedConfig = await readJson<WebUiBotConfig>(files.config, files.configExample)
   const storedAutonomy = { ...storedConfig.autonomy }
@@ -261,7 +278,7 @@ async function snapshot(): Promise<unknown> {
   const experienceFile = resolveUserData(config.storage.experienceFile)
   const taskFile = resolveUserData(config.storage.taskFile ?? 'data/tasks.json')
   const progressionFile = resolveUserData(config.storage.progressionFile ?? 'data/progression.json')
-  const [persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs] = await Promise.all([
+  const [persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, bot, client, secrets, botLogs, gameLogs, easyAuthPassword] = await Promise.all([
     readJson<Persona>(files.persona, files.personaExample),
     readJson<PromptTemplates>(files.prompts, files.promptsExample),
     workspace.readDocuments(),
@@ -277,10 +294,10 @@ async function snapshot(): Promise<unknown> {
     readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
     readRuntimeJson<ProgressionDocument>(progressionFile).catch(() => null),
     readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
-    processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog)
+    processStatus(files.botPid), processStatus(files.clientPid), secretState(), tail(files.botLog), tail(files.gameLog), easyAuthPasswordValue()
   ])
   const monitor = await readMonitorSnapshot()
-  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(resolveUserData(skin.skinFile)), imageUrl: await exists(resolveUserData(skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, monitor, runtime: { bot, client }, secrets, logs: { bot: botLogs, game: gameLogs } }
+  return { config, persona, prompts, agentPrompts, playerProfiles, behaviorPatches, skin: { ...skin, imported: await exists(resolveUserData(skin.skinFile)), imageUrl: await exists(resolveUserData(skin.skinFile)) ? '/api/skin/image' : null }, rules, mods, manifest, live, memory, experience, tasks, progression, diagnostics, monitor, runtime: { bot, client }, secrets, easyAuthPassword, logs: { bot: botLogs, game: gameLogs } }
 }
 
 async function centralChatSnapshot(): Promise<unknown> {
@@ -507,7 +524,13 @@ const server = createServer(async (request, response) => {
     const relative = pathname === '/' ? 'index.html' : pathname.slice(1)
     const target = path.resolve(publicRoot, relative)
     if (!target.startsWith(`${publicRoot}${path.sep}`)) return json(response, 403, { ok: false, error: '路径无效' })
-    const content = await readFile(target)
+    let content: Buffer
+    try {
+      content = await readFile(target)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return json(response, 404, { ok: false, error: '文件不存在' })
+      throw error
+    }
     response.writeHead(200, { 'content-type': staticTypes[path.extname(target)] ?? 'application/octet-stream' })
     response.end(content)
   } catch (error) {

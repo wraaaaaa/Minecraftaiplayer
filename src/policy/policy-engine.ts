@@ -21,7 +21,7 @@ export type AgentAction =
   | { type: 'place_block'; itemId?: string; count: number; verifiedWilderness?: boolean }
   | { type: 'smelt_item'; inputItemId?: string; outputItemId?: string; count: number }
   | { type: 'trade_villager'; desiredItemId?: string; count: number }
-  | { type: 'enchant_item'; itemId?: string; minLevel?: number }
+  | { type: 'enchant_item'; itemId?: string; minLevel?: number; preferredEnchantment?: string }
   | { type: 'sleep_in_bed' }
   | { type: 'excavate_tunnel'; resource?: string; targetY: number; length: number; verifiedWilderness?: boolean }
   | { type: 'travel_to_dimension'; dimension: 'minecraft:overworld' | 'minecraft:the_nether' | 'minecraft:the_end' }
@@ -49,8 +49,8 @@ export type AgentAction =
   | { type: 'unequip_armor' }
   | { type: 'make_inventory_room'; freeSlots: number }
   | { type: 'use_held_item'; hand: 'main' | 'off' }
-  | { type: 'drop_inventory_item'; slot: number; count: number }
-  | { type: 'discard_worn_tools'; remainingDurability: number }
+  | { type: 'drop_inventory_item'; slot: number; count: number; authorizedPlayer?: string }
+  | { type: 'discard_worn_tools'; remainingDurability: number; authorizedPlayer?: string }
   | { type: 'gesture'; gesture: 'acknowledge' | 'happy' | 'afraid' | 'angry' | 'excited'; target?: string }
   | { type: 'craft_recipe'; itemId: string; count: number }
   | { type: 'send_server_command'; command: string }

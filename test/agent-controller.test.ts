@@ -247,19 +247,15 @@ test('采集任务只有在自有掉落实际进入背包后才完成', async ()
   await logger.flush()
 })
 
-test('主动生存循环不会重叠，找不到住所且材料不足时不会空建', async () => {
-  const suffix = `${process.pid}-${Date.now()}-proactive`
+test('空闲待机阶段：无家且夜晚先找床，失败后零 Token 待机，不空建', async () => {
+  const suffix = `${process.pid}-${Date.now()}-idle-night`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = {
-    ...DEFAULT_AUTONOMY_CONFIG,
-    autoInviteNearbyPlayers: false,
-    developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -16, minY: 60, minZ: -16, maxX: 16, maxY: 90, maxZ: 16 }
-  }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, replenishDurationMs: 0 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
   const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
-  const provider: LlmProvider = { complete: async () => { throw new Error('主动聊天已关闭，不应调用模型') } }
+  const provider: LlmProvider = { complete: async () => { throw new Error('待机不应调用模型') } }
   const actions: AgentAction[] = []
   const executor = {
     execute: async (action: AgentAction) => {
@@ -274,72 +270,35 @@ test('主动生存循环不会重叠，找不到住所且材料不足时不会�
 
   await Promise.all([controller.proactiveTick(unsafeNight), controller.proactiveTick(unsafeNight)])
 
-  assert.deepEqual(actions, [{ type: 'discard_worn_tools', remainingDurability: 1 }, { type: 'wait_safe' }])
+  assert.deepEqual(actions, [{ type: 'seek_shelter' }, { type: 'wait_safe' }])
   await logger.flush()
 })
 
-test('安全空闲时模型只能串行执行一个经过逐目标验证的自主发展动作', async () => {
-  const suffix = `${process.pid}-${Date.now()}-idle-development`
+test('补充阶段交给模型（原生工具循环）且只用受限工具集', async () => {
+  const suffix = `${process.pid}-${Date.now()}-replenish`
   const testConfig = structuredClone(config)
-  testConfig.chat = { ...testConfig.chat, proactiveEnabled: true, proactiveIdleMs: 0, proactiveMinIntervalMs: 0 }
-  testConfig.autonomy = {
-    ...DEFAULT_AUTONOMY_CONFIG,
-    autoInviteNearbyPlayers: false,
-    developmentZone: { enabled: true, dimension: 'minecraft:overworld', minX: -32, minY: 0, minZ: -32, maxX: 32, maxY: 128, maxZ: 32 }
-  }
+  testConfig.chat = { ...testConfig.chat, proactiveMinIntervalMs: 0 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
   const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
-  const provider: LlmProvider = { complete: async () => ({ text: '{"reply":"","action":{"type":"gather_resource","resource":"wood","count":2}}', model: 'mock', requestedEffort: 'low', effectiveEffort: 'low' }) }
+  let turn = 0
+  const provider: LlmProvider = {
+    complete: async () => { throw new Error('补充阶段不应调用旧 complete') },
+    toolTurn: async () => {
+      turn++
+      if (turn === 1) return { text: '', toolCalls: [{ id: 'c', name: 'chop_nearby_wood', arguments: '{"count":2}' }], continuation: { turn: 1 }, model: 'mock', requestedEffort: 'high', effectiveEffort: 'high' }
+      return { text: '', toolCalls: [], model: 'mock', requestedEffort: 'none', effectiveEffort: 'none' }
+    }
+  }
   const actions: AgentAction[] = []
   const executor = { execute: async (action: AgentAction) => { actions.push(action); return { ok: true, detail: 'verified' } }, chat: async () => {} }
   const controller = new AgentController({ config: testConfig, persona, prompts, provider, memory, experience, policy: new PolicyEngine(rules), executor, logger, tasks, secrets: new SecretGuard([]) })
 
   await controller.proactiveTick({ ...world, nearbyPlayers: [], environment: { isNight: false, safeToIdle: true } })
 
-  assert.deepEqual(actions, [
-    { type: 'discard_worn_tools', remainingDurability: 1 },
-    { type: 'wait_safe' },
-    { type: 'prepare_for', purpose: 'mining' },
-    { type: 'gather_resource', resource: 'wood', count: 2, authorizedPlayer: 'admin', verifiedWilderness: true },
-    { type: 'collect_own_drops', count: 2, radius: 16 }
-  ])
-  await logger.flush()
-})
-
-test('陪伴模式空闲时零模型调用，并且路过玩家拒绝后停止跟随回家', async () => {
-  const suffix = `${process.pid}-${Date.now()}-companion-invite`
-  const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
-  const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
-  const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
-  const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
-  const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
-  let providerCalls = 0
-  const actions: AgentAction[] = []
-  const chats: string[] = []
-  const controller = new AgentController({
-    config: testConfig, persona, prompts,
-    provider: { complete: async () => { providerCalls++; throw new Error('陪伴待机不应调用模型') } },
-    memory, experience, policy: new PolicyEngine(rules),
-    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async message => { chats.push(message) } },
-    logger, tasks, secrets: new SecretGuard([])
-  })
-
-  await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
-  await controller.handlePlayerMessage({ name: 'Alice', uuid: 'alice' }, '就到这吧', { ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
-
-  assert.equal(providerCalls, 0)
-  assert.deepEqual(actions, [
-    { type: 'follow_player', target: 'Alice' },
-    { type: 'gesture', gesture: 'excited', target: 'Alice' },
-    { type: 'stop' },
-    { type: 'return_home' }
-  ])
-  assert.equal(chats.length, 2)
-  assert.match(chats[0] ?? '', /要不要|好不好/u)
-  assert.match(chats[1] ?? '', /不打扰|不跟/u)
+  assert.deepEqual(actions, [{ type: 'gather_resource', resource: 'wood', count: 2, verifiedWilderness: true }])
   await logger.flush()
 })
 
@@ -369,45 +328,39 @@ test('远处敌对生物锁定 Bot 时启动持续防御寻路而不是原地挥
   await logger.flush()
 })
 
-test('路过玩家不回应邀请时，即使仍在附近也会超时停止跟随', async () => {
-  const suffix = `${process.pid}-${Date.now()}-companion-timeout`
+test('空闲待机中路过玩家只打招呼不自动跟随，回应后唤醒', async () => {
+  const suffix = `${process.pid}-${Date.now()}-passer-greet`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, inviteCooldownMs: 10_000, conversationWindowMs: 1000 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, commandArbitrationMs: 0, inviteCooldownMs: 10_000, replenishDurationMs: 0 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
   const logger = new Logger({ file: path.join(tmpdir(), `mcai-agent-${suffix}.log`), level: 'error', console: false })
+  let providerCalls = 0
   const actions: AgentAction[] = []
+  const chats: string[] = []
   const controller = new AgentController({
     config: testConfig, persona, prompts,
-    provider: { complete: async () => { throw new Error('邀请超时不应调用模型') } },
+    provider: { complete: async () => { providerCalls++; throw new Error('待机不应调用模型') } },
     memory, experience, policy: new PolicyEngine(rules),
-    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async () => {} },
+    executor: { execute: async action => { actions.push(action); return { ok: true, detail: `verified:${action.type}` } }, chat: async message => { chats.push(message) } },
     logger, tasks, secrets: new SecretGuard([])
   })
-  const seenAt = Date.now()
-  const originalNow = Date.now
-  try {
-    await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
-    Date.now = () => seenAt + 31_000
-    await controller.proactiveTick({ ...world, activePrimitive: 'follow_player', nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
-  } finally {
-    Date.now = originalNow
-  }
 
-  assert.deepEqual(actions, [
-    { type: 'follow_player', target: 'Alice' },
-    { type: 'gesture', gesture: 'excited', target: 'Alice' },
-    { type: 'stop' },
-    { type: 'return_home' }
-  ])
+  await controller.proactiveTick({ ...world, nearbyPlayers: [{ name: 'Alice', uuid: 'alice', distance: 3 }] })
+
+  assert.equal(providerCalls, 0)
+  assert.ok(!actions.some(action => action.type === 'follow_player'))
+  assert.ok(!actions.some(action => action.type === 'gesture'))
+  assert.equal(chats.length, 1)
+  assert.match(chats[0] ?? '', /在呢|随时叫/u)
   await logger.flush()
 })
 
-test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', async () => {
+test('陪伴待机在安全位置只做一次零 Token 待机', async () => {
   const suffix = `${process.pid}-${Date.now()}-companion-standby`
   const testConfig = structuredClone(config)
-  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, commandArbitrationMs: 0 }
+  testConfig.autonomy = { ...DEFAULT_AUTONOMY_CONFIG, autoInviteNearbyPlayers: false, commandArbitrationMs: 0, replenishDurationMs: 0 }
   const memory = new MemoryStore(path.join(tmpdir(), `mcai-agent-memory-${suffix}.json`), persona.name, 100)
   const experience = new ExperienceStore(path.join(tmpdir(), `mcai-agent-experience-${suffix}.json`))
   const tasks = new TaskStore(path.join(tmpdir(), `mcai-agent-tasks-${suffix}.json`))
@@ -424,23 +377,8 @@ test('陪伴模式在安全位置只做一次本地清理与零 Token 待机', a
   const safeWorld: WorldState = { ...world, nearbyPlayers: [], environment: { isNight: false, safeToIdle: true } }
   await controller.proactiveTick(safeWorld)
   await controller.proactiveTick(safeWorld)
-  await controller.proactiveTick({
-    ...safeWorld,
-    position: { x: 0, y: 64, z: 0 },
-    home: { dimension: 'minecraft:overworld', x: 100, y: 64, z: 100, radius: 10, source: 'first_home' },
-    activePrimitive: 'return_home'
-  })
-  await controller.proactiveTick({
-    ...safeWorld,
-    position: { x: 0, y: 64, z: 0 },
-    home: { dimension: 'minecraft:overworld', x: 100, y: 64, z: 100, radius: 10, source: 'first_home' },
-    navigationStatus: 'home_route_stalled_safe_wait; best_distance=80; no_progress_ticks=1200'
-  })
   assert.equal(providerCalls, 0)
-  assert.deepEqual(actions, [
-    { type: 'discard_worn_tools', remainingDurability: 1 },
-    { type: 'wait_safe' }
-  ])
+  assert.deepEqual(actions, [{ type: 'wait_safe' }])
   await logger.flush()
 })
 

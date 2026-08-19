@@ -19,7 +19,7 @@
 | 目标服务器 | Fabric 26.2 模组服（offline-mode:false） | 也可用“局域网兼容模式”加入本地/局域网 LAN 世界 |
 | 网络 | 可访问 npm 镜像、BMCLAPI/CERNET 资源镜像、GitHub 镜像 | 中国大陆已内置回退下载路线 |
 
-版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.2.0`。
+版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.3.0`。
 
 ### 二、一键安装（推荐）
 
@@ -45,7 +45,7 @@
    .\gradlew.bat build --no-daemon
    ```
 
-   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.2.0.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
+   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
 5. 初始化用户数据目录（只复制模板，不覆盖已有文件）：
 
    ```powershell

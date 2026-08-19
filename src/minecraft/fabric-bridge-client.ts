@@ -491,7 +491,10 @@ export class FabricBridgeClient implements ActionExecutor {
     if (this.#recentPlayerChats.size > 100) {
       for (const [key, seenAt] of this.#recentPlayerChats) if (now - seenAt >= 1500) this.#recentPlayerChats.delete(key)
     }
-    const identity: PlayerIdentity = { name: message.name, ...(message.uuid ? { uuid: message.uuid } : {}) }
+    // 聊天文本常只有玩家名而没有 UUID；从当前世界快照里按名字补全 UUID，
+    // 让聊天身份与 Fabric 附近玩家身份统一，避免同一玩家被拆成 name: 与 uuid: 两份记忆。
+    const resolvedUuid = message.uuid ?? this.#world.nearbyPlayers.find(player => player.name.toLowerCase() === message.name!.toLowerCase())?.uuid
+    const identity: PlayerIdentity = { name: message.name, ...(resolvedUuid ? { uuid: resolvedUuid } : {}) }
     const aliases = await this.#addressAliasesResolver?.(identity) ?? []
     const addressed = this.#addressing.decide(identity, message.message, this.#world, Date.now(), aliases)
     if (!addressed.addressed) {

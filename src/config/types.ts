@@ -151,6 +151,7 @@ export interface BotConfig {
     protectOwner?: boolean
     allowVerifiedWilderness?: boolean
     allowTeleportCommand?: boolean
+    replenishDurationMs?: number
     firstHome?: {
       enabled: boolean
       dimension: string
@@ -240,6 +241,7 @@ export interface AutonomyConfig {
   protectOwner: boolean
   allowVerifiedWilderness: boolean
   allowTeleportCommand: boolean
+  replenishDurationMs: number
   firstHome: {
     enabled: boolean
     dimension: string
@@ -292,6 +294,7 @@ export const DEFAULT_AUTONOMY_CONFIG: Readonly<AutonomyConfig> = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
+  replenishDurationMs: 30 * 60_000,
   firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 

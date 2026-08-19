@@ -1015,7 +1015,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         return new ActionResult(true, "block_interaction_accepted; block=" + blockId + "; target=" + target.toShortString());
     }
 
-    private static ActionResult dropInventoryItem(Minecraft client, LocalPlayer player, JsonObject action) {
+    private ActionResult dropInventoryItem(Minecraft client, LocalPlayer player, JsonObject action) {
         if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
             return new ActionResult(false, "normal inventory with empty cursor is required");
         }
@@ -1024,6 +1024,10 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (slot < 0 || slot >= player.getInventory().getNonEquipmentItems().size()) return new ActionResult(false, "invalid inventory slot");
         ItemStack stack = player.getInventory().getItem(slot);
         if (stack.isEmpty()) return new ActionResult(false, "inventory slot is empty");
+        String authorizedPlayer = action.has("authorizedPlayer") && !action.get("authorizedPlayer").isJsonNull() ? action.get("authorizedPlayer").getAsString() : null;
+        if (InventoryCleanup.isValuable(stack) && authorizedPlayer != null && !authorizedPlayer.equalsIgnoreCase(ownerName)) {
+            return new ActionResult(false, "refused: valuable item requires owner authorization");
+        }
         int count = Math.max(1, Math.min(requested, stack.getCount()));
         int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
         if (count == stack.getCount()) {
@@ -1034,18 +1038,20 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         return new ActionResult(true, "drop_requested; slot=" + slot + "; count=" + count);
     }
 
-    private static ActionResult discardWornTools(Minecraft client, LocalPlayer player, JsonObject action) {
+    private ActionResult discardWornTools(Minecraft client, LocalPlayer player, JsonObject action) {
         if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
             return new ActionResult(false, "normal inventory with empty cursor is required");
         }
         int threshold = Math.max(0, Math.min(16, (int) number(action, "remainingDurability", 1)));
         int discardedStacks = 0;
         int discardedItems = 0;
+        String authorizedPlayer = action.has("authorizedPlayer") && !action.get("authorizedPlayer").isJsonNull() ? action.get("authorizedPlayer").getAsString() : null;
         for (int slot = 0; slot < player.getInventory().getNonEquipmentItems().size(); slot++) {
             ItemStack stack = player.getInventory().getItem(slot);
             if (stack.isEmpty() || !stack.isDamageableItem() || stack.getMaxDamage() <= 0) continue;
             if (!stack.has(DataComponents.TOOL) && !stack.has(DataComponents.WEAPON)) continue;
             if (!stack.getEnchantments().isEmpty()) continue;
+            if (InventoryCleanup.isValuable(stack) && authorizedPlayer != null && !authorizedPlayer.equalsIgnoreCase(ownerName)) continue;
             int remaining = stack.getMaxDamage() - stack.getDamageValue();
             if (remaining > threshold) continue;
             int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;

@@ -165,7 +165,8 @@ export function validateConfig(config: BotConfig): void {
       ['wildernessMinPlayerDistance', config.autonomy.wildernessMinPlayerDistance, 16, 512],
       ['inviteRadius', config.autonomy.inviteRadius, 2, 32],
       ['inviteCooldownMs', config.autonomy.inviteCooldownMs, 10_000, 86_400_000],
-      ['wornToolRemainingDurability', config.autonomy.wornToolRemainingDurability, 0, 16]
+      ['wornToolRemainingDurability', config.autonomy.wornToolRemainingDurability, 0, 16],
+      ['replenishDurationMs', config.autonomy.replenishDurationMs, 60_000, 3_600_000]
     ] as const) {
       if (value === undefined) continue
       if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) throw new Error(`autonomy.${name} 必须在 ${minimum}-${maximum} 之间`)

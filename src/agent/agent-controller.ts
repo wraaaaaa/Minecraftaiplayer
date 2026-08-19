@@ -12,14 +12,13 @@ import type { ProgressionStore } from '../progression/progression-store.js'
 import type { TaskRecord, TaskStore } from '../tasks/task-store.js'
 import { assessAction } from './capability-assessor.js'
 import { parseAgentDecision } from './decision.js'
-import { planAutonomousDevelopment } from './autonomous-development.js'
 import { buildPlayerRequest, buildSystemPrompt, buildToolAgentGoal } from './prompt.js'
 import type { WorldState } from './world-state.js'
 import { extractDeclaredBotAlias, type PromptWorkspace } from '../prompts/prompt-workspace.js'
 import type { ContextCompressor } from '../memory/context-compressor.js'
 import type { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
 import { agentWorkspaceConfig } from '../config/types.js'
-import { ToolAgent } from './tool-agent.js'
+import { REPLENISH_TOOL_NAMES, ToolAgent } from './tool-agent.js'
 import { sensorySnapshot } from './multimodal-sensors.js'
 import { COMPLETION_REPLIES, FAILURE_REPLIES, IDLE_REPLIES, LISTENING_REPLIES, naturalGameText, ReplyComposer, SECRET_REFUSAL_REPLIES, TIMEOUT_REPLIES } from './game-reply.js'
 
@@ -114,8 +113,8 @@ export const AGENT_V2_SYSTEM_RULES = `
 <minecraft_agent_v2>
 你是持续运行的 Minecraft 玩家 Agent，不是关键词脚本选择器。理解完整目标和当前环境后，自主制定策略并选择工具或连续技能；不要输出旧版动作 JSON 或虚构工具。
 原子工具是手脚，适合精确观察和一次交互；连续技能是由本地客户端逐 Tick 执行的运动技能，适合采集、阶梯挖掘、合成、熔炼、狩猎、拾取与返程。连续技能不是预设任务答案：技能、参数、调用次序、失败后的替代方案都由你根据目标决定。
-重复低层动作优先使用连续技能，不能每挖一个方块、每走一步就重新调用模型。只在里程碑、新威胁、环境变化、技能完成或失败后重新规划。
-“跟着我”“一直跟着”等持续命令必须调用 follow_player_continuously 一次，让客户端动态追踪玩家；禁止反复 navigate_to 玩家旧坐标。跟随会一直保持到明确停止、冲突的新任务、危险抢占、目标离线或断线。
+标准/重复/关键任务优先用连续技能省 token；技能失败、返回缺口或指令是技能覆盖不了的非标准任务时，不要拒绝——下降到原子工具从方块思考，与技能组合解决。「没有某个行为的技能」不等于「不能做」。工作台/熔炉/附魔台等容器即通用手脚：craft_recipe 填合成格、smelt_items 填燃料与材料、interact_block 开关容器；玩家要“附魔/强化装备”时用 enchant_item（附魔台+青金石+经验，可指定装备与期望附魔），缺料返回真实原因，可据此循环附出一套顶级装备。
+“跟着我”“一直跟着”等持续命令必须调用 follow_player_continuously 一次，让客户端动态追踪玩家；禁止反复 navigate_to 玩家旧坐标。跟随会一直保持到明确停止、冲突的新任务、危险抢占、目标离线或断线。玩家只是在提问、确认或表达疑惑（如“你啥意思”“怎么了”“你在干嘛”“听懂了吗”）时属于普通聊天，先自然回答，绝不要因此启动跟随、移动或任何工具。
 每次根据最新 observationDelta 只调用一个最合适的工具。工具返回后核对 ok、detail 和后置条件，再决定继续、改路、补充条件、拒绝或结束。不得假设动作成功。
 陪伴模式不会在空闲时自主采矿。玩家明确要求采矿时优先跟随玩家进入已发现的天然矿洞，再从洞内开展短程作业；没有可靠洞口信息时请玩家带路，不得垂直脚下挖掘。只有无天然洞穴方案时才可用 excavate_safely 开凿可返回的阶梯，完成后调用 return_to_task_start。
 玩家要求“建房子/小屋/避难所”时，先到达指定现场并只调用一次 build_shelter，让客户端逐 Tick 完成整栋小屋；绝不能用 place_block 逐格搭墙、逐块询问模型。
@@ -162,6 +161,8 @@ export class AgentController {
   readonly #replyComposer = new ReplyComposer()
   #followedPlayer: string | null = null
   #pendingFollowSwitch: { requesterName: string; askedAt: number } | null = null
+  #replenishUntil = 0
+  #replenishRun: Promise<void> | undefined
 
   constructor(options: { config: BotConfig; persona: Persona; prompts: PromptTemplates; provider: LlmProvider; memory: MemoryStore; experience: ExperienceStore; policy: PolicyEngine; executor: ActionExecutor; logger: Logger; tasks: TaskStore; secrets: SecretGuard; diagnostics?: DiagnosticStore; progression?: ProgressionStore; promptWorkspace?: PromptWorkspace; contextCompressor?: ContextCompressor; selfImprovement?: SelfImprovementManager }) {
     this.#config = options.config
@@ -180,6 +181,8 @@ export class AgentController {
     this.#promptWorkspace = options.promptWorkspace
     this.#contextCompressor = options.contextCompressor
     this.#selfImprovement = options.selfImprovement
+    // 空闲即进入补充阶段：默认从「30 分钟自主补充」开始，窗口结束后回家待机。
+    this.#replenishUntil = Date.now() + autonomyConfig(this.#config).replenishDurationMs
   }
 
   async initialize(): Promise<void> {
@@ -199,6 +202,9 @@ export class AgentController {
     this.#standbyEngaged = false
     this.#nearbyPlayersLastTick.add(identity.name.toLowerCase())
     this.#lastInviteByPlayer.set(identity.name.toLowerCase(), Date.now())
+    // 待机中收到被寻址的玩家消息（含路过玩家回应）→ 唤醒并进入下一轮补充阶段
+    const wakeNow = Date.now()
+    if (this.#replenishUntil <= wakeNow) this.#replenishUntil = wakeNow + autonomyConfig(this.#config).replenishDurationMs
     const safeMessage = this.#secrets.sanitizeForPersistence(message).slice(0, 1000)
     // 任何新的、被称呼到的玩家消息都会解除之前的保持。下面新的显式保持
     // 会重新建立它。这是一种控制面状态，而不是由关键词选择的动作。
@@ -336,8 +342,7 @@ export class AgentController {
       if (!survivalEmergency) return
       this.#manualHold = false
     }
-    const invited = await this.#maybeInvitePassingPlayer(world, autonomy)
-    if (invited) return
+    await this.#maybeInvitePassingPlayer(world, autonomy)
     // 诸如 follow_player 之类的连续玩家模式由 Fabric 客户端持有，并且
     // 有意地比启动它们的请求存活得更久。空闲开发绝不能
     // 替换它们；上面的即时危险、显式停止、冲突的玩家动作、
@@ -348,231 +353,127 @@ export class AgentController {
   }
 
   async #runUnifiedIdle(world: WorldState, autonomy: AutonomyConfig): Promise<void> {
-    const unsafe = world.environment?.safeToIdle === false || world.onFire === true
-      || (world.inWater === true && (world.air ?? 300) < 180)
-    if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
-      this.#standbyEngaged = false
-      if (!unsafe && world.navigationStatus?.startsWith('home_route_stalled_safe_wait')) return
-      if (world.activePrimitive === 'return_home') return
-      await this.#executeProactive({ type: 'return_home' })
-      return
-    }
-    if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false)) {
-      // 没有记录的家时，反复寻找想象中的避难所只会产生
-      // 相同的失败并阻碍资源发展。持续发展直到能建造真正的家；
-      // 到那时才把 seek_shelter 用作高优先级返回动作。
-      if (world.home) {
+    const now = Date.now()
+    // 待机阶段：30 分钟窗口结束 → 回家并零 Token 等待
+    if (now >= this.#replenishUntil) {
+      if (autonomy.safeIdleEnabled && world.home && !insideHome(world)) {
+        this.#standbyEngaged = false
+        if (world.activePrimitive === 'return_home') return
+        await this.#executeProactive({ type: 'return_home' })
+        return
+      }
+      if (autonomy.safeIdleEnabled && (world.environment?.isNight || world.environment?.safeToIdle === false) && !world.home) {
         const shelter = await this.#executeProactive({ type: 'seek_shelter' })
         if (shelter.ok) return
       }
-      if (!world.home && autonomy.autoBuildShelter && autonomy.allowVerifiedWilderness && canBuildSafeShelter(world)) {
-        await this.#executeProactive({ type: 'build_shelter', verifiedWilderness: true })
-        return
-      }
-    }
-    const now = Date.now()
-    const developmentIntervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
-    if (now - this.#lastProactiveAt >= developmentIntervalMs) {
-      const progression = await this.#progression?.load()
-      const planned = planAutonomousDevelopment(this.#config, world, progression)
-      if (planned) {
-        this.#lastProactiveAt = now
-        await this.#progression?.notePlan(planned.stage, planned.action.type, planned.reason)
+      if (autonomy.safeIdleEnabled && !this.#standbyEngaged) {
+        const waiting = await this.#executeProactive({ type: 'wait_safe' })
+        if (!waiting.ok) return
+        this.#standbyEngaged = true
         await this.#diagnose({
-          type: 'decision', level: 'info', title: '自主发展决策', summary: `${planned.stage}: ${planned.action.type}`,
-          detail: JSON.stringify(planned, null, 2), metadata: { source: 'local-deterministic', stage: planned.stage, action: planned.action.type }
+          type: 'result', level: 'success', title: '空闲待机已进入零 Token 安全等待', summary: '安全位置等待玩家召唤',
+          detail: waiting.detail, metadata: { source: 'autonomous-idle', tokenCost: 0 }
         })
-        const assessment = assessAction(this.#config, planned.action, world, { requesterName: autonomy.ownerName })
-        if (assessment.status === 'ready') {
-          const policy = this.#policy.authorize(planned.action)
-          if (policy.allowed) {
-            const result = await this.#executeAutonomousAction(planned.action)
-            const failureKey = planned.action.type === 'gather_resource'
-              ? `gather_resource:${planned.action.resource}`
-              : planned.action.type
-            await this.#progression?.noteResult(
-              planned.action.type,
-              result.ok,
-              this.#secrets.sanitizeForPersistence(result.detail),
-              failureKey
-            )
-            this.#logger.info('自主发展步骤已执行', { stage: planned.stage, action: planned.action.type, ok: result.ok, detail: this.#secrets.sanitizeForPersistence(result.detail), survey: world.blockSurvey?.classification ?? 'missing' })
-            await this.#diagnose({
-              type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'error',
-              title: result.ok ? '自主发展动作已启动或完成' : '自主发展动作失败', summary: `${planned.stage}: ${planned.action.type}`,
-              detail: result.detail, metadata: { source: 'local-deterministic', stage: planned.stage, action: planned.action.type }
-            })
-            if (!result.ok && !/player_task_preempted/u.test(result.detail)) void this.#learnFromFailure(planned.action, result.detail, planned.reason)
-            return
-          }
-          await this.#progression?.noteResult(planned.action.type, false, policy.reason)
-          await this.#diagnose({ type: 'failure', level: 'warning', title: '自主发展被行为规则拒绝', summary: planned.action.type, detail: policy.reason, metadata: { action: planned.action.type } })
-        } else {
-          const detail = assessment.reasons.join('；')
-          await this.#progression?.noteResult(planned.action.type, false, detail)
-          this.#logger.info('自主发展步骤因当前条件暂缓', { action: planned.action.type, reasons: assessment.reasons })
-          await this.#diagnose({ type: 'failure', level: 'warning', title: '自主发展条件不足', summary: planned.action.type, detail, metadata: { action: planned.action.type } })
-        }
       }
+      return
     }
-    if (autonomy.discardWornTools && now - this.#lastWornToolCleanupAt >= 5 * 60_000) {
-      this.#lastWornToolCleanupAt = now
-      await this.#executor.execute({
-        type: 'discard_worn_tools', remainingDurability: autonomy.wornToolRemainingDurability
-      }).catch(() => ({ ok: false, detail: 'worn_tool_cleanup_failed' }))
-    }
-    if (autonomy.safeIdleEnabled && !this.#standbyEngaged) {
-      const waiting = await this.#executeProactive({ type: 'wait_safe' })
-      if (!waiting.ok) return
-      this.#standbyEngaged = true
-      await this.#diagnose({
-        type: 'result', level: 'success', title: '空闲待机已进入零 Token 安全等待', summary: '安全位置等待玩家召唤',
-        detail: waiting.detail, metadata: { source: 'autonomous-idle', tokenCost: 0 }
-      })
-    }
-    if (!this.#config.chat.proactiveEnabled || now - this.#lastInboundAt < this.#config.chat.proactiveIdleMs || now - this.#lastProactiveAt < this.#config.chat.proactiveMinIntervalMs) return
-    this.#lastProactiveAt = now
+    // 补充阶段：模型自主补充食物/工具/背包
+    await this.#runReplenishPhase(world)
+  }
+
+  async #runReplenishPhase(world: WorldState): Promise<void> {
+    const now = Date.now()
+    const intervalMs = Math.max(15_000, Math.min(60_000, this.#config.chat.proactiveMinIntervalMs))
+    if (now - this.#lastProactiveAt < intervalMs) return
+    if (this.#replenishRun) return
+    this.#replenishRun = this.#doReplenish(world).finally(() => { this.#replenishRun = undefined })
+    return this.#replenishRun
+  }
+
+  async #doReplenish(world: WorldState): Promise<void> {
+    this.#lastProactiveAt = Date.now()
+    const epoch = this.#proactiveEpoch
     try {
-      const response = await this.#provider.complete({
-        system: this.#secrets.sanitizeForModel(await this.#systemPrompt()),
-        user: this.#secrets.sanitizeForModel(JSON.stringify({
-          mode: 'safe_idle_self_development',
-          instruction: this.#prompts.proactiveInstruction,
-          hardRules: '只可选择安全自主动作；不得跟随、接近、注视或攻击玩家。采集和建造由 Fabric 逐目标判断天然地形、玩家结构、危险源和撤退路径，不使用人工坐标框。没有确实可完成的进展时输出 none。',
-          structuredGameState: world
-        }))
+      const systemPrompt = this.#secrets.sanitizeForModel(`${await this.#systemPrompt(undefined, true)}\n\n${AGENT_V2_SYSTEM_RULES}`)
+      const goal = JSON.stringify({
+        mode: 'companion_replenish',
+        instruction: '这是无人召唤时的自主补充阶段，最多持续 30 分钟。只补充三类：食物（采集/狩猎/烹饪）、工具（损坏后重做、补齐基础工具）、背包（清理杂物、腾空间）。禁止下矿追求钻石、跨维度、建造大型建筑、交易、附魔、追随或接近玩家。从方块开始逐步规划，每步用原子工具或必要的补充循环；没有可安全完成的事就 wait_safe 或结束。'
+      })
+      const agent = new ToolAgent({
+        provider: this.#provider,
+        executor: { execute: action => this.#executeWithFollowGuard(action), chat: message => this.#executor.chat(message), snapshot: () => this.#executor.snapshot?.() ?? this.#latestWorld },
+        authorize: action => this.#policy.authorize(action),
+        maxSteps: this.#config.model.agentMaxSteps ?? 12,
+        maxApiCalls: Math.max(1, Math.min(3, this.#config.model.agentMaxApiCalls ?? 8)),
+        maxTaskTokens: this.#config.model.agentMaxTaskTokens ?? 160_000,
+        maxInputTokensPerCall: this.#config.model.agentMaxInputTokensPerCall ?? 48_000,
+        maxOutputTokens: this.#config.model.agentMaxOutputTokens ?? 1024,
+        followupReasoningEffort: this.#config.model.agentFollowupReasoningEffort ?? 'none',
+        onTurn: async event => {
+          await this.#diagnose({
+            type: event.error ? 'failure' : 'decision', level: event.error ? 'warning' : 'info',
+            title: event.error ? `补充阶段模型轮次 ${event.apiCall} 空响应，准备降级` : `补充阶段模型轮次 ${event.apiCall}`,
+            summary: `耗时 ${event.elapsedMs}ms；本轮 ${event.usage.totalTokens} Token；累计 ${event.cumulativeUsage.totalTokens} Token。`,
+            detail: `estimated_input=${event.estimatedInputTokens}; actual_input=${event.usage.inputTokens}; output=${event.usage.outputTokens}; reasoning=${event.usage.reasoningTokens ?? 0}; effort=${event.requestedEffort}->${event.effectiveEffort}${event.error ? `; error=${event.error}` : ''}`,
+            metadata: { source: 'companion-replenish', apiCall: event.apiCall, ...event.usage, cumulativeTokens: event.cumulativeUsage.totalTokens }
+          })
+        },
+        onStep: async event => {
+          this.#latestWorld = event.world
+          await this.#diagnose({
+            type: event.ok ? 'step' : 'failure', level: event.ok ? 'info' : 'warning',
+            title: event.ok ? `补充步骤 ${event.step} 已确认` : `补充步骤 ${event.step} 失败，交回模型重规划`,
+            summary: event.tool,
+            detail: `${event.arguments}\n${this.#secrets.sanitizeForPersistence(event.detail)}`,
+            metadata: { source: 'companion-replenish', step: event.step, tool: event.tool, ok: event.ok }
+          })
+        }
+      })
+      const result = await agent.run({
+        system: systemPrompt,
+        goal: this.#secrets.sanitizeForModel(goal),
+        initialWorld: world,
+        cancelled: () => epoch !== this.#proactiveEpoch,
+        allowedToolNames: REPLENISH_TOOL_NAMES
       })
       if ((await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) return
-      const decision = parseAgentDecision(response.text)
-      if (decision.validationError) {
-        this.#logger.warn('空闲自主决策格式无效，已跳过', { reason: decision.validationError })
-        await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型决策格式无效', summary: response.model, detail: decision.validationError })
-        return
-      }
-      if (!AUTONOMOUS_ACTION_TYPES.has(decision.action.type)) {
-        this.#logger.warn('空闲自主决策选择了禁止的玩家交互动作，已跳过', { action: decision.action.type })
-        await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作被本地边界拒绝', summary: decision.action.type, detail: JSON.stringify(decision.action, null, 2), metadata: { model: response.model, action: decision.action.type } })
-        return
-      }
       await this.#diagnose({
-        type: 'decision', level: 'info', title: '空闲模型决策', summary: decision.action.type,
-        detail: JSON.stringify(decision.action, null, 2), metadata: { model: response.model, action: decision.action.type }
+        type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'warning',
+        title: result.ok ? '补充阶段动作完成' : '补充阶段动作未完成',
+        summary: `steps=${result.steps}; apiCalls=${result.apiCalls}`,
+        detail: this.#secrets.sanitizeForPersistence(result.detail), metadata: { source: 'companion-replenish', steps: result.steps, apiCalls: result.apiCalls }
       })
-
-      let actionSucceeded = true
-      if (decision.action.type !== 'none' && decision.action.type !== 'wait_safe') {
-        const assessment = assessAction(this.#config, decision.action, world, { requesterName: autonomy.ownerName })
-        const preparationAction = decision.action.type === 'prepare_for' || decision.action.type === 'equip_best'
-        if (assessment.status !== 'ready' && !(preparationAction && assessment.status === 'needs_preparation')) {
-          this.#logger.info('空闲自主动作因当前条件不满足而跳过', { action: decision.action.type, reasons: assessment.reasons })
-          await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作条件不足', summary: decision.action.type, detail: assessment.reasons.join('；'), metadata: { model: response.model, action: decision.action.type } })
-          actionSucceeded = false
-        } else {
-          const policy = this.#policy.authorize(decision.action)
-          if (!policy.allowed) {
-            this.#logger.warn('空闲自主动作被行为规则拒绝', { action: decision.action.type, reason: policy.reason })
-            await this.#diagnose({ type: 'failure', level: 'warning', title: '空闲模型动作被行为规则拒绝', summary: decision.action.type, detail: policy.reason, metadata: { model: response.model, action: decision.action.type } })
-            actionSucceeded = false
-          } else {
-            const result = await this.#executeAutonomousAction(decision.action)
-            actionSucceeded = result.ok
-            await this.#diagnose({
-              type: result.ok ? 'result' : 'failure', level: result.ok ? 'success' : 'error',
-              title: result.ok ? '空闲模型动作已完成' : '空闲模型动作失败', summary: decision.action.type,
-              detail: result.detail, metadata: { model: response.model, action: decision.action.type }
-            })
-            if (!result.ok && !/player_task_preempted/u.test(result.detail)) {
-              await this.#bestEffortExperience({
-                task: JSON.stringify(decision.action),
-                context: 'safe_idle_self_development',
-                outcome: 'failure',
-                lesson: this.#secrets.sanitizeForPersistence(result.detail),
-                correction: '下次先检查目标环境、物资、配方、距离和真实后置条件；不能安全完成时保持等待。',
-                tags: ['proactive', decision.action.type]
-              })
-              void this.#learnFromFailure(decision.action, result.detail, 'safe_idle_self_development')
-            }
-          }
-        }
-      }
-      if (actionSucceeded && decision.reply && !(await this.#tasks.load()).tasks.some(task => task.status === 'queued' || task.status === 'running')) {
-        await this.#safeChat(naturalGameText(decision.reply, this.#replyComposer.varied(IDLE_REPLIES)))
-      }
     } catch (error) {
-      this.#logger.warn('主动空闲聊天已跳过', error)
-      await this.#diagnose({ type: 'failure', level: 'warning', title: '主动空闲处理异常', summary: '本轮已跳过', detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
+      this.#logger.warn('补充阶段本轮已跳过', error)
+      await this.#diagnose({ type: 'failure', level: 'warning', title: '补充阶段处理异常', summary: '本轮已跳过', detail: error instanceof Error ? `${error.name}: ${error.message}` : String(error) })
     }
   }
 
-  async #maybeInvitePassingPlayer(world: WorldState, autonomy: AutonomyConfig): Promise<boolean> {
+  async #maybeInvitePassingPlayer(world: WorldState, autonomy: AutonomyConfig): Promise<void> {
     const now = Date.now()
     const current = new Set(world.nearbyPlayers
       .filter(player => player.distance <= autonomy.inviteRadius)
       .map(player => player.name.toLowerCase()))
-    const pending = this.#pendingCompanionInvite
-    if (pending) {
-      if (now >= pending.expiresAt) {
-        this.#pendingCompanionInvite = undefined
-        await this.#executor.execute({ type: 'stop' }).catch(() => ({ ok: false, detail: 'stop_failed' }))
-        if (autonomy.safeIdleEnabled) await this.#executor.execute({ type: 'return_home' }).catch(() => ({ ok: false, detail: 'return_home_failed' }))
-        this.#nearbyPlayersLastTick = current
-        return true
-      }
-      const present = current.has(pending.identity.name.toLowerCase())
-      if (present) {
-        this.#nearbyPlayersLastTick = current
-        return false
-      }
-    }
-    if (!autonomy.autoInviteNearbyPlayers || pending) {
+    if (!autonomy.autoInviteNearbyPlayers) {
       this.#nearbyPlayersLastTick = current
-      return false
+      return
     }
-    const movementCanBeReplaced = !world.activePrimitive
-      || ['idle', ''].includes(world.activePrimitive)
-      || (world.activePrimitive === 'return_home' && insideHome(world))
-    if (!movementCanBeReplaced) {
-      // 已经在跟随/执行其他移动原语：不再发起新的跟随邀请，只向新路过的玩家自然打个招呼。
-      const passer = world.nearbyPlayers
-        .filter(player => player.distance <= autonomy.inviteRadius)
-        .filter(player => !this.#nearbyPlayersLastTick.has(player.name.toLowerCase()))
-        .sort((left, right) => left.distance - right.distance)[0]
-      this.#nearbyPlayersLastTick = current
-      if (passer) {
-        await this.#bestEffortReply({ name: passer.name, ...(passer.uuid ? { uuid: passer.uuid } : {}) }, `嗨，${passer.name}，小默现在正陪着人走，先不跟你啦，玩得开心喵~`).catch(() => {})
-      }
-      return false
-    }
-    const candidate = world.nearbyPlayers
+    const following = this.#followedPlayer?.toLowerCase()
+    const passer = world.nearbyPlayers
       .filter(player => player.distance <= autonomy.inviteRadius)
       .filter(player => !this.#nearbyPlayersLastTick.has(player.name.toLowerCase()))
+      .filter(player => player.name.toLowerCase() !== following)
+      .filter(player => player.name.toLowerCase() !== autonomy.ownerName.toLowerCase())
       .filter(player => now - (this.#lastInviteByPlayer.get(player.name.toLowerCase()) ?? 0) >= autonomy.inviteCooldownMs)
       .sort((left, right) => left.distance - right.distance)[0]
     this.#nearbyPlayersLastTick = current
-    if (!candidate) return false
-
-    const identity: PlayerIdentity = { name: candidate.name, ...(candidate.uuid ? { uuid: candidate.uuid } : {}) }
-    const followed = await this.#executor.execute({ type: 'follow_player', target: candidate.name })
-    if (followed.ok) this.#followedPlayer = candidate.name
-    this.#lastInviteByPlayer.set(candidate.name.toLowerCase(), now)
-    if (!followed.ok) {
-      await this.#diagnose({
-        type: 'failure', level: 'warning', title: '路过玩家陪伴邀请未启动', summary: candidate.name,
-        detail: followed.detail, metadata: { source: 'companion-local', distance: candidate.distance }
-      })
-      return false
-    }
-    this.#pendingCompanionInvite = { identity, expiresAt: now + Math.max(30_000, autonomy.conversationWindowMs * 2) }
-    this.#standbyEngaged = false
-    await Promise.allSettled([
-      this.#bestEffortReply(identity, `嗨，${candidate.name}，小默看到你经过啦。我先陪你走一小段好不好？如果不需要，跟我说一声，我就回家等着喵~`),
-      this.#executor.execute({ type: 'gesture', gesture: 'excited', target: candidate.name })
-    ])
-    await this.#diagnose({
-      type: 'result', level: 'success', title: '已向路过玩家发出陪伴邀请', summary: candidate.name,
-      detail: followed.detail, metadata: { source: 'companion-local', distance: candidate.distance, tokenCost: 0 }
-    })
-    return true
+    if (!passer) return
+    this.#lastInviteByPlayer.set(passer.name.toLowerCase(), now)
+    const identity: PlayerIdentity = { name: passer.name, ...(passer.uuid ? { uuid: passer.uuid } : {}) }
+    const message = following
+      ? `嗨，${passer.name}，小默现在正陪着人走，先不跟你啦，玩得开心喵~`
+      : `嗨，${passer.name}，小默在呢，有事随时叫我喵~`
+    await this.#bestEffortReply(identity, message).catch(() => {})
   }
 
   async #executeAutonomousAction(action: AgentAction): Promise<{ ok: boolean; detail: string }> {

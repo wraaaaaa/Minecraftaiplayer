@@ -32,6 +32,7 @@ const AUTONOMY_DEFAULTS = Object.freeze({
   protectOwner: true,
   allowVerifiedWilderness: true,
   allowTeleportCommand: false,
+  replenishDurationMs: 30 * 60 * 1000,
   firstHome: Object.freeze({ enabled: true, dimension: 'minecraft:overworld', x: 1226, y: 65, z: 199, radius: 10 })
 })
 
@@ -199,6 +200,17 @@ function renderStatus(snapshot) {
   const selectedKey = snapshot.config.model.apiKeyEnv
   $('keyStatus').textContent = snapshot.secrets[selectedKey] ? '已配置' : '未配置'
   $('keyStatus').style.color = snapshot.secrets[selectedKey] ? 'var(--green)' : 'var(--amber)'
+  const monitor = snapshot.monitor
+  const monitorEnabled = snapshot.config.playerMonitor?.enabled === true
+  if (monitor && monitor.lastPollAt) {
+    $('monitorCount').textContent = `${monitor.online} / ${monitor.max}`
+    $('monitorCount').style.color = monitor.humans > 0 ? 'var(--green)' : 'var(--muted)'
+    $('monitorDetail').textContent = `人类 ${monitor.humans} · AI ${monitor.botOnline ? '在线' : '离线'} · ${new Date(monitor.lastPollAt).toLocaleTimeString()}`
+  } else {
+    $('monitorCount').textContent = monitorEnabled ? '等待轮询' : '未开启'
+    $('monitorCount').style.color = 'var(--muted)'
+    $('monitorDetail').textContent = monitorEnabled ? '监听已启用，等待首次轮询结果' : 'playerMonitor.enabled 未开启'
+  }
   const live = snapshot.live
   const world = live?.world
   const phaseLabels = { starting: '正在启动', waiting_for_client: '等待游戏客户端', connected: '客户端已连接', in_world: '已进入世界', disconnected: '连接已断开', stopped: '已停止' }
@@ -269,6 +281,9 @@ function populate(snapshot) {
   setNumber('connectTimeout', c.server.connectTimeoutMs); setNumber('reconnectDelay', c.server.reconnectDelayMs); setChecked('autoRespawn', c.server.autoRespawn ?? true); setNumber('respawnDelay', c.server.respawnDelayMs ?? 3000); setNumber('actionTimeout', c.server.actionTimeoutMs)
   set('bridgeHost', c.server.bridgeHost); setNumber('bridgePort', c.server.bridgePort)
   setChecked('easyAuthEnabled', c.easyAuth.enabled); setChecked('registerIfNeeded', c.easyAuth.registerIfNeeded); set('passwordEnv', c.easyAuth.passwordEnv); setNumber('loginDelay', c.easyAuth.loginDelayMs)
+  set('minecraftPassword', snapshot.easyAuthPassword ?? '')
+  const pm = { enabled: false, pollIntervalMs: 15000, onlineAfterMs: 60000, offlineAfterMs: 1800000, statusTimeoutMs: 5000, ...(c.playerMonitor || {}) }
+  setChecked('playerMonitorEnabled', pm.enabled); setNumber('playerMonitorPollIntervalMs', pm.pollIntervalMs); setNumber('playerMonitorOnlineAfterMs', pm.onlineAfterMs); setNumber('playerMonitorOfflineAfterMs', pm.offlineAfterMs)
   set('modelProvider', c.model.provider); set('modelName', c.model.model); set('apiKeyEnv', c.model.apiKeyEnv); set('modelBaseUrl', c.model.baseUrl); set('reasoningEffort', c.model.reasoningEffort); setNumber('modelTimeout', c.model.timeoutMs); setNumber('maxOutputTokens', c.model.maxOutputTokens ?? 4096); setNumber('agentMaxSteps', c.model.agentMaxSteps ?? 12); setNumber('autonomousAgentMaxSteps', c.model.autonomousAgentMaxSteps ?? 8)
   setNumber('agentMaxApiCalls', c.model.agentMaxApiCalls ?? 8); setNumber('agentMaxTaskTokens', c.model.agentMaxTaskTokens ?? 160000); setNumber('agentMaxInputTokensPerCall', c.model.agentMaxInputTokensPerCall ?? 48000); setNumber('agentMaxOutputTokens', c.model.agentMaxOutputTokens ?? 1024); set('agentFollowupReasoningEffort', c.model.agentFollowupReasoningEffort ?? 'none')
   const multimodal = { autoDetect: true, visionEnabled: true, audioEnabled: true, onlineResearchEnabled: true, sensoryDirectory: 'data/sensory', ...(c.model.multimodal || {}) }
@@ -279,7 +294,7 @@ function populate(snapshot) {
   set('speechVolcAppIdEnv', speech.volcengineAppIdEnv); set('speechVolcCluster', speech.volcengineCluster); set('speechCustomAuthHeader', speech.customAuthHeader); set('speechCustomAuthScheme', speech.customAuthScheme); set('speechCustomAudioJsonPath', speech.customAudioJsonPath)
   setChecked('requireMention', c.chat.requireMention); set('replyPrefix', c.chat.replyPrefix); setNumber('cooldownMs', c.chat.cooldownMs); setChecked('proactiveEnabled', c.chat.proactiveEnabled); setNumber('proactiveIdleMs', c.chat.proactiveIdleMs); setNumber('proactiveMinIntervalMs', c.chat.proactiveMinIntervalMs)
   const autonomy = { ...AUTONOMY_DEFAULTS, ...(c.autonomy || {}) }
-  setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs)
+  setChecked('autonomyEnabled', autonomy.enabled); set('ownerName', autonomy.ownerName); setNumber('commandArbitrationMs', autonomy.commandArbitrationMs); setChecked('contextualAddressing', autonomy.contextualAddressing); setNumber('directAddressDistance', autonomy.directAddressDistance); setNumber('conversationWindowMs', autonomy.conversationWindowMs); setNumber('replenishDurationMinutes', Math.round((autonomy.replenishDurationMs ?? 30 * 60 * 1000) / 60000))
   setNumber('lowHealthThreshold', autonomy.lowHealthThreshold); setNumber('criticalHealthThreshold', autonomy.criticalHealthThreshold); setNumber('eatBelowFood', autonomy.eatBelowFood); setNumber('hostileScanRadius', autonomy.hostileScanRadius); setNumber('wildernessMinPlayerDistance', autonomy.wildernessMinPlayerDistance)
   setChecked('safeIdleEnabled', autonomy.safeIdleEnabled); setChecked('autoInviteNearbyPlayers', autonomy.autoInviteNearbyPlayers); setNumber('inviteRadius', autonomy.inviteRadius); setNumber('inviteCooldownMs', autonomy.inviteCooldownMs); setChecked('discardWornTools', autonomy.discardWornTools); setNumber('wornToolRemainingDurability', autonomy.wornToolRemainingDurability); setChecked('autoGather', autonomy.autoGather); setChecked('autoCraft', autonomy.autoCraft); setChecked('autoBuildShelter', autonomy.autoBuildShelter)
   for (const id of ['autoHunt', 'autoSmelt', 'autoMine', 'autoTrade', 'autoEnchant', 'autoDimensionTravel', 'autoSleep', 'protectOwner', 'allowVerifiedWilderness', 'allowTeleportCommand']) setChecked(id, autonomy[id])
@@ -307,6 +322,7 @@ function collect() {
   if (!/^[A-Za-z0-9_]{3,16}$/.test(username)) throw new Error('Bot 游戏名只能使用 3-16 位英文字母、数字或下划线')
   Object.assign(c.server, { connectionMode: value('connectionMode'), adapter: value('serverAdapter'), host: value('serverHost').trim(), port: number('serverPort'), lanDiscoveryTimeoutMs: number('lanDiscoveryTimeout'), version: value('serverVersion').trim(), username, auth: value('serverAuth'), connectTimeoutMs: number('connectTimeout'), reconnectDelayMs: number('reconnectDelay'), autoRespawn: checked('autoRespawn'), respawnDelayMs: number('respawnDelay'), bridgeHost: value('bridgeHost').trim(), bridgePort: number('bridgePort'), actionTimeoutMs: number('actionTimeout') })
   Object.assign(c.easyAuth, { enabled: checked('easyAuthEnabled'), registerIfNeeded: checked('registerIfNeeded'), passwordEnv: value('passwordEnv').trim(), loginDelayMs: number('loginDelay') })
+  c.playerMonitor = { enabled: checked('playerMonitorEnabled'), pollIntervalMs: number('playerMonitorPollIntervalMs'), onlineAfterMs: number('playerMonitorOnlineAfterMs'), offlineAfterMs: number('playerMonitorOfflineAfterMs'), statusTimeoutMs: c.playerMonitor?.statusTimeoutMs ?? 5000 }
   Object.assign(c.model, { provider: value('modelProvider'), model: value('modelName').trim(), apiKeyEnv: value('apiKeyEnv').trim(), baseUrl: value('modelBaseUrl').trim(), reasoningEffort: value('reasoningEffort'), timeoutMs: number('modelTimeout'), maxOutputTokens: number('maxOutputTokens'), agentMaxSteps: number('agentMaxSteps'), autonomousAgentMaxSteps: number('autonomousAgentMaxSteps'), agentMaxApiCalls: number('agentMaxApiCalls'), agentMaxTaskTokens: number('agentMaxTaskTokens'), agentMaxInputTokensPerCall: number('agentMaxInputTokensPerCall'), agentMaxOutputTokens: number('agentMaxOutputTokens'), agentFollowupReasoningEffort: value('agentFollowupReasoningEffort'), multimodal: { autoDetect: checked('multimodalAutoDetect'), visionEnabled: checked('visionEnabled'), audioEnabled: checked('audioEnabled'), onlineResearchEnabled: checked('onlineResearchEnabled'), sensoryDirectory: value('sensoryDirectory').trim() } })
   c.speech = {
     enabled: checked('speechEnabled'), provider: value('speechProvider'), protocol: value('speechProtocol'), model: value('speechModel').trim(), apiKeyEnv: value('speechApiKeyEnv').trim(), baseUrl: value('speechBaseUrl').trim(), voice: value('speechVoice').trim(), style: value('speechStyle').trim(),
@@ -324,7 +340,7 @@ function collect() {
     lowHealthThreshold, criticalHealthThreshold, eatBelowFood: number('eatBelowFood'), hostileScanRadius: number('hostileScanRadius'), wildernessMinPlayerDistance: number('wildernessMinPlayerDistance'),
     safeIdleEnabled: checked('safeIdleEnabled'), autoInviteNearbyPlayers: checked('autoInviteNearbyPlayers'), inviteRadius: number('inviteRadius'), inviteCooldownMs: number('inviteCooldownMs'), discardWornTools: checked('discardWornTools'), wornToolRemainingDurability: number('wornToolRemainingDurability'), autoGather: checked('autoGather'), autoCraft: checked('autoCraft'), autoBuildShelter: checked('autoBuildShelter'),
     autoHunt: checked('autoHunt'), autoSmelt: checked('autoSmelt'), autoMine: checked('autoMine'), autoTrade: checked('autoTrade'), autoEnchant: checked('autoEnchant'),
-    autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'),
+    autoDimensionTravel: checked('autoDimensionTravel'), autoSleep: checked('autoSleep'), protectOwner: checked('protectOwner'), allowVerifiedWilderness: checked('allowVerifiedWilderness'), allowTeleportCommand: checked('allowTeleportCommand'), replenishDurationMs: Math.round(number('replenishDurationMinutes') * 60000),
     firstHome: { enabled: checked('firstHomeEnabled'), dimension: value('firstHomeDimension'), x: number('firstHomeX'), y: number('firstHomeY'), z: number('firstHomeZ'), radius: number('firstHomeRadius') }
   }
   c.agentWorkspace = {
@@ -371,8 +387,8 @@ async function saveSecrets() {
   try {
     const secrets = { MINECRAFT_LOGIN_PASSWORD: value('minecraftPassword'), DEEPSEEK_API_KEY: value('deepseekKey'), ARK_API_KEY: value('arkKey'), OPENAI_API_KEY: value('openaiKey'), MIMO_API_KEY: value('mimoKey'), VOLCENGINE_TTS_APP_ID: value('volcTtsAppId'), VOLCENGINE_TTS_ACCESS_TOKEN: value('volcTtsToken'), CUSTOM_TTS_API_KEY: value('customTtsKey') }
     await request('/api/secrets', { method: 'PUT', body: JSON.stringify(secrets) })
-    for (const id of ['minecraftPassword', 'deepseekKey', 'arkKey', 'openaiKey', 'mimoKey', 'volcTtsAppId', 'volcTtsToken', 'customTtsKey']) set(id, '')
-    toast('密钥已保存到本机 .env，不会在页面中回显')
+    for (const id of ['deepseekKey', 'arkKey', 'openaiKey', 'mimoKey', 'volcTtsAppId', 'volcTtsToken', 'customTtsKey']) set(id, '')
+    toast('密钥已保存到本机 .env；API Key 不回显，进服密码已回填')
     await refreshStatus()
   } catch (error) { toast(error.message, true) }
 }
@@ -428,7 +444,7 @@ async function action(url, success) {
 }
 
 async function refreshStatus() {
-  try { const next = await request('/api/snapshot'); state.runtime = next.runtime; state.manifest = next.manifest; state.live = next.live; state.secrets = next.secrets; state.logs = next.logs; state.memory = next.memory; state.tasks = next.tasks; state.progression = next.progression; state.diagnostics = next.diagnostics; renderStatus({ ...state, ...next }) } catch (error) { toast(error.message, true) }
+  try { const next = await request('/api/snapshot'); state.runtime = next.runtime; state.manifest = next.manifest; state.live = next.live; state.secrets = next.secrets; state.logs = next.logs; state.memory = next.memory; state.tasks = next.tasks; state.progression = next.progression; state.diagnostics = next.diagnostics; state.easyAuthPassword = next.easyAuthPassword; if (!dirty) set('minecraftPassword', next.easyAuthPassword ?? ''); renderStatus({ ...state, ...next }) } catch (error) { toast(error.message, true) }
 }
 
 async function refreshCentralChat() {

@@ -44,6 +44,7 @@ final class InventoryCleanup {
     static int discardPriority(ItemStack stack, int countInInventory) {
         if (stack.isEmpty()) return Integer.MAX_VALUE;
         if (!stack.getEnchantments().isEmpty()) return Integer.MAX_VALUE;
+        if (isValuable(stack)) return Integer.MAX_VALUE;
         String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
 
         if (stack.isDamageableItem() && stack.getMaxDamage() > 0
@@ -63,6 +64,15 @@ final class InventoryCleanup {
         if (priority == 0) return "worn_tool";
         if (priority == 10) return "unsafe_food";
         return "filler_excess";
+    }
+
+    /** 贵重物品（下界合金/钻石装备工具、锭、矿石、残骸、下界之星、附魔书）从不被自动丢弃。 */
+    static boolean isValuable(ItemStack stack) {
+        if (stack.isEmpty()) return false;
+        String id = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
+        return id.equals("minecraft:diamond") || id.equals("minecraft:nether_star")
+            || id.equals("minecraft:enchanted_book")
+            || id.contains("netherite_") || id.contains("diamond_");
     }
 
     /** 挑选单个最差（优先级最低）的可丢弃背包槽位；没有时返回 -1。 */

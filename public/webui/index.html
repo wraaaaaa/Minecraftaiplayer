@@ -54,6 +54,7 @@
           <article class="status-card"><span>Minecraft 客户端</span><strong id="clientStatus">检查中</strong><small id="clientPid">—</small></article>
           <article class="status-card"><span>服务器模组</span><strong id="modCount">0 个</strong><small id="modSyncTime">尚未同步</small></article>
           <article class="status-card"><span>模型密钥</span><strong id="keyStatus">未配置</strong><small>只显示状态，不回传内容</small></article>
+          <article class="status-card"><span>服务器在线监听</span><strong id="monitorCount">未开启</strong><small id="monitorDetail">—</small></article>
         </div>
         <div class="world-strip">
           <span><small>游戏阶段</small><strong id="worldPhase">未运行</strong></span>
@@ -109,7 +110,16 @@
         <div class="subpanel">
           <h3>EasyAuth</h3>
           <div class="toggle-row"><label class="switch"><input id="easyAuthEnabled" type="checkbox"><span></span>启用服内认证</label><label class="switch"><input id="registerIfNeeded" type="checkbox"><span></span>首次进入时允许自动注册</label></div>
-          <div class="form-grid three"><label>密码变量名<input id="passwordEnv" type="text"></label><label>登录等待（毫秒）<input id="loginDelay" type="number" min="0"></label><label>EasyAuth 密码<input id="minecraftPassword" type="password" autocomplete="new-password" placeholder="留空表示不修改"></label></div>
+          <div class="form-grid three"><label>密码变量名<input id="passwordEnv" type="text"></label><label>登录等待（毫秒）<input id="loginDelay" type="number" min="0"></label><label>EasyAuth 密码<input id="minecraftPassword" type="password" autocomplete="new-password" placeholder="已回填当前密码"><small>回填当前进服密码；留空=保持不修改，修改后需重启 Bot 生效。</small></label></div>
+        </div>
+        <div class="subpanel">
+          <h3>服务器在线监听</h3>
+          <div class="toggle-row"><label class="switch"><input id="playerMonitorEnabled" type="checkbox"><span></span>启用在线监听（正常启动时监听人数，有人自动进、无人自动退）</label></div>
+          <div class="form-grid three">
+            <label>轮询间隔（毫秒）<input id="playerMonitorPollIntervalMs" type="number" min="5000" max="300000"></label>
+            <label>人类上线多久进服（毫秒）<input id="playerMonitorOnlineAfterMs" type="number" min="1000" max="3600000"></label>
+            <label>无人多久后下线（毫秒）<input id="playerMonitorOfflineAfterMs" type="number" min="1000" max="86400000"></label>
+          </div>
         </div>
       </section>
 
@@ -198,8 +208,8 @@
           <span>最高优先玩家目前仅按游戏名匹配。请保持 EasyAuth 开启并保护该名称的登录密码，避免他人冒用。</span>
           <strong>持久任务队列</strong>
           <span id="taskQueueSummary">尚无任务记录</span>
-          <strong>末地发育进度</strong>
-          <span id="progressionSummary">尚未生成发育进度文件</span>
+          <strong>空闲补充记录</strong>
+          <span id="progressionSummary">尚未生成空闲补充记录</span>
         </div>
         <div class="priority-flow" aria-label="任务执行顺序">
           <span><b>1</b>安全反射</span><i>›</i><span><b>2</b>最高优先玩家</span><i>›</i><span><b>3</b>距离最近的玩家</span><i>›</i><span><b>4</b>逐项串行完成</span>
@@ -217,6 +227,7 @@
               <label>收集同时到达指令（毫秒）<input id="commandArbitrationMs" type="number" min="0" max="5000"><small>短暂收集多人消息后再按优先级排序。</small></label>
               <label>近距离直接交流范围（格）<input id="directAddressDistance" type="number" min="1" max="64" step="0.5"><small>范围内可结合语气、上下文判断，无需点名。</small></label>
               <label>连续对话窗口（毫秒）<input id="conversationWindowMs" type="number" min="1000" max="600000"><small>Bot 回复后，这段时间内可自然接着说。</small></label>
+              <label>自主补充时长（分钟）<input id="replenishDurationMinutes" type="number" min="1" max="60"><small>空闲自主补充食物/工具/背包的最长时长；到点回家待机。</small></label>
             </div>
           </article>
           <article class="autonomy-card">

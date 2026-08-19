@@ -7,6 +7,14 @@
 
 > **用户数据统一目录 `userdata/`**：`.env`、`config/*.json`、`data/` 已全部合并到项目根目录的 `userdata/`（可用 `MCAI_USERDATA_DIR` 覆盖位置）。升级版本 = 只替换 `userdata/` 一个文件夹。配置字段里的相对路径（如 `data/memory.json`、`config/persona.json`）仍按原字符串填写，由 `src/core/user-data.ts` 的 `resolveUserData()` 解析到 `userdata/` 下；仓库模板 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 留在根目录。旧目录可跑 `node scripts/migrate-userdata.mjs` 一次性迁移。
 
+> **v1.3.0 交付（从方块思考 + 空闲补充循环）**：
+> - 空闲重构：删除确定性科技树，改为「30 分钟模型自主补充（食物/工具/背包）→ 回家零 Token 待机 → 玩家指令或路过玩家回应唤醒」循环；补充阶段由模型用受限工具集从方块逐步决策。
+> - 双层工具并存：原子工具（走路/挖方块/放方块/用物品/交互/合成配方/选槽位）与复合脚本（跟随/采集/合成/冶炼/挖掘/建造/狩猎）同时保留，模型自由编排；脚本失败或覆盖不了时下降到原子层继续，永不因「没有对应脚本」拒绝。
+> - 补齐工具面：附魔 `enchant_item`（附魔台+青金石+期望附魔）、村民交易、睡觉、跨维度、`chop_nearby_wood` 连续砍树；工作台/熔炉/附魔台等容器交互即通用手脚。
+> - 修复：服务器在线监听经「启动 Bot」无法激活的 bug（WebUI 新增监听开关，本地配置迁移为启用；正常启动监听、测试启动直连）。
+> - 新安全规则：非最高权限玩家要求直接丢弃贵重物品（全套下界合金/钻石装备与工具、钻石/下界合金锭与矿、下界之星等）时拒绝；当场制作或刚拾取的物品除外。
+> - 跟随等关键陪伴脚本保持现有稳定实现，运行期间模型可对随机事件介入后回到脚本。
+> - 版本号 1.3.0。
 > **v1.2.0 交付（拟人化行为）**：
 > - 情绪-动作联动：高兴边跑边跳、生气空手轻拍玩家、疑惑/同意蹲两下、激动绕着玩家小跑，动作与语言同步表达情绪。
 > - 最高指令玩家 ID 可配置：默认 `admin`（主工作区本地仍为 `wraaaaaa`），提示词用 `{{owner}}` 占位符随 ownerName 自动更新。
@@ -1025,7 +1033,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-fabric-clien
 
 1. 查看 `userdata/data/bot.pid.json`、`userdata/data/minecraft-client.pid.json` 是否属于当前项目根。
 2. 查看 `logs/background.stderr.log`、`logs/minecraft-client.stderr.log`。
-3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.2.0.jar` 存在。
+3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.3.0.jar` 存在。
 4. 用 `Start-Bot.cmd` 成对启动，不要只开 Java 或只开 Node。
 5. 确认桥 host/port 相同且 `userdata/data/bridge-token.txt` 非空。
 6. 如果项目移动过，删除已经停止进程遗留的 PID 文件；停止脚本会做所有权检查，不要手工杀不明 PID。

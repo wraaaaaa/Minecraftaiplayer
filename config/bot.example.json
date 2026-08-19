@@ -72,7 +72,7 @@
     "requireMention": true,
     "replyPrefix": "",
     "cooldownMs": 2500,
-    "proactiveEnabled": false,
+    "proactiveEnabled": true,
     "proactiveIdleMs": 180000,
     "proactiveMinIntervalMs": 300000
   },
@@ -141,6 +141,7 @@
     "protectOwner": true,
     "allowVerifiedWilderness": true,
     "allowTeleportCommand": false,
+    "replenishDurationMs": 1800000,
     "firstHome": {
       "enabled": true,
       "dimension": "minecraft:overworld",

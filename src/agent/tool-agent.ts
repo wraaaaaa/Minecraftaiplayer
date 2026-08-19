@@ -108,7 +108,21 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'hunt_for', description: '连续狩猎合法目标并收取掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('数量', 1, 64) }) },
   { name: 'send_server_command', description: '仅尝试 tp/teleport 到玩家；无权限后改用寻路。', parameters: objectSchema({ command: string('不带 / 的命令') }) },
   { name: 'stop_all_actions', description: '立即停止动作并释放按键。', parameters: objectSchema({}) },
-  { name: 'wait_ticks', description: '等待 1–100 tick；20 tick≈1秒。', parameters: objectSchema({ ticks: integer('tick', 1, 100) }) }
+  { name: 'wait_ticks', description: '等待 1–100 tick；20 tick≈1秒。', parameters: objectSchema({ ticks: integer('tick', 1, 100) }) },
+  { name: 'express_emotion', description: '用身体动作表达情绪：happy=高兴蹦跳（冲刺+小跳）、acknowledge=点头或蹲两下（同意/疑惑）、excited=激动（绕目标转两圈）、afraid=害怕（冲刺跳）、angry=生气（空手轻拍目标）。玩家说“跳两下”“蹲一下”“转个圈”“开心一点”“表示同意”等时使用。', parameters: objectSchema({ emotion: { type: 'string', enum: ['happy', 'acknowledge', 'excited', 'afraid', 'angry'], description: 'happy=高兴蹦跳; acknowledge=点头/蹲两下; excited=激动绕圈; afraid=害怕冲刺跳; angry=生气空手轻拍' }, player: string('目标玩家名，excited/angry 时建议填写') }, ['emotion']) },
+  { name: 'enchant_item', description: '用附魔台给装备附魔：需要附魔台+青金石+经验；可指定装备与期望附魔，缺料返回真实原因。', parameters: objectSchema({ item_id: string('要附魔的装备 ID，可省略'), preferred_enchantment: string('期望附魔（如 sharpness/protection/efficiency/fortune/mending），可省略') }, []) },
+  { name: 'trade_villager', description: '与附近村民交易一次。', parameters: objectSchema({ item_id: string('期望获得的物品 ID，可省略'), count: integer('数量', 1, 64) }, ['count']) },
+  { name: 'sleep_in_bed', description: '在附近的床上睡觉并设置重生点。', parameters: objectSchema({}) },
+  { name: 'travel_to_dimension', description: '前往指定维度（主世界/下界/末地）。', parameters: objectSchema({ dimension: { type: 'string', enum: ['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end'] } }) },
+  { name: 'chop_nearby_wood', description: '砍伐附近的一片树木作为木材（连续技能）。', parameters: objectSchema({ count: integer('数量', 1, 64) }) }
+])
+
+export const REPLENISH_TOOL_NAMES: readonly string[] = Object.freeze([
+  'observe_world', 'navigate_to', 'look_at', 'select_hotbar', 'break_block', 'place_block',
+  'use_held_item', 'interact_block', 'interact_entity', 'attack_entity', 'step_on_block',
+  'craft_recipe', 'drop_inventory_item', 'wait_ticks', 'stop_all_actions', 'express_emotion',
+  'eat_safe_food', 'chop_nearby_wood', 'smelt_items', 'collect_own_drops', 'make_inventory_room',
+  'discard_worn_tools', 'excavate_safely'
 ])
 
 const GUIDE_SEARCH_TOOL: LlmToolDefinition = {
@@ -181,8 +195,8 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     case 'make_inventory_room': return { type: 'make_inventory_room', freeSlots: whole(args, 'free_slots', 1, 4) }
     case 'use_held_item': return { type: 'use_held_item', hand: args.hand === 'off' ? 'off' : 'main' }
     case 'eat_safe_food': return { type: 'eat_best_food' }
-    case 'drop_inventory_item': return { type: 'drop_inventory_item', slot: whole(args, 'slot', 0, 35), count: whole(args, 'count', 1, 64) }
-    case 'discard_worn_tools': return { type: 'discard_worn_tools', remainingDurability: whole(args, 'remaining_durability', 0, 16) }
+    case 'drop_inventory_item': return { type: 'drop_inventory_item', slot: whole(args, 'slot', 0, 35), count: whole(args, 'count', 1, 64), ...(requesterName ? { authorizedPlayer: requesterName } : {}) }
+    case 'discard_worn_tools': return { type: 'discard_worn_tools', remainingDurability: whole(args, 'remaining_durability', 0, 16), ...(requesterName ? { authorizedPlayer: requesterName } : {}) }
     case 'craft_recipe': return { type: 'craft_recipe', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64) }
     case 'gather_resource': return {
       type: 'gather_resource', resource: text(args, 'resource'), count: whole(args, 'count', 1, 64),
@@ -216,6 +230,28 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
     case 'send_server_command': return { type: 'send_server_command', command: text(args, 'command').replace(/^\/+/, '') }
     case 'stop_all_actions': return { type: 'stop' }
     case 'wait_ticks': return { waitTicks: whole(args, 'ticks', 1, 100) }
+    case 'express_emotion': {
+      const emotion = text(args, 'emotion')
+      if (!['happy', 'acknowledge', 'excited', 'afraid', 'angry'].includes(emotion)) throw new Error('emotion 无效')
+      const target = optionalText(args, 'player')
+      return { type: 'gesture', gesture: emotion as 'happy' | 'acknowledge' | 'excited' | 'afraid' | 'angry', ...(target ? { target } : {}) }
+    }
+    case 'enchant_item': {
+      const itemId = optionalText(args, 'item_id')
+      const preferredEnchantment = optionalText(args, 'preferred_enchantment')
+      return { type: 'enchant_item', ...(itemId ? { itemId } : {}), ...(preferredEnchantment ? { preferredEnchantment } : {}) }
+    }
+    case 'trade_villager': {
+      const desiredItemId = optionalText(args, 'item_id')
+      return { type: 'trade_villager', count: whole(args, 'count', 1, 64), ...(desiredItemId ? { desiredItemId } : {}) }
+    }
+    case 'sleep_in_bed': return { type: 'sleep_in_bed' }
+    case 'travel_to_dimension': {
+      const dimension = text(args, 'dimension')
+      if (!['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end'].includes(dimension)) throw new Error('dimension 无效')
+      return { type: 'travel_to_dimension', dimension: dimension as 'minecraft:overworld' | 'minecraft:the_nether' | 'minecraft:the_end' }
+    }
+    case 'chop_nearby_wood': return { type: 'gather_resource', resource: 'wood', count: whole(args, 'count', 1, 64), verifiedWilderness: true }
     default: throw new Error(`不存在工具 ${call.name}`)
   }
 }
@@ -426,6 +462,7 @@ export class ToolAgent {
     requesterName?: string
     cancelled?: () => boolean
     attachments?: LlmInputAttachment[]
+    allowedToolNames?: readonly string[]
   }): Promise<ToolAgentRunResult> {
     if (!this.#provider.toolTurn) throw new Error('当前模型适配器不支持原生工具调用，不能启动 Agent 闭环')
     const startedAt = Date.now()
@@ -443,7 +480,9 @@ export class ToolAgent {
     let descended = false
     let passiveWaitStreak = 0
     const guideCache = new Map<string, string>()
-    const tools = this.#searchGuide ? [...AGENT_TOOLS, GUIDE_SEARCH_TOOL] : [...AGENT_TOOLS]
+    const tools = input.allowedToolNames
+      ? AGENT_TOOLS.filter(tool => input.allowedToolNames!.includes(tool.name))
+      : this.#searchGuide ? [...AGENT_TOOLS, GUIDE_SEARCH_TOOL] : [...AGENT_TOOLS]
     const user = [
       `目标：${input.goal}`,
       input.requesterName ? `发起玩家：${input.requesterName}` : '来源：空闲自主目标',

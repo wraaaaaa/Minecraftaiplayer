@@ -553,6 +553,7 @@ public final class AdvancedTaskController {
         private enum Phase { FIND, OPEN, LOAD_ITEM, LOAD_LAPIS, CHOOSE, TAKE, VERIFY }
         private final String requestedItem;
         private final int minimumLevel;
+        private final String preferredEnchantment;
         private BlockPos table;
         private Phase phase = Phase.FIND;
         private String itemId;
@@ -562,6 +563,7 @@ public final class AdvancedTaskController {
             super(id, "enchant_item", CONTAINER_TIMEOUT_TICKS);
             requestedItem = optionalId(action, "itemId");
             minimumLevel = integer(action, "minLevel", 1, 30, 1);
+            preferredEnchantment = action.has("preferredEnchantment") && !action.get("preferredEnchantment").isJsonNull() ? action.get("preferredEnchantment").getAsString() : null;
         }
 
         @Override
@@ -570,7 +572,7 @@ public final class AdvancedTaskController {
             if (phase == Phase.FIND) {
                 table = findOwnedBlock(client, player.blockPosition(), 12, state -> state.is(Blocks.ENCHANTING_TABLE));
                 if (table == null) { finish(client, this, false, "no_loaded_bot_owned_enchanting_table"); return; }
-                itemId = chooseEnchantableItem(player, requestedItem);
+                itemId = chooseEnchantableItem(player, requestedItem, preferredEnchantment);
                 if (itemId == null) { finish(client, this, false, "no_unenchanted_damageable_item_matching_request"); return; }
                 if (inventoryCount(player, "minecraft:lapis_lazuli") <= 0 || player.experienceLevel < minimumLevel) {
                     finish(client, this, false, "insufficient_lapis_or_experience");
@@ -1486,19 +1488,30 @@ public final class AdvancedTaskController {
             ).stream().min(Comparator.<AbstractVillager>comparingDouble(player::distanceToSqr)).orElse(null);
     }
 
-    private static String chooseEnchantableItem(LocalPlayer player, String requested) {
+    private static String chooseEnchantableItem(LocalPlayer player, String requested, String preferred) {
         return player.getInventory().getNonEquipmentItems().stream()
             .filter(stack -> !stack.isEmpty() && stack.isDamageableItem() && stack.getEnchantments().isEmpty())
             .map(AdvancedTaskController::itemId)
             .filter(id -> requested == null || id.equals(requested))
-            .sorted(Comparator.comparingInt(AdvancedTaskController::equipmentScore).reversed())
+            .sorted(Comparator.comparingInt((String id) -> equipmentScore(id, preferred)).reversed())
             .findFirst().orElse(null);
     }
 
-    private static int equipmentScore(String id) {
+    private static int equipmentScore(String id, String preferred) {
         int material = id.contains("netherite_") ? 50 : id.contains("diamond_") ? 40 : id.contains("iron_") ? 30 : id.contains("golden_") ? 20 : 10;
         int kind = id.endsWith("_sword") ? 5 : id.endsWith("_pickaxe") ? 4 : id.endsWith("_axe") ? 3 : 1;
-        return material + kind;
+        int preference = 0;
+        if (preferred != null) {
+            String p = preferred.toLowerCase();
+            boolean armor = id.endsWith("_helmet") || id.endsWith("_chestplate") || id.endsWith("_leggings") || id.endsWith("_boots");
+            if ((p.contains("sword") || p.contains("sharpness") || p.contains("looting") || p.contains("sweeping")) && id.endsWith("_sword")) preference = 200;
+            else if ((p.contains("pickaxe") || p.contains("efficiency") || p.contains("fortune") || p.contains("silk")) && id.endsWith("_pickaxe")) preference = 200;
+            else if (p.contains("axe") && id.endsWith("_axe")) preference = 200;
+            else if ((p.contains("shovel") || p.contains("silk")) && id.endsWith("_shovel")) preference = 200;
+            else if ((p.contains("armor") || p.contains("protection") || p.contains("mending") || p.contains("unbreaking")) && armor) preference = 150;
+            else if ((p.contains("bow") || p.contains("power") || p.contains("infinity") || p.contains("punch") || p.contains("flame")) && id.endsWith("_bow")) preference = 200;
+        }
+        return material + kind + preference;
     }
 
     private interface BlockPredicate { boolean test(BlockState state); }
