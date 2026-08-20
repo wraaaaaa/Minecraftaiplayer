@@ -51,14 +51,15 @@ export class BotRuntime {
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
     const contextCompressor = new ContextCompressor({ config: workspaceConfig, provider, memory, workspace: promptWorkspace, secrets })
     const selfImprovement = new SelfImprovementManager({ config: workspaceConfig.selfImprovement, provider, workspace: promptWorkspace, secrets })
-    await Promise.all([memory.load(), experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize(), adminInbox.initialize()])
     const existingMemory = await memory.load()
+    await Promise.all([experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize(), adminInbox.initialize()])
     await Promise.all(Object.values(existingMemory.players).map(player => promptWorkspace.ensurePlayerProfile(
       { name: player.currentName, ...(player.uuid ? { uuid: player.uuid } : {}) },
       player
     )))
     const serverLabel = `${config.server.host}:${config.server.port}`
     await status.report('starting', config.server.adapter, serverLabel, { connected: false, inventory: [], nearbyPlayers: [] })
+    let reconnectAttempts = 0
     while (!this.#stopping) {
       const policy = new PolicyEngine(rules)
       const client = config.server.adapter === 'fabric_bridge'
@@ -99,6 +100,16 @@ export class BotRuntime {
         try { await client.waitForEnd() } finally { clearInterval(adminTimer) }
       } catch (error) {
         this.#logger.error('连接尝试失败', error)
+        const code = (error as NodeJS.ErrnoException).code
+        if (code === 'EADDRINUSE') {
+          this.#logger.error('桥接端口被其他进程占用，停止重连', { port: config.server.bridgePort })
+          break
+        }
+        reconnectAttempts += 1
+        if (reconnectAttempts > 30) {
+          this.#logger.error('桥接重连次数达到上限，停止重连', { attempts: reconnectAttempts })
+          break
+        }
       }
       await client.close('reconnect')
       if (!this.#stopping) await delay(config.server.reconnectDelayMs)

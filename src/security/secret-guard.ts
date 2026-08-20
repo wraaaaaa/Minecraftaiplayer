@@ -33,7 +33,7 @@ export class SecretGuard {
   safeChat(value: string): { safe: true; text: string } | { safe: false; text: string; reason: string } {
     const cleaned = value.replace(/[\r\n]+/gu, ' ').trim().slice(0, 240)
     const sanitized = this.sanitize(cleaned)
-    if (sanitized !== cleaned || sanitized.includes('[REDACTED]')) {
+    if (sanitized !== cleaned) {
       return { safe: false, text: '我不能透露密码、API Key、令牌、服务器地址或本地配置等敏感信息。', reason: '聊天内容触发了敏感信息出站拦截' }
     }
     return { safe: true, text: cleaned }

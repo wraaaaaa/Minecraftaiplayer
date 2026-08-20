@@ -42,7 +42,21 @@ final class BridgeConnection implements AutoCloseable {
     }
 
     void send(JsonObject message) {
-        if (outgoing.size() < 1000) outgoing.add(message);
+        String type = message.has("type") ? message.get("type").getAsString() : "";
+        boolean critical = "action_result".equals(type) || "voice_status".equals(type);
+        if (critical) {
+            outgoing.add(message);
+            return;
+        }
+        if (outgoing.size() >= 1000) {
+            // 队列满时优先丢弃最旧的 state 事件，绝不静默丢弃回执/语音状态。
+            outgoing.removeIf(item -> {
+                String itemType = item.has("type") ? item.get("type").getAsString() : "";
+                return "state".equals(itemType);
+            });
+            if (outgoing.size() >= 1000) return;
+        }
+        outgoing.add(message);
     }
 
     private void runLoop() {

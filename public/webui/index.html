@@ -22,6 +22,7 @@
   <div class="layout">
     <nav class="sidebar" aria-label="设置导航">
       <a href="#overview" class="active">运行概览</a>
+      <a href="#dashboard">实时仪表盘</a>
       <a href="#central-chat">总聊天</a>
       <a href="#server">服务器</a>
       <a href="#model">大模型</a>
@@ -65,6 +66,41 @@
         </div>
       </section>
 
+      <section id="dashboard" class="panel dashboard-panel">
+        <div class="section-heading"><div><p class="eyebrow">LIVE DASHBOARD</p><h2>实时图形仪表盘</h2><p class="muted">世界雷达、状态、背包、趋势、配置总览与环境自检；数据由 WebSocket 每秒推送。</p></div></div>
+        <div class="dashboard-grid">
+          <article class="dash-card radar-card">
+            <h3>世界雷达</h3>
+            <svg id="radarSvg" viewBox="0 0 240 240" role="img" aria-label="附近玩家与敌对生物"></svg>
+            <div id="radarMeta" class="dash-meta">—</div>
+          </article>
+          <article class="dash-card gauges-card">
+            <h3>状态仪表</h3>
+            <div class="gauge-row"><label>生命</label><div class="gauge"><span id="gaugeHealth"></span></div><b id="gaugeHealthText">—</b></div>
+            <div class="gauge-row"><label>饱食</label><div class="gauge"><span id="gaugeFood"></span></div><b id="gaugeFoodText">—</b></div>
+            <div class="gauge-row"><label>氧气</label><div class="gauge"><span id="gaugeAir"></span></div><b id="gaugeAirText">—</b></div>
+            <div class="badge-row"><span id="badgeDimension" class="badge">—</span><span id="badgeTime" class="badge">—</span><span id="badgeOnFire" class="badge danger hidden">着火</span><span id="badgeInWater" class="badge info hidden">水中</span></div>
+          </article>
+          <article class="dash-card inventory-card">
+            <h3>背包</h3>
+            <div id="inventoryGrid" class="inventory-grid">—</div>
+          </article>
+          <article class="dash-card trend-card">
+            <h3>趋势</h3>
+            <div id="trendLegend" class="trend-legend"></div>
+            <svg id="trendChart" viewBox="0 0 480 160" preserveAspectRatio="none"></svg>
+          </article>
+          <article class="dash-card env-card">
+            <h3>环境自检</h3>
+            <button id="envCheckButton" class="button ghost">立即检测</button>
+            <div id="envCheckResult" class="env-result">尚未检测</div>
+          </article>
+          <article class="dash-card config-card">
+            <h3>配置总览</h3>
+            <pre id="configOverview">—</pre>
+          </article>
+        </div>
+      </section>
       <section id="central-chat" class="panel central-chat-panel">
         <div class="section-heading">
           <div><p class="eyebrow">CENTRAL CHAT & DIAGNOSTICS</p><h2>总聊天</h2><p class="muted">玩家对话、Bot 回复、结构化决策摘要、步骤和完整错误统一显示在这里。</p></div>

@@ -313,6 +313,7 @@ function populate(snapshot) {
   set('modsSource', snapshot.mods.sourceDirectory); setChecked('syncOnStart', snapshot.mods.syncOnClientStart); set('excludePatterns', snapshot.mods.excludeFilePatterns.join('\n'))
   renderStatus(snapshot)
   renderPlayerProfiles(snapshot)
+  renderConfigOverview(snapshot)
   setDirty(false)
 }
 
@@ -539,3 +540,174 @@ window.addEventListener('beforeunload', event => { if (dirty) { event.preventDef
 load()
 setInterval(() => { if (!dirty) refreshStatus() }, 10000)
 setInterval(() => { if (checked('centralChatAuto')) refreshCentralChat() }, 4000)
+// ===== 实时图形仪表盘 =====
+const trendData = { players: [], tokens: [], tasks: [] }
+let liveSocket
+
+function connectLive() {
+  if (liveSocket && (liveSocket.readyState === 0 || liveSocket.readyState === 1)) return
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+  liveSocket = new WebSocket(proto + '//' + location.host + '/ws')
+  liveSocket.onmessage = event => { try { renderLive(JSON.parse(event.data)) } catch { /* ignore */ } }
+  liveSocket.onclose = () => { setTimeout(connectLive, 3000) }
+  liveSocket.onerror = () => { try { liveSocket.close() } catch { /* ignore */ } }
+}
+
+function renderLive(live) {
+  renderRadar(live.live)
+  renderGauges(live.live)
+  renderInventory(live.live)
+  renderTrends(live)
+  if (live.runtime) {
+    $('botStatus').textContent = live.runtime.bot.running ? '运行中' : '已停止'
+    $('botStatus').style.color = live.runtime.bot.running ? 'var(--green)' : 'var(--muted)'
+    $('clientStatus').textContent = live.runtime.client.running ? '运行中' : '已停止'
+    $('clientStatus').style.color = live.runtime.client.running ? 'var(--green)' : 'var(--muted)'
+  }
+}
+
+function renderRadar(live) {
+  const world = live?.world
+  const svg = $('radarSvg')
+  if (!world || !world.position) {
+    svg.innerHTML = '<circle cx="120" cy="120" r="110" class="radar-ring"/><text x="120" y="120" text-anchor="middle" class="radar-empty">等待进服</text>'
+    $('radarMeta').textContent = '—'
+    return
+  }
+  const cx = 120, cy = 120, scale = 6
+  const parts = ['<circle cx="120" cy="120" r="112" class="radar-ring"/>', '<circle cx="120" cy="120" r="72" class="radar-ring"/>', '<circle cx="120" cy="120" r="32" class="radar-ring"/>', '<circle cx="120" cy="120" r="5" class="radar-bot"/>']
+  for (const p of (world.nearbyPlayers || [])) {
+    const dx = (p.position?.x ?? 0) - world.position.x, dz = (p.position?.z ?? 0) - world.position.z
+    const x = cx + dx * scale, y = cy + dz * scale
+    if (x < 8 || x > 232 || y < 8 || y > 232) continue
+    parts.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6" class="radar-player"/>')
+    parts.push('<text x="' + (x + 8).toFixed(1) + '" y="' + (y - 4).toFixed(1) + '" class="radar-label">' + (p.name || '?') + '</text>')
+  }
+  for (const h of (world.nearbyHostiles || [])) {
+    const dx = (h.position?.x ?? 0) - world.position.x, dz = (h.position?.z ?? 0) - world.position.z
+    const x = cx + dx * scale, y = cy + dz * scale
+    if (x < 8 || x > 232 || y < 8 || y > 232) continue
+    parts.push('<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="6" class="radar-hostile"/>')
+    parts.push('<text x="' + (x + 8).toFixed(1) + '" y="' + (y - 4).toFixed(1) + '" class="radar-label">' + (h.typeId || '?') + '</text>')
+  }
+  svg.innerHTML = parts.join('')
+  $('radarMeta').textContent = '坐标 ' + world.position.x.toFixed(1) + ', ' + world.position.y.toFixed(1) + ', ' + world.position.z.toFixed(1) + ' · ' + (world.dimension || '—') + ' · ' + (world.activePrimitive || '安全等待')
+}
+
+function setGauge(id, textId, value, max) {
+  const pct = (typeof value === 'number' && typeof max === 'number' && max > 0) ? Math.max(0, Math.min(100, value / max * 100)) : 0
+  $(id).style.width = pct.toFixed(1) + '%'
+  $(textId).textContent = (typeof value === 'number' ? Math.round(value) : '—') + ' / ' + (typeof max === 'number' ? Math.round(max) : '—')
+}
+
+function renderGauges(live) {
+  const world = live?.world
+  setGauge('gaugeHealth', 'gaugeHealthText', world?.health, world?.maxHealth ?? 20)
+  setGauge('gaugeFood', 'gaugeFoodText', world?.food, 20)
+  setGauge('gaugeAir', 'gaugeAirText', world?.air, 300)
+  $('badgeDimension').textContent = world?.dimension || '—'
+  const tod = world?.environment?.timeOfDay ?? world?.timeOfDay
+  $('badgeTime').textContent = typeof tod === 'number' ? (tod < 13000 ? '白天' : tod < 23000 ? '夜晚' : '白天') + ' ' + Math.round(tod) : '—'
+  $('badgeOnFire').classList.toggle('hidden', !world?.onFire)
+  $('badgeInWater').classList.toggle('hidden', !world?.inWater)
+}
+
+function renderInventory(live) {
+  const world = live?.world
+  const inv = world?.inventory || []
+  const grid = $('inventoryGrid')
+  if (!inv.length) { grid.textContent = '背包为空'; return }
+  grid.replaceChildren(...inv.slice(0, 40).map(item => {
+    const card = document.createElement('div')
+    card.className = 'inv-item'
+    const name = document.createElement('span')
+    name.textContent = item.name || item.itemId || '?'
+    const count = document.createElement('b')
+    count.textContent = item.count ?? 1
+    card.append(name, count)
+    if (typeof item.durability === 'number' && typeof item.maxDurability === 'number' && item.maxDurability > 0) {
+      const bar = document.createElement('i')
+      bar.className = 'inv-durability'
+      bar.style.width = Math.max(0, Math.min(100, (item.maxDurability - item.durability) / item.maxDurability * 100)) + '%'
+      card.append(bar)
+    }
+    if (item.enchanted) { const badge = document.createElement('em'); badge.className = 'inv-enchant'; badge.textContent = '附魔'; card.append(badge) }
+    return card
+  }))
+}
+
+function pushTrend(arr, value) { arr.push(value); if (arr.length > 100) arr.shift() }
+
+function renderTrends(live) {
+  const diag = (live.diagnostics?.events || [])
+  const recentTokens = diag.slice(-6).reduce((sum, e) => sum + Number(e.metadata?.totalTokens || 0), 0)
+  const tasks = (live.tasks?.tasks || [])
+  pushTrend(trendData.players, live.monitor?.humans ?? 0)
+  pushTrend(trendData.tokens, recentTokens)
+  pushTrend(trendData.tasks, tasks.filter(t => t.status === 'running' || t.status === 'queued').length)
+  const svg = $('trendChart')
+  const W = 480, H = 160, max = Math.max(1, ...trendData.tokens, ...trendData.players, ...trendData.tasks)
+  const series = [
+    { key: 'players', color: 'var(--green)', data: trendData.players },
+    { key: 'tokens', color: 'var(--accent)', data: trendData.tokens },
+    { key: 'tasks', color: 'var(--amber)', data: trendData.tasks }
+  ]
+  const paths = series.map(s => {
+    const pts = s.data.map((v, i) => (i / Math.max(1, s.data.length - 1) * W).toFixed(1) + ',' + (H - 4 - v / max * (H - 12)).toFixed(1)).join(' ')
+    return '<polyline fill="none" stroke="' + s.color + '" stroke-width="2" points="' + pts + '"/>'
+  })
+  svg.innerHTML = '<line x1="0" y1="' + (H - 4) + '" x2="' + W + '" y2="' + (H - 4) + '" class="trend-axis"/>' + paths.join('')
+  $('trendLegend').innerHTML = '<span class="dot dot-green"></span>人数 ' + (trendData.players.at(-1) ?? 0) + ' <span class="dot dot-accent"></span>Token ' + (trendData.tokens.at(-1) ?? 0) + ' <span class="dot dot-amber"></span>任务 ' + (trendData.tasks.at(-1) ?? 0)
+}
+
+const SECRET_FIELDS = new Set(['apiKey', 'password', 'key', 'token'])
+function maskConfig(value, key) {
+  if (SECRET_FIELDS.has(key) || /(?:key|password|token|secret)/iu.test(key)) return '已配置'
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, maskConfig(v, k)]))
+  return value
+}
+
+function renderConfigOverview(snapshot) {
+  const c = snapshot.config
+  const view = {
+    server: { adapter: c.server.adapter, connectionMode: c.server.connectionMode, host: c.server.host, port: c.server.port, username: c.server.username, auth: c.server.auth, bridgeHost: c.server.bridgeHost, bridgePort: c.server.bridgePort },
+    model: { provider: c.model.provider, model: c.model.model, apiKeyEnv: c.model.apiKeyEnv, baseUrl: c.model.baseUrl, reasoningEffort: c.model.reasoningEffort, apiKey: snapshot.secrets[c.model.apiKeyEnv] ? '已配置' : '未配置' },
+    easyAuth: { enabled: c.easyAuth.enabled, registerIfNeeded: c.easyAuth.registerIfNeeded, password: snapshot.easyAuthPassword ? '已配置' : '未配置' },
+    speech: c.speech ? { enabled: c.speech.enabled, provider: c.speech.provider, model: c.speech.model, voice: c.speech.voice } : { enabled: false },
+    autonomy: { enabled: c.autonomy?.enabled, ownerName: c.autonomy?.ownerName, safeIdleEnabled: c.autonomy?.safeIdleEnabled, replenishDurationMs: c.autonomy?.replenishDurationMs },
+    playerMonitor: { enabled: c.playerMonitor?.enabled },
+    storage: c.storage,
+    logging: c.logging
+  }
+  $('configOverview').textContent = JSON.stringify(view, null, 2)
+}
+
+function renderEnvCheck(result) {
+  const el = $('envCheckResult')
+  el.replaceChildren()
+  const head = document.createElement('div')
+  head.className = 'env-summary ' + (result.ok ? 'pass' : 'fail')
+  head.textContent = result.summary
+  el.append(head)
+  for (const it of result.items || []) {
+    const row = document.createElement('div')
+    row.className = 'env-item ' + it.status
+    const icon = document.createElement('span'); icon.textContent = it.status === 'pass' ? '✓' : it.status === 'fail' ? '✗' : '⚠'
+    const label = document.createElement('strong'); label.textContent = it.label
+    const detail = document.createElement('small'); detail.textContent = it.detail
+    row.append(icon, label, detail)
+    el.append(row)
+  }
+}
+
+async function runEnvCheck() {
+  const btn = $('envCheckButton')
+  btn.disabled = true
+  $('envCheckResult').textContent = '检测中…'
+  try { renderEnvCheck(await request('/api/environment/check')) }
+  catch (error) { $('envCheckResult').textContent = '检测失败：' + error.message }
+  finally { btn.disabled = false }
+}
+
+$('envCheckButton').addEventListener('click', runEnvCheck)
+connectLive()

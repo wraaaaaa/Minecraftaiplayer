@@ -31,7 +31,17 @@ export function compactRuntimeWorld(world: WorldState): WorldState {
     ...(world.inWater === undefined ? {} : { inWater: world.inWater }),
     ...(world.onGround === undefined ? {} : { onGround: world.onGround }),
     ...(world.dimension === undefined ? {} : { dimension: world.dimension }),
-    inventory: [],
+    inventory: world.inventory.slice(0, 46).map(item => ({
+      name: item.name,
+      ...(item.itemId ? { itemId: item.itemId } : {}),
+      count: item.count,
+      ...(item.slot === undefined ? {} : { slot: item.slot }),
+      ...(item.durability === undefined ? {} : { durability: item.durability }),
+      ...(item.maxDurability === undefined ? {} : { maxDurability: item.maxDurability }),
+      ...(item.enchanted === undefined ? {} : { enchanted: item.enchanted })
+    })),
+    ...(world.freeSlots === undefined ? {} : { freeSlots: world.freeSlots }),
+    ...(world.selectedHotbarSlot === undefined ? {} : { selectedHotbarSlot: world.selectedHotbarSlot }),
     nearbyPlayers: world.nearbyPlayers.slice(0, 16).map(player => ({
       name: player.name,
       distance: player.distance,

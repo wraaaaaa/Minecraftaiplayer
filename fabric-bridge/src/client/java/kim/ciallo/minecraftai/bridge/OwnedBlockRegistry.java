@@ -37,13 +37,16 @@ public final class OwnedBlockRegistry {
     }
 
     public static synchronized void registerPlacedStructure(Minecraft client, BlockPos primary, String expectedBlockId) {
+        registerPlacedStructure(client, List.of(primary), expectedBlockId);
+    }
+
+    /** 只注册调用方明确给出的、经服务器确认的精确放置位置，绝不做邻接猜测。 */
+    public static synchronized void registerPlacedStructure(Minecraft client, List<BlockPos> positions, String expectedBlockId) {
         ensureLoaded();
-        if (client == null || client.level == null || primary == null || expectedBlockId == null) return;
+        if (client == null || client.level == null || positions == null || expectedBlockId == null) return;
         String dimension = client.level.dimension().identifier().toString();
-        for (BlockPos candidate : List.of(
-            primary, primary.north(), primary.south(), primary.west(), primary.east(), primary.above(), primary.below()
-        )) {
-            if (!client.level.isLoaded(candidate)) continue;
+        for (BlockPos candidate : positions) {
+            if (candidate == null || !client.level.isLoaded(candidate)) continue;
             BlockState observed = client.level.getBlockState(candidate);
             String actual = BuiltInRegistries.BLOCK.getKey(observed.getBlock()).toString();
             if (expectedBlockId.equals(actual)) {

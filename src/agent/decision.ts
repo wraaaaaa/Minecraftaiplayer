@@ -44,7 +44,7 @@ function normalizeAction(value: unknown, currentPlayerName?: string): { action: 
       return { action: { type, target: action.target.trim() } }
     case 'wander':
     case 'explore': {
-      const radius = typeof action.radius === 'number' && Number.isFinite(action.radius) ? Math.max(2, Math.min(16, Math.round(action.radius))) : 6
+      const radius = typeof action.radius === 'number' && Number.isFinite(action.radius) ? Math.max(2, Math.min(8, Math.round(action.radius))) : 6
       return { action: { type: 'wander', radius } }
     }
     case 'explore_frontier': {

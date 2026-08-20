@@ -7,7 +7,16 @@ import { spawn } from 'node:child_process'
 import { userDataPath } from './core/user-data.js'
 
 // 用于服务器列表 Ping 握手的 Minecraft 26.2 协议版本。
-const PROTOCOL_VERSION = 776
+// 从随包分发的 minecraft-data 读取，避免写死版本号。
+async function resolveProtocolVersion(): Promise<number> {
+  try {
+    const versionFile = path.join(projectRoot, 'vendor', 'minecraft-data', '26.2', 'version.json')
+    const parsed = JSON.parse(await readFile(versionFile, 'utf8')) as { version?: number }
+    return typeof parsed.version === 'number' ? parsed.version : 776
+  } catch {
+    return 776
+  }
+}
 
 interface PlayerMonitorState {
   humanSeenAt: number | null
@@ -104,6 +113,7 @@ async function main(): Promise<void> {
   const offlineAfterMs = monitor.offlineAfterMs ?? 30 * 60_000
   const timeoutMs = monitor.statusTimeoutMs ?? 5_000
   log('玩家监听已启动：' + host + ':' + port + '，轮询间隔 ' + pollIntervalMs + 'ms，上线延迟 ' + onlineAfterMs + 'ms，下线延迟 ' + offlineAfterMs + 'ms')
+  const protocolVersion = await resolveProtocolVersion()
 
   let state = await readState()
   while (true) {
@@ -116,7 +126,7 @@ async function main(): Promise<void> {
         await delay(pollIntervalMs)
         continue
       }
-      const status = await queryServerStatus(host, port, PROTOCOL_VERSION, timeoutMs)
+      const status = await queryServerStatus(host, port, protocolVersion, timeoutMs)
       const humans = Math.max(0, status.online - (online ? 1 : 0))
       state.onlineCount = status.online
       state.maxPlayers = status.max

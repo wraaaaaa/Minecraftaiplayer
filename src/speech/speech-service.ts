@@ -221,6 +221,8 @@ export class SpeechService {
   close(): void {
     this.#closed = true
     this.#queue.length = 0
+    const waiters = this.#idleWaiters.splice(0)
+    for (const resolve of waiters) resolve()
   }
 
   waitForIdle(): Promise<void> {

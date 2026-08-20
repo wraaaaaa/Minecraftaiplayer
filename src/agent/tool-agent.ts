@@ -101,7 +101,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
     resource: string('目标资源'), target_y: integer('目标 Y', -2048, 2048), length: integer('长度', 2, 64)
   }) },
   { name: 'return_to_task_start', description: '从地下沿安全路线返回任务起始高度。', parameters: objectSchema({}) },
-  { name: 'collect_own_drops', description: '连续拾取本任务登记的自有掉落。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), radius: integer('半径', 2, 32) }) },
+  { name: 'collect_own_drops', description: '连续拾取本任务登记的自有掉落。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), radius: integer('半径', 2, 16) }) },
   { name: 'give_item_to_player', description: '接近玩家并交付自身物品。', parameters: objectSchema({ item_id: string('物品 ID'), count: integer('数量', 1, 64), player: string('玩家名') }) },
   { name: 'accept_items_from_player', description: '接近明确玩家并拾取其身边刚丢出的物品；以背包真实增量确认。', parameters: objectSchema({ player: string('玩家名'), item_id: string('物品 ID，可填 any'), count: integer('数量', 1, 64), radius: integer('玩家周围搜索半径', 1, 6) }) },
   { name: 'equip_for', description: '穿装备/穿戴：按用途从背包穿上当前最好的盔甲和主手工具；general 即普通穿戴。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
@@ -110,7 +110,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'stop_all_actions', description: '立即停止动作并释放按键。', parameters: objectSchema({}) },
   { name: 'wait_ticks', description: '等待 1–100 tick；20 tick≈1秒。', parameters: objectSchema({ ticks: integer('tick', 1, 100) }) },
   { name: 'express_emotion', description: '用身体动作表达情绪：happy=高兴蹦跳（冲刺+小跳）、acknowledge=点头或蹲两下（同意/疑惑）、excited=激动（绕目标转两圈）、afraid=害怕（冲刺跳）、angry=生气（空手轻拍目标）。玩家说“跳两下”“蹲一下”“转个圈”“开心一点”“表示同意”等时使用。', parameters: objectSchema({ emotion: { type: 'string', enum: ['happy', 'acknowledge', 'excited', 'afraid', 'angry'], description: 'happy=高兴蹦跳; acknowledge=点头/蹲两下; excited=激动绕圈; afraid=害怕冲刺跳; angry=生气空手轻拍' }, player: string('目标玩家名，excited/angry 时建议填写') }, ['emotion']) },
-  { name: 'enchant_item', description: '用附魔台给装备附魔：需要附魔台+青金石+经验；可指定装备与期望附魔，缺料返回真实原因。', parameters: objectSchema({ item_id: string('要附魔的装备 ID，可省略'), preferred_enchantment: string('期望附魔（如 sharpness/protection/efficiency/fortune/mending），可省略') }, []) },
+  { name: 'enchant_item', description: '用附魔台给装备附魔：需要附魔台+青金石+经验；指定装备与期望附魔，缺料返回真实原因。', parameters: objectSchema({ item_id: string('要附魔的装备 ID'), preferred_enchantment: string('期望附魔（如 sharpness/protection/efficiency/fortune/mending），可省略') }, ['item_id']) },
   { name: 'trade_villager', description: '与附近村民交易一次。', parameters: objectSchema({ item_id: string('期望获得的物品 ID，可省略'), count: integer('数量', 1, 64) }, ['count']) },
   { name: 'sleep_in_bed', description: '在附近的床上睡觉并设置重生点。', parameters: objectSchema({}) },
   { name: 'travel_to_dimension', description: '前往指定维度（主世界/下界/末地）。', parameters: objectSchema({ dimension: { type: 'string', enum: ['minecraft:overworld', 'minecraft:the_nether', 'minecraft:the_end'] } }) },
@@ -210,7 +210,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
       length: whole(args, 'length', 2, 64), verifiedWilderness: true
     }
     case 'return_to_task_start': return { returnToStart: true }
-    case 'collect_own_drops': return { type: 'collect_own_drops', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), radius: whole(args, 'radius', 2, 32) }
+    case 'collect_own_drops': return { type: 'collect_own_drops', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), radius: whole(args, 'radius', 2, 16) }
     case 'give_item_to_player': return { type: 'drop_item', itemId: text(args, 'item_id'), count: whole(args, 'count', 1, 64), target: text(args, 'player') }
     case 'accept_items_from_player': {
       const itemId = text(args, 'item_id')

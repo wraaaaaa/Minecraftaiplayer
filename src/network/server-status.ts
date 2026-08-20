@@ -35,6 +35,7 @@ function readVarInt(buffer: Buffer, offset: number): ReadResult {
   while (true) {
     if (index >= buffer.length) throw new Error('VarInt 数据不完整')
     const byte = buffer[index]!
+    if (position === 4 && (byte & 0x7f) > 0x0f) throw new Error('VarInt 第 5 字节溢出')
     value |= (byte & 0x7f) << (7 * position)
     index++
     if ((byte & 0x80) === 0) break

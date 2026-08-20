@@ -107,8 +107,7 @@ export class PolicyEngine {
       case 'accept_items':
         return { allowed: true, reason: '只允许拾取明确玩家身边本次可见的掉落物，并验证背包增量' }
       case 'collect_own_drops':
-        if (this.#rules.denyTakingPlayerItems) return { allowed: true, reason: '只允许收集本任务产生并由 Fabric 跟踪的掉落物' }
-        return { allowed: true, reason: '允许收集掉落物' }
+        return { allowed: true, reason: '只允许收集本任务产生并由 Fabric 跟踪的自有掉落物' }
       case 'break_block_at':
         return { allowed: true, reason: 'Fabric 必须再次验证目标为天然方块、Bot 自有方块或玩家本次明确指向的方块' }
       case 'place_block_at':

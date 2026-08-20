@@ -67,19 +67,26 @@ const sourceNames = allSourceNames
 
 await mkdir(targetDirectory, { recursive: true })
 const previous = await readJson(manifestFile, { files: [] })
+
+// 先完整校验全部源文件（JAR/ZIP 头），全部通过后再删除/复制，避免中途失败留下残缺 mods 目录。
+const prepared = []
+for (const name of sourceNames) {
+  const source = path.join(sourceDirectory, name)
+  const header = (await readFile(source)).subarray(0, 4)
+  if (header.length < 4 || header[0] !== 0x50 || header[1] !== 0x4B) {
+    throw new Error(`Invalid JAR/ZIP header: ${name}`)
+  }
+  prepared.push({ name, source })
+}
+
 for (const item of previous.files ?? []) {
   if (!safeManagedName(item.name)) continue
   await rm(path.join(targetDirectory, item.name), { force: true })
 }
 
 const files = []
-for (const name of sourceNames) {
-  const source = path.join(sourceDirectory, name)
+for (const { name, source } of prepared) {
   const target = path.join(targetDirectory, name)
-  const header = (await readFile(source)).subarray(0, 4)
-  if (header.length < 4 || header[0] !== 0x50 || header[1] !== 0x4B) {
-    throw new Error(`Invalid JAR/ZIP header: ${name}`)
-  }
   await copyFile(source, target)
   files.push({ name, size: (await stat(target)).size, sha256: await sha256(target), compatibility: compatibilityHint(name) })
 }

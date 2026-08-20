@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { compactRuntimeWorld } from '../src/runtime/status-store.js'
 
-test('运行状态文件保留总控摘要但不落盘高频附近方块和背包明细', () => {
+test('运行状态文件保留总控摘要与背包明细，但不落盘高频附近方块数据', () => {
   const compact = compactRuntimeWorld({
     connected: true,
     sequence: 12,
@@ -20,7 +20,7 @@ test('运行状态文件保留总控摘要但不落盘高频附近方块和背�
     navigationStatus: 'idle'
   })
 
-  assert.deepEqual(compact.inventory, [])
+  assert.deepEqual(compact.inventory, [{ name: '钻石', itemId: 'minecraft:diamond', count: 64 }])
   assert.equal(compact.nearbyBlocks, undefined)
   assert.deepEqual(compact.position, { x: 1, y: 64, z: 2 })
   assert.deepEqual(compact.nearbyPlayers, [{ name: 'Alice', uuid: 'alice', distance: 3 }])

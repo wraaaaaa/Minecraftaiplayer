@@ -1,6 +1,6 @@
 import { access, readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { agentWorkspaceConfig, speechConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
+import { agentWorkspaceConfig, autonomyConfig, speechConfig, type BehaviorRules, type BotConfig, type Persona, type PromptTemplates, type ReasoningEffort } from './types.js'
 import { parseJsonDocument } from '../core/json.js'
 import { projectPath, resolveUserData, userDataPath } from '../core/user-data.js'
 
@@ -49,6 +49,7 @@ export function validateConfig(config: BotConfig): void {
   if (!['direct', 'lan'].includes(config.server?.connectionMode)) throw new Error('server.connectionMode 只能是 direct 或 lan')
   requireString(config.server?.host, 'server.host')
   requirePositiveInteger(config.server?.port, 'server.port')
+  if (config.server.port > 65535) throw new Error('server.port 必须在 1-65535 之间')
   requirePositiveInteger(config.server?.lanDiscoveryTimeoutMs, 'server.lanDiscoveryTimeoutMs')
   requireString(config.server?.version, 'server.version')
   requireString(config.server?.username, 'server.username')
@@ -61,6 +62,7 @@ export function validateConfig(config: BotConfig): void {
   }
   requireString(config.server?.bridgeHost, 'server.bridgeHost')
   requirePositiveInteger(config.server?.bridgePort, 'server.bridgePort')
+  if (config.server.bridgePort > 65535) throw new Error('server.bridgePort 必须在 1-65535 之间')
   requirePositiveInteger(config.server?.actionTimeoutMs, 'server.actionTimeoutMs')
   if (!['offline', 'microsoft'].includes(config.server.auth)) throw new Error('server.auth 只能是 offline 或 microsoft')
   requireString(config.model?.provider, 'model.provider')
@@ -171,7 +173,8 @@ export function validateConfig(config: BotConfig): void {
       if (value === undefined) continue
       if (typeof value !== 'number' || !Number.isFinite(value) || value < minimum || value > maximum) throw new Error(`autonomy.${name} 必须在 ${minimum}-${maximum} 之间`)
     }
-    if (config.autonomy.criticalHealthThreshold > config.autonomy.lowHealthThreshold) throw new Error('autonomy.criticalHealthThreshold 不能高于 lowHealthThreshold')
+    const effectiveAutonomy = autonomyConfig(config)
+    if (effectiveAutonomy.criticalHealthThreshold > effectiveAutonomy.lowHealthThreshold) throw new Error('autonomy.criticalHealthThreshold 不能高于 lowHealthThreshold')
     for (const name of ['enabled', 'contextualAddressing', 'safeIdleEnabled', 'autoGather', 'autoCraft', 'autoBuildShelter'] as const) {
       if (typeof config.autonomy[name] !== 'boolean') throw new Error(`autonomy.${name} 必须是布尔值`)
     }

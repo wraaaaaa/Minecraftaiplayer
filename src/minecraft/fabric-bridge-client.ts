@@ -210,6 +210,8 @@ export class FabricBridgeClient implements ActionExecutor {
   }
 
   #accept(socket: Socket): void {
+    // 被拒绝的 socket 也必须有 error 监听器，否则 destroy(error) 会以未处理 'error' 事件击穿进程。
+    socket.on('error', () => {})
     if (this.#socket && !this.#socket.destroyed) {
       socket.destroy(new Error('只允许一个 Fabric 客户端连接'))
       return
@@ -419,7 +421,7 @@ export class FabricBridgeClient implements ActionExecutor {
             z: (rawPosition as { z: number }).z
           }
         : undefined
-      const targetingBot = entity.targetingBot === true || entity.targetingPlayer === true || entity.currentThreat === true
+      const targetingBot = entity.targetingBot === true || entity.targetingPlayer === true
       return [{
         id: String(rawId), typeId: entity.typeId, distance: entity.distance,
         ...(typeof entity.name === 'string' ? { name: entity.name } : {}),

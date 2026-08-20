@@ -5,7 +5,7 @@ import { parseAgentDecision } from '../src/agent/decision.js'
 test('解析模型 JSON 并限制聊天和闲逛半径', () => {
   const decision = parseAgentDecision('```json\n{"reply":"我来了！\\n马上到。","action":{"type":"wander","radius":99},"remember":"Alice 喜欢建造"}\n```')
   assert.equal(decision.reply, '我来了！ 马上到。')
-  assert.deepEqual(decision.action, { type: 'wander', radius: 16 })
+  assert.deepEqual(decision.action, { type: 'wander', radius: 8 })
   assert.equal(decision.remember, 'Alice 喜欢建造')
   assert.equal(decision.intent, 'action')
 })

@@ -20,6 +20,8 @@ import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prom
 import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
 import { mergeManagedEnv } from './env-file.js'
 import { redactForWebUi } from './redaction.js'
+import { runEnvironmentCheck } from './environment-check.js'
+import { WebSocketServer } from 'ws'
 import { resolveUserData, userDataPath } from '../core/user-data.js'
 
 const execFileAsync = promisify(execFile)
@@ -493,6 +495,9 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     await rm(files.testFlag, { force: true })
     return json(response, 200, { ok: true, output: await runPowerShell('start-all-background.ps1') })
   }
+  if (request.method === 'GET' && pathname === '/api/environment/check') {
+    return json(response, 200, await runEnvironmentCheck())
+  }
   if (request.method === 'POST' && pathname === '/api/model/test') {
     const started = Date.now()
     const loaded = await loadProjectConfig()
@@ -514,7 +519,7 @@ function allowedRequest(request: IncomingMessage): boolean {
 
 const staticTypes: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8' }
 const server = createServer(async (request, response) => {
-  response.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+  response.setHeader('content-security-policy', "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self' ws://127.0.0.1:3210 ws://localhost:3210; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
   response.setHeader('x-content-type-options', 'nosniff')
   response.setHeader('cache-control', 'no-store')
   try {
@@ -539,3 +544,47 @@ const server = createServer(async (request, response) => {
 })
 
 server.listen(port, host, () => console.log(`Minecraft AI Control Center: http://${host}:${port}`))
+
+// 轻量实时快照：只读运行时相关数据，不含提示词文档与玩家画像，供 1 秒级推送。
+async function liveSnapshot(): Promise<unknown> {
+  const config = await readJson<WebUiBotConfig>(files.config, files.configExample)
+  const memoryFile = resolveUserData(config.storage.memoryFile)
+  const taskFile = resolveUserData(config.storage.taskFile ?? 'data/tasks.json')
+  const [live, monitor, diagnostics, memory, tasks, bot, client, botLogs, gameLogs] = await Promise.all([
+    readRuntimeJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
+    readMonitorSnapshot(),
+    readRuntimeJson<DiagnosticDocument>(files.diagnostics).catch(() => null),
+    readRuntimeJson<MemoryDocument>(memoryFile).catch(() => null),
+    readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
+    processStatus(files.botPid), processStatus(files.clientPid), tail(files.botLog), tail(files.gameLog)
+  ])
+  return {
+    live,
+    monitor,
+    diagnostics: diagnostics ? { events: (diagnostics.events ?? []).slice(-40) } : null,
+    memory: memory ? { botName: memory.botName, events: (memory.events ?? []).slice(-20) } : null,
+    tasks: tasks ? { tasks: (tasks.tasks ?? []).slice(-12) } : null,
+    runtime: { bot, client },
+    logs: { bot: botLogs, game: gameLogs }
+  }
+}
+
+const wss = new WebSocketServer({ noServer: true })
+server.on('upgrade', (request, socket, head) => {
+  if (!allowedRequest(request)) return socket.destroy()
+  const pathname = new URL(request.url ?? '/', `http://${request.headers.host}`).pathname
+  if (pathname !== '/ws') return socket.destroy()
+  wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws))
+})
+
+let lastLive = ''
+function broadcast(): void {
+  void liveSnapshot().then(snapshot => {
+    const next = JSON.stringify(snapshot)
+    if (next === lastLive) return
+    lastLive = next
+    for (const ws of wss.clients) if (ws.readyState === 1) ws.send(next)
+  }).catch(() => {})
+}
+setInterval(broadcast, 1000).unref()
+wss.on('connection', ws => { if (lastLive) ws.send(lastLive) })

@@ -102,8 +102,8 @@ public final class AdvancedTaskController {
                 case "travel_to_dimension" -> new TravelTask(id, action);
                 default -> null;
             };
-        } catch (IllegalArgumentException error) {
-            results.add(new TaskResult(id, false, "invalid_action: " + error.getMessage()));
+        } catch (Exception error) {
+            results.add(new TaskResult(id, false, "invalid_action: " + safeMessage(error)));
             return false;
         }
         if (active == null) {
@@ -166,10 +166,14 @@ public final class AdvancedTaskController {
         abstract void tick(Minecraft client);
 
         void cleanup(Minecraft client) {
-            navigator.release(client);
-            clearControls(client);
-            if (client != null && client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
-                client.player.closeContainer();
+            try {
+                navigator.release(client);
+                clearControls(client);
+                if (client != null && client.player != null && client.player.containerMenu != client.player.inventoryMenu) {
+                    client.player.closeContainer();
+                }
+            } catch (Exception ignored) {
+                // 清理路径绝不允许异常传播到事件总线
             }
         }
     }
@@ -338,12 +342,11 @@ public final class AdvancedTaskController {
             }
             ItemEntity offered = client.level.getEntitiesOfClass(
                     ItemEntity.class,
-                    giver.getBoundingBox().inflate(radius),
+                    player.getBoundingBox().inflate(radius + 8.0D),
                     item -> item.isAlive() && !item.isRemoved() && item.tickCount <= 600
                         && (requestedItemId == null || itemId(item.getItem()).equals(requestedItemId))
                 ).stream()
-                .min(Comparator.<ItemEntity>comparingDouble(item -> item.distanceToSqr(giver))
-                    .thenComparingDouble(player::distanceToSqr))
+                .min(Comparator.comparingDouble(player::distanceToSqr))
                 .orElse(null);
             if (offered == null) {
                 navigator.release(client);
@@ -460,7 +463,7 @@ public final class AdvancedTaskController {
                 if (!result.isEmpty() && itemId(result).equals(outputId)
                     && (result.getCount() >= wanted || menu.getSlot(0).getItem().isEmpty())) {
                     phase = Phase.TAKE_OUTPUT;
-                } else if (tick - phaseTick > wanted * 240L + 200L) {
+                } else if (tick - phaseTick > Math.min(wanted * 240L + 200L, SMELT_TIMEOUT_TICKS - 200L)) {
                     finish(client, this, false, "furnace did not produce expected output " + outputId);
                 }
                 return;
@@ -472,10 +475,10 @@ public final class AdvancedTaskController {
                 return;
             }
             int delta = inventoryCount(player, outputId) - baseline;
-            if (delta >= wanted || (delta > 0 && tick - phaseTick > 20L)) {
+            if (delta >= wanted) {
                 finish(client, this, true, "verified_smelt_inventory_delta=" + delta + "; output=" + outputId);
             } else if (tick - phaseTick > 60L) {
-                finish(client, this, false, "server did not confirm smelt output inventory delta");
+                finish(client, this, false, "server did not confirm full smelt output; delta=" + delta + "; wanted=" + wanted);
             }
         }
     }
@@ -544,8 +547,8 @@ public final class AdvancedTaskController {
                 return;
             }
             int delta = inventoryCount(player, resultId) - baseline;
-            if (delta >= wanted || delta > 0) finish(client, this, true, "verified_trade_inventory_delta=" + delta + "; result=" + resultId);
-            else if (tick - phaseTick > 60L) finish(client, this, false, "server did not confirm traded item in inventory");
+            if (delta >= wanted) finish(client, this, true, "verified_trade_inventory_delta=" + delta + "; result=" + resultId);
+            else if (tick - phaseTick > 60L) finish(client, this, false, "server did not confirm full traded item in inventory; delta=" + delta + "; wanted=" + wanted);
         }
     }
 
@@ -563,7 +566,7 @@ public final class AdvancedTaskController {
             super(id, "enchant_item", CONTAINER_TIMEOUT_TICKS);
             requestedItem = optionalId(action, "itemId");
             minimumLevel = integer(action, "minLevel", 1, 30, 1);
-            preferredEnchantment = action.has("preferredEnchantment") && !action.get("preferredEnchantment").isJsonNull() ? action.get("preferredEnchantment").getAsString() : null;
+            preferredEnchantment = string(action, "preferredEnchantment", null);
         }
 
         @Override
@@ -618,7 +621,7 @@ public final class AdvancedTaskController {
                 int option = -1;
                 for (int index = 2; index >= 0; index--) {
                     int cost = menu.costs[index];
-                    if (cost > 0 && cost <= player.experienceLevel && index + 1 <= menu.getGoldCount()) { option = index; break; }
+                    if (cost >= minimumLevel && cost <= player.experienceLevel && index + 1 <= menu.getGoldCount()) { option = index; break; }
                 }
                 if (option < 0) {
                     if (tick - phaseTick > 40L) finish(client, this, false, "no_affordable_enchantment_option");
@@ -657,6 +660,9 @@ public final class AdvancedTaskController {
             if (player.isSleeping()) {
                 finish(client, this, true, "verified_player_sleeping; server will set bed respawn point");
                 return;
+            }
+            if (bed != null && (!client.level.isLoaded(bed) || !client.level.getBlockState(bed).is(BlockTags.BEDS))) {
+                bed = null;
             }
             if (bed == null) {
                 // 优先使用 Bot 自己放置的床；找不到时再寻找附近未被占用的床（村庄/玩家基地等）。
@@ -818,7 +824,7 @@ public final class AdvancedTaskController {
         private void prepareNextStep(Minecraft client, LocalPlayer player) {
             BlockPos current = navigator.standingBlockPos(client, player);
             int dy = Integer.compare(targetY, current.getY());
-            if (dy != 0) {
+            if (dy != 0 && scaffold == null) {
                 // 每一级楼梯都要重新评估全部四个方向。六格前还是实心的方向可能通向洞穴；
                 // 盲目继续会在空气上方挖出脚部所在格，导致碰撞寻路器没有合法的
                 // 落点。
@@ -1085,7 +1091,6 @@ public final class AdvancedTaskController {
                 navigator.drive(client, player, Vec3.atCenterOf(base), 4.5D, true, tick);
                 return;
             }
-            navigator.release(client);
             if (index < frame.size()) {
                 BlockPos target = frame.get(index);
                 BlockState state = client.level.getBlockState(target);
@@ -1098,6 +1103,11 @@ public final class AdvancedTaskController {
                     if (inventoryCount(player, "minecraft:obsidian") <= 0) finish(client, this, false, "ran out of obsidian while building portal");
                     return;
                 }
+                if (!player.isWithinBlockInteractionRange(target, 0.0D)) {
+                    navigator.drive(client, player, Vec3.atCenterOf(target), 3.0D, true, tick);
+                    return;
+                }
+                navigator.release(client);
                 if (tick - interactionTick >= 10L) {
                     if (!placeHeldBlockAt(client, player, target)) {
                         finish(client, this, false, "no legal support face for portal frame block " + target.toShortString());
@@ -1125,7 +1135,6 @@ public final class AdvancedTaskController {
     private final class TravelTask extends Task {
         private final String targetDimension;
         private BlockPos portal;
-        private String startDimension;
         private Vec3 searchGoal;
         private Vec3 throwOrigin;
         private Vec3 lastEyePosition;
@@ -1140,6 +1149,8 @@ public final class AdvancedTaskController {
         private BlockPos breaking;
         private long breakStarted;
         private long lastFrameScan;
+        private long lastPortalScan;
+        private long lastFrameInteract;
         private List<BlockPos> frames = List.of();
 
         TravelTask(String id, JsonObject action) {
@@ -1154,16 +1165,18 @@ public final class AdvancedTaskController {
         void tick(Minecraft client) {
             LocalPlayer player = client.player;
             String current = client.level.dimension().identifier().toString();
-            if (startDimension == null) startDimension = current;
             if (current.equals(targetDimension)) {
                 finish(client, this, true, "verified_dimension=" + current);
                 return;
             }
             boolean endPortalTravel = targetDimension.equals("minecraft:the_end")
                 || current.equals("minecraft:the_end") && targetDimension.equals("minecraft:overworld");
-            portal = findBlock(client, player.blockPosition(), 36, state -> endPortalTravel
-                ? state.is(Blocks.END_PORTAL)
-                : state.is(Blocks.NETHER_PORTAL));
+            if (tick - lastPortalScan >= 20L || lastPortalScan == 0L) {
+                portal = findBlock(client, player.blockPosition(), 36, state -> endPortalTravel
+                    ? state.is(Blocks.END_PORTAL)
+                    : state.is(Blocks.NETHER_PORTAL));
+                lastPortalScan = tick;
+            }
             if (portal != null) {
                 navigator.drive(client, player, Vec3.atCenterOf(portal), 0.2D, false, tick);
                 return;
@@ -1194,7 +1207,10 @@ public final class AdvancedTaskController {
             }
             if (!frames.isEmpty()) {
                 BlockPos emptyFrame = frames.stream()
-                    .filter(position -> !client.level.getBlockState(position).getValue(EndPortalFrameBlock.HAS_EYE))
+                    .filter(position -> {
+                        BlockState state = client.level.getBlockState(position);
+                        return state.hasProperty(EndPortalFrameBlock.HAS_EYE) && !state.getValue(EndPortalFrameBlock.HAS_EYE);
+                    })
                     .min(Comparator.comparingDouble(position -> player.distanceToSqr(Vec3.atCenterOf(position)))).orElse(null);
                 if (emptyFrame != null) {
                     if (!ensureHotbarItem(client, player, "minecraft:ender_eye")) {
@@ -1206,7 +1222,10 @@ public final class AdvancedTaskController {
                         return;
                     }
                     navigator.release(client);
-                    useBlock(client, player, emptyFrame);
+                    if (tick - lastFrameInteract >= 10L) {
+                        useBlock(client, player, emptyFrame);
+                        lastFrameInteract = tick;
+                    }
                     return;
                 }
                 // 每个可见的框架都已放入末影之眼；给服务器一点时间来生成传送门。
@@ -1384,7 +1403,7 @@ public final class AdvancedTaskController {
     private static LivingEntity findHostile(Minecraft client, LocalPlayer player, int requestedId, String protectPlayer) {
         return client.level.getEntitiesOfClass(
                 LivingEntity.class,
-                player.getBoundingBox().inflate(32.0D),
+                player.getBoundingBox().inflate(64.0D),
                 entity -> entity != player && entity instanceof Enemy && entity.isAlive() && !entity.isRemoved()
                     && (requestedId < 0 || entity.getId() == requestedId)
                     && (protectPlayer.isBlank() || entity instanceof Mob mob && mob.getTarget() instanceof AbstractClientPlayer target
@@ -1418,7 +1437,7 @@ public final class AdvancedTaskController {
                 ItemEntity.class,
                 player.getBoundingBox().inflate(24.0D),
                 entity -> entity.isAlive() && !entity.isRemoved() && purposeDropMatches(entity.getItem(), purpose)
-                    && (origin == null || entity.position().distanceTo(origin) <= 6.0D)
+                    && (origin == null || entity.position().distanceTo(origin) <= 16.0D)
             ).stream().min(Comparator.<ItemEntity>comparingDouble(player::distanceToSqr)).orElse(null);
     }
 
@@ -1568,7 +1587,7 @@ public final class AdvancedTaskController {
     private static BlockPos findBlock(Minecraft client, BlockPos center, int radius, BlockPredicate predicate) {
         BlockPos best = null;
         double bestDistance = Double.POSITIVE_INFINITY;
-        for (BlockPos cursor : BlockPos.betweenClosed(center.offset(-radius, -8, -radius), center.offset(radius, 8, radius))) {
+        for (BlockPos cursor : BlockPos.betweenClosed(center.offset(-radius, -32, -radius), center.offset(radius, 32, radius))) {
             if (!client.level.isLoaded(cursor) || !predicate.test(client.level.getBlockState(cursor))) continue;
             double distance = cursor.distSqr(center);
             if (distance < bestDistance) { best = cursor.immutable(); bestDistance = distance; }
