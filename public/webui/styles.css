@@ -206,4 +206,13 @@ pre { min-height: 250px; max-height: 420px; margin: 0; padding: 15px; overflow: 
 .env-item strong { color: #3c4a6b; }
 .env-item small { color: var(--muted); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .config-card pre { min-height: 0; max-height: 340px; font-size: 10px; }
+.dash-wide { grid-column: 1 / -1; }
+.dash-timeline { display: grid; gap: 4px; max-height: 300px; overflow: auto; }
+.dash-timeline-item { display: grid; grid-template-columns: 68px 1fr; gap: 10px; align-items: start; padding: 7px 9px; border-radius: 8px; background: #f6f8ff; font-size: 11px; }
+.dash-timeline-item time { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-timeline-item strong { display: block; color: #3c4a6b; }
+.dash-timeline-item span { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-timeline-item.error { border-left: 3px solid var(--red); }
+.dash-timeline-item.warning { border-left: 3px solid var(--amber); }
+.dash-timeline-item.running { border-left: 3px solid var(--accent); }
 @media (max-width: 680px) { .dashboard-grid { grid-template-columns: 1fr; } .inventory-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }

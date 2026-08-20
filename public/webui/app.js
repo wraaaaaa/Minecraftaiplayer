@@ -558,6 +558,7 @@ function renderLive(live) {
   renderGauges(live.live)
   renderInventory(live.live)
   renderTrends(live)
+  renderTimeline(live)
   if (live.runtime) {
     $('botStatus').textContent = live.runtime.bot.running ? '运行中' : '已停止'
     $('botStatus').style.color = live.runtime.bot.running ? 'var(--green)' : 'var(--muted)'
@@ -658,6 +659,42 @@ function renderTrends(live) {
   })
   svg.innerHTML = '<line x1="0" y1="' + (H - 4) + '" x2="' + W + '" y2="' + (H - 4) + '" class="trend-axis"/>' + paths.join('')
   $('trendLegend').innerHTML = '<span class="dot dot-green"></span>人数 ' + (trendData.players.at(-1) ?? 0) + ' <span class="dot dot-accent"></span>Token ' + (trendData.tokens.at(-1) ?? 0) + ' <span class="dot dot-amber"></span>任务 ' + (trendData.tasks.at(-1) ?? 0)
+}
+
+function renderTimeline(live) {
+  const el = $('dashTimeline')
+  if (!el) return
+  const statusText = { queued: '排队', running: '执行中', completed: '完成', failed: '失败' }
+  const diagnostics = (live.diagnostics?.events || []).slice(-20).map(event => ({
+    at: event.at,
+    level: event.level || 'info',
+    title: event.title || '诊断',
+    summary: event.summary || '—'
+  }))
+  const tasks = (live.tasks?.tasks || []).slice(-10).map(task => ({
+    at: task.updatedAt || task.createdAt,
+    level: task.status === 'failed' ? 'error' : task.status === 'running' ? 'running' : 'info',
+    title: '任务 · ' + (task.issuer?.name || '玩家') + ' · ' + (statusText[task.status] || task.status),
+    summary: task.request || '—'
+  }))
+  const merged = [...diagnostics, ...tasks].sort((a, b) => Date.parse(b.at || '') - Date.parse(a.at || '')).slice(0, 20)
+  el.replaceChildren()
+  if (!merged.length) { el.textContent = '暂无任务或诊断记录'; return }
+  for (const item of merged) {
+    const row = document.createElement('div')
+    row.className = 'dash-timeline-item ' + (item.level || 'info')
+    const time = document.createElement('time')
+    const ts = new Date(item.at)
+    time.textContent = Number.isNaN(ts.getTime()) ? (item.at || '') : ts.toLocaleTimeString()
+    const body = document.createElement('div')
+    const title = document.createElement('strong')
+    title.textContent = item.title
+    const summary = document.createElement('span')
+    summary.textContent = item.summary
+    body.append(title, summary)
+    row.append(time, body)
+    el.append(row)
+  }
 }
 
 const SECRET_FIELDS = new Set(['apiKey', 'password', 'key', 'token'])

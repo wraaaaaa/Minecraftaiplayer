@@ -8,7 +8,7 @@
 > **用户数据统一目录 `userdata/`**：`.env`、`config/*.json`、`data/` 已全部合并到项目根目录的 `userdata/`（可用 `MCAI_USERDATA_DIR` 覆盖位置）。升级版本 = 只替换 `userdata/` 一个文件夹。配置字段里的相对路径（如 `data/memory.json`、`config/persona.json`）仍按原字符串填写，由 `src/core/user-data.ts` 的 `resolveUserData()` 解析到 `userdata/` 下；仓库模板 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 留在根目录。旧目录可跑 `node scripts/migrate-userdata.mjs` 一次性迁移。
 
 > **v1.3.0 α 交付（WebUI 图形化实时仪表盘 + 原生桌面窗口）**：
-> - WebUI 新增「实时仪表盘」分区：世界雷达（附近玩家/敌对生物相对方位 SVG）、状态仪表（生命/饱食/氧气进度条 + 维度/昼夜/着火/入水徽章）、背包物品网格（名称/数量/耐久条/附魔标记）、趋势图（人数/Token/任务三条滚动折线）、配置总览（除 API Key 等密钥外的已配置信息，密钥只显示“已配置/未配置”）与「环境自检」按钮（一键检查 Node/Java/JAVA_HOME/桥 jar/Fabric API/HeadlessMc/客户端资源/模组清单/配置/密钥/依赖/游戏数据/Bot 与客户端进程/桥与 WebUI 端口）。
+> - WebUI 新增「实时仪表盘」分区：世界雷达（附近玩家/敌对生物相对方位 SVG）、状态仪表（生命/饱食/氧气进度条 + 维度/昼夜/着火/入水徽章）、背包物品网格（名称/数量/耐久条/附魔标记）、趋势图（人数/Token/任务三条滚动折线）、任务/诊断时间线（最近诊断事件与任务状态按时间倒序合并）、配置总览（除 API Key 等密钥外的已配置信息，密钥只显示“已配置/未配置”）与「环境自检」按钮（一键检查 Node/Java/JAVA_HOME/桥 jar/Fabric API/HeadlessMc/客户端资源/模组清单/配置/密钥/依赖/游戏数据/Bot 与客户端进程/桥与 WebUI 端口）。
 > - 实时推送：后端新增 `ws` WebSocket 服务（路径 `/ws`），每秒广播轻量快照（运行时状态、在线监听、最近诊断/记忆/任务、进程与日志尾），前端断线 3 秒自动重连；CSP 的 `connect-src` 增加 `ws://127.0.0.1:3210 ws://localhost:3210`。
 > - 原生桌面窗口：新增 `electron/main.cjs` 与脚本 `npm run desktop`（`electron .`）、`npm run dist:desktop`（electron-builder 打包 Windows 便携版）。桌面窗口单实例、自动拉起 WebUI 服务并加载 `http://127.0.0.1:3210`。
 > - 运行时状态新增背包明细（节流到变化时写入，仍不回显密钥），使背包网格有真实数据。
