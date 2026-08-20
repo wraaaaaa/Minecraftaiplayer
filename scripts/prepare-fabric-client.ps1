@@ -7,8 +7,8 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $gameDirectory = Join-Path $projectRoot '.runtime\minecraft'
 $modsDirectory = Join-Path $gameDirectory 'mods'
-$bridgeSource = Join-Path $projectRoot 'fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-alpha.jar'
-$bridgeTarget = Join-Path $modsDirectory 'minecraft-ai-fabric-bridge-1.3.0-alpha.jar'
+$bridgeSource = Join-Path $projectRoot 'fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-beta.jar'
+$bridgeTarget = Join-Path $modsDirectory 'minecraft-ai-fabric-bridge-1.3.0-beta.jar'
 $fabricApiTarget = Join-Path $modsDirectory 'fabric-api-0.156.0+26.2.jar'
 $skinLoaderSource = Join-Path $projectRoot 'vendor\custom-skin-loader\CustomSkinLoader_Universal-15.0.1.jar'
 $skinLoaderTarget = Join-Path $modsDirectory 'CustomSkinLoader_Universal-15.0.1.jar'
@@ -50,7 +50,8 @@ if (-not [string]::IsNullOrWhiteSpace($AdditionalModsDirectory)) {
 
 @(
     'pauseOnLostFocus:false',
-    'onboardAccessibility:false'
+    'onboardAccessibility:false',
+    'lang:zh_cn'
 ) | Set-Content -LiteralPath (Join-Path $gameDirectory 'options.txt') -Encoding UTF8
 
 Write-Output "Fabric client directory prepared: $gameDirectory"

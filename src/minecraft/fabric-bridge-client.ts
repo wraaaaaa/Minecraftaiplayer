@@ -22,7 +22,8 @@ type VoiceBridgeAction =
   | { type: 'voice_playback_begin'; sessionId: string; sampleRate: number; expectedBytes: number }
   | { type: 'voice_playback_chunk'; sessionId: string; sequence: number; data: string }
   | { type: 'voice_playback_end'; sessionId: string }
-type BridgeAction = AgentAction | { type: 'chat'; message: string } | VoiceBridgeAction
+type InventoryDiscardAction = { type: 'discard_inventory_items'; slots: Array<{ slot: number; count: number }>; authorizedPlayer: string }
+type BridgeAction = AgentAction | { type: 'chat'; message: string } | VoiceBridgeAction | InventoryDiscardAction
 
 type BridgeMessage = {
   type?: string
@@ -100,6 +101,7 @@ export class FabricBridgeClient implements ActionExecutor {
   readonly #addressing: AddressingEngine
   readonly #speech: SpeechService
   readonly #expectedToken: string
+  readonly #ownerName: string
   readonly #pending = new Map<string, PendingAction>()
   readonly #statusHandler: (phase: RuntimeStatus['phase'], world: WorldState) => Promise<void>
   #server?: Server
@@ -126,6 +128,7 @@ export class FabricBridgeClient implements ActionExecutor {
     this.#policy = options.policy
     this.#secrets = options.secrets
     const autonomy = autonomyConfig(options.config)
+    this.#ownerName = autonomy.ownerName
     this.#addressing = new AddressingEngine({ botNames: [options.config.server.username, options.persona.name], requireMention: options.config.chat.requireMention, contextual: autonomy.contextualAddressing, directDistance: autonomy.directAddressDistance, conversationWindowMs: autonomy.conversationWindowMs })
     const bridgeSessionCredential = process.env.MCAI_BRIDGE_TOKEN?.trim() ?? ''
     this.#expectedToken = bridgeSessionCredential
@@ -207,6 +210,11 @@ export class FabricBridgeClient implements ActionExecutor {
     const decision = this.#policy.authorize(action)
     if (!decision.allowed) return { ok: false, detail: decision.reason }
     return this.#sendAction(action)
+  }
+
+  /** 仪表盘背包整理：按槽位丢弃并后退，绕过模型直接执行；authorizedPlayer 固定为主人。 */
+  async discardInventory(slots: Array<{ slot: number; count: number }>): Promise<ActionResult> {
+    return this.#sendAction({ type: 'discard_inventory_items', slots, authorizedPlayer: this.#ownerName })
   }
 
   #accept(socket: Socket): void {

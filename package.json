@@ -1,6 +1,6 @@
 {
   "name": "minecraft-ai-player",
-  "version": "1.3.0-alpha",
+  "version": "1.3.0-beta",
   "private": true,
   "description": "Headless, API-driven AI player for Minecraft Java Edition",
   "type": "module",
@@ -33,8 +33,7 @@
     "audit:dependencies": "npm audit --omit=dev --registry=https://registry.npmjs.org",
     "test:voice-bridge": "node scripts/test-voice-bridge.mjs --send-test-tone",
     "test": "tsx --test test/**/*.test.ts",
-    "desktop": "electron .",
-    "dist:desktop": "electron-builder --win"
+    "desktop": "electron ."
   },
   "dependencies": {
     "minecraft-data": "3.112.0",
@@ -46,17 +45,8 @@
     "@types/node": "24.13.3",
     "@types/ws": "^8.18.1",
     "electron": "^43.4.1",
-    "electron-builder": "^26.15.3",
     "tsx": "4.23.5",
     "typescript": "7.0.2"
-  },
-  "build": {
-    "appId": "com.wraaaaaa.minecraftai",
-    "productName": "Minecraft AI 总控台",
-    "directories": { "output": "dist-e" },
-    "files": ["electron/**", "dist/**", "public/webui/**", "config/*.example.json", "config/agent-prompts.example/**", "vendor/minecraft-data/**", "package.json"],
-    "win": { "target": "portable" },
-    "asar": false
   },
   "overrides": {
     "uuid": "11.1.1"

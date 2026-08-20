@@ -1,6 +1,7 @@
 package kim.ciallo.minecraftai.bridge;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.mojang.authlib.GameProfile;
 import net.fabricmc.api.ClientModInitializer;
@@ -797,6 +798,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             }
             case "interact_block" -> interactBlock(client, player, action);
             case "drop_inventory_item" -> dropInventoryItem(client, player, action);
+            case "discard_inventory_items" -> discardInventoryItems(client, player, action);
             case "discard_worn_tools" -> discardWornTools(client, player, action);
             case "gesture" -> startGesture(action);
             case "send_server_command" -> {
@@ -1036,6 +1038,44 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             for (int index = 0; index < count; index++) client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 0, ContainerInput.THROW, player);
         }
         return new ActionResult(true, "drop_requested; slot=" + slot + "; count=" + count);
+    }
+
+    /** 仪表盘背包整理：按槽位丢弃指定数量，随后后退 5 格避免再次拾取刚丢出的物品。 */
+    private ActionResult discardInventoryItems(Minecraft client, LocalPlayer player, JsonObject action) {
+        if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
+            return new ActionResult(false, "normal inventory with empty cursor is required");
+        }
+        String authorizedPlayer = action.has("authorizedPlayer") && !action.get("authorizedPlayer").isJsonNull() ? action.get("authorizedPlayer").getAsString() : null;
+        JsonArray slots = action.has("slots") && action.get("slots").isJsonArray() ? action.getAsJsonArray("slots") : new JsonArray();
+        if (slots.isEmpty()) return new ActionResult(false, "no discard slots provided");
+        int discardedStacks = 0;
+        int discardedItems = 0;
+        for (JsonElement element : slots) {
+            if (!element.isJsonObject()) continue;
+            JsonObject request = element.getAsJsonObject();
+            int slot = (int) number(request, "slot", -1);
+            if (slot < 0 || slot >= player.getInventory().getNonEquipmentItems().size()) continue;
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (stack.isEmpty()) continue;
+            if (InventoryCleanup.isValuable(stack) && authorizedPlayer != null && !authorizedPlayer.equalsIgnoreCase(ownerName)) continue;
+            int count = Math.max(1, Math.min((int) number(request, "count", stack.getCount()), stack.getCount()));
+            int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
+            if (count == stack.getCount()) {
+                client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 1, ContainerInput.THROW, player);
+            } else {
+                for (int index = 0; index < count; index++) client.gameMode.handleContainerInput(player.inventoryMenu.containerId, menuSlot, 0, ContainerInput.THROW, player);
+            }
+            discardedStacks++;
+            discardedItems += count;
+        }
+        boolean retreat = false;
+        for (int attempt = 0; attempt < 12 && !retreat; attempt++) {
+            double angle = Math.random() * Math.PI * 2;
+            double targetX = player.getX() + Math.cos(angle) * 5.0D;
+            double targetZ = player.getZ() + Math.sin(angle) * 5.0D;
+            retreat = setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player);
+        }
+        return new ActionResult(true, "discarded_stacks=" + discardedStacks + "; discarded_items=" + discardedItems + "; retreat_engaged=" + retreat);
     }
 
     private ActionResult discardWornTools(Minecraft client, LocalPlayer player, JsonObject action) {

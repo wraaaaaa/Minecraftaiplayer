@@ -622,7 +622,7 @@ function renderInventory(live) {
     const card = document.createElement('div')
     card.className = 'inv-item'
     const name = document.createElement('span')
-    name.textContent = item.name || item.itemId || '?'
+    name.textContent = (window.ITEM_NAMES_ZH && window.ITEM_NAMES_ZH[item.itemId]) || item.name || item.itemId || '?'
     const count = document.createElement('b')
     count.textContent = item.count ?? 1
     card.append(name, count)
@@ -633,8 +633,32 @@ function renderInventory(live) {
       card.append(bar)
     }
     if (item.enchanted) { const badge = document.createElement('em'); badge.className = 'inv-enchant'; badge.textContent = '附魔'; card.append(badge) }
+    if (typeof item.slot === 'number') {
+      const discard = document.createElement('button')
+      discard.type = 'button'
+      discard.className = 'inv-discard'
+      discard.textContent = '丢弃'
+      discard.title = '丢弃整堆：' + (item.name || item.itemId || '?')
+      discard.addEventListener('click', () => discardItem(item.slot, item.count ?? 1))
+      card.append(discard)
+    }
     return card
   }))
+}
+
+async function discardItem(slot, count) {
+  const status = $('discardStatus')
+  status.classList.remove('hidden')
+  status.className = 'discard-status'
+  status.textContent = '正在提交丢弃（槽位 ' + slot + ' × ' + count + '）…'
+  try {
+    await request('/api/inventory/discard', { method: 'POST', body: JSON.stringify({ slots: [{ slot, count }] }) })
+    status.className = 'discard-status ok'
+    status.textContent = '已提交丢弃；Bot 丢弃后将自动后退 5 格避免再次拾取。'
+  } catch (error) {
+    status.className = 'discard-status error'
+    status.textContent = '丢弃失败：' + error.message
+  }
 }
 
 function pushTrend(arr, value) { arr.push(value); if (arr.length > 100) arr.shift() }

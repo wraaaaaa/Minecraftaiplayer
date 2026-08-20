@@ -19,8 +19,6 @@ Thumbs.db
 fabric-bridge/.gradle/
 fabric-bridge/build/
 fabric-bridge/run/
-dist-e/
-release/
 .runtime/
 HeadlessMC/
 mods/

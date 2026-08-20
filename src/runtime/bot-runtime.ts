@@ -19,6 +19,7 @@ import { PromptWorkspace } from '../prompts/prompt-workspace.js'
 import { ContextCompressor } from '../memory/context-compressor.js'
 import { SelfImprovementManager } from '../self-improvement/self-improvement-manager.js'
 import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
+import { InventoryDiscardInbox } from '../admin/inventory-discard-inbox.js'
 
 export class BotRuntime {
   readonly #loaded: LoadedProjectConfig
@@ -48,11 +49,12 @@ export class BotRuntime {
     })
     const status = new RuntimeStatusStore()
     const adminInbox = new AdminCommandInbox('data/admin-inbox')
+    const discardInbox = new InventoryDiscardInbox('data/inventory-discard-inbox')
     const provider = createLlmProvider(config.model, apiKey, this.#logger)
     const contextCompressor = new ContextCompressor({ config: workspaceConfig, provider, memory, workspace: promptWorkspace, secrets })
     const selfImprovement = new SelfImprovementManager({ config: workspaceConfig.selfImprovement, provider, workspace: promptWorkspace, secrets })
     const existingMemory = await memory.load()
-    await Promise.all([experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize(), adminInbox.initialize()])
+    await Promise.all([experience.load(), tasks.load(), diagnostics.load(), progression.load(), status.load(), promptWorkspace.initialize(), selfImprovement.initialize(), adminInbox.initialize(), discardInbox.initialize()])
     await Promise.all(Object.values(existingMemory.players).map(player => promptWorkspace.ensurePlayerProfile(
       { name: player.currentName, ...(player.uuid ? { uuid: player.uuid } : {}) },
       player
@@ -94,10 +96,32 @@ export class BotRuntime {
             }
           } finally { adminPolling = false }
         }
+        let discardPolling = false
+        const pollDiscard = async (): Promise<void> => {
+          if (discardPolling || this.#stopping || !(client instanceof FabricBridgeClient)) return
+          discardPolling = true
+          try {
+            while (true) {
+              const command = await discardInbox.claimNext()
+              if (!command) break
+              try {
+                const result = await client.discardInventory(command.slots)
+                await discardInbox.finish(command, result.ok, result.detail)
+              } catch (error) {
+                const detail = error instanceof Error ? error.message : String(error)
+                await discardInbox.finish(command, false, detail)
+                this.#logger.error('仪表盘背包丢弃执行失败', { commandId: command.id, error: detail })
+              }
+            }
+          } finally { discardPolling = false }
+        }
         const adminTimer = setInterval(() => { void pollAdmin() }, 250)
         adminTimer.unref()
         void pollAdmin()
-        try { await client.waitForEnd() } finally { clearInterval(adminTimer) }
+        const discardTimer = setInterval(() => { void pollDiscard() }, 250)
+        discardTimer.unref()
+        void pollDiscard()
+        try { await client.waitForEnd() } finally { clearInterval(adminTimer); clearInterval(discardTimer) }
       } catch (error) {
         this.#logger.error('连接尝试失败', error)
         const code = (error as NodeJS.ErrnoException).code

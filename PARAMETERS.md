@@ -317,7 +317,7 @@ WebUI 只接受标准 `64x64` 现代皮肤或 `64x32` 旧版 PNG；`model` 为 `
 - 一键部署并打开：`Install-and-Open-Control-Center.cmd`。
 - 只打开 WebUI：`Open-WebUI.cmd`。
 - 静默启动/停止 Bot：`Start-Bot.cmd`、`Stop-Bot.cmd`。
-- 原生桌面窗口：`npm run desktop`（Electron 单实例窗口，自动拉起 WebUI 服务）；打包 Windows 便携版 `.exe`：`npm run dist:desktop`（可设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` 走国内镜像下载 Electron 二进制）。
+- 原生桌面窗口：双击 `Open-Desktop.cmd`（或 `npm run desktop`），Electron 单实例窗口自动拉起 WebUI 服务，无需浏览器。
 
 ## 9.1 人数监听自动上下线
 

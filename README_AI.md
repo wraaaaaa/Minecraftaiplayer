@@ -7,13 +7,14 @@
 
 > **用户数据统一目录 `userdata/`**：`.env`、`config/*.json`、`data/` 已全部合并到项目根目录的 `userdata/`（可用 `MCAI_USERDATA_DIR` 覆盖位置）。升级版本 = 只替换 `userdata/` 一个文件夹。配置字段里的相对路径（如 `data/memory.json`、`config/persona.json`）仍按原字符串填写，由 `src/core/user-data.ts` 的 `resolveUserData()` 解析到 `userdata/` 下；仓库模板 `config/*.example.json`、`config/agent-prompts.example/`、`.env.example` 留在根目录。旧目录可跑 `node scripts/migrate-userdata.mjs` 一次性迁移。
 
-> **v1.3.0 α 交付（WebUI 图形化实时仪表盘 + 原生桌面窗口）**：
+> **v1.3.0 β 交付（WebUI 图形化实时仪表盘 + 原生桌面窗口 + 背包整理）**：
 > - WebUI 新增「实时仪表盘」分区：世界雷达（附近玩家/敌对生物相对方位 SVG）、状态仪表（生命/饱食/氧气进度条 + 维度/昼夜/着火/入水徽章）、背包物品网格（名称/数量/耐久条/附魔标记）、趋势图（人数/Token/任务三条滚动折线）、任务/诊断时间线（最近诊断事件与任务状态按时间倒序合并）、配置总览（除 API Key 等密钥外的已配置信息，密钥只显示“已配置/未配置”）与「环境自检」按钮（一键检查 Node/Java/JAVA_HOME/桥 jar/Fabric API/HeadlessMc/客户端资源/模组清单/配置/密钥/依赖/游戏数据/Bot 与客户端进程/桥与 WebUI 端口）。
 > - 实时推送：后端新增 `ws` WebSocket 服务（路径 `/ws`），每秒广播轻量快照（运行时状态、在线监听、最近诊断/记忆/任务、进程与日志尾），前端断线 3 秒自动重连；CSP 的 `connect-src` 增加 `ws://127.0.0.1:3210 ws://localhost:3210`。
-> - 原生桌面窗口：新增 `electron/main.cjs` 与脚本 `npm run desktop`（`electron .`）、`npm run dist:desktop`（electron-builder 打包 Windows 便携版）。桌面窗口单实例、自动拉起 WebUI 服务并加载 `http://127.0.0.1:3210`。
+> - 原生桌面窗口：新增 `electron/main.cjs` 与脚本 `npm run desktop`（`electron .`），双击 `Open-Desktop.cmd` 即可打开原生窗口；桌面窗口单实例、自动拉起 WebUI 服务并加载 `http://127.0.0.1:3210`。
 > - 运行时状态新增背包明细（节流到变化时写入，仍不回显密钥），使背包网格有真实数据。
 > - 修复：仪表盘前端一处语法错误、趋势图例内联样式违反 CSP、昼夜徽章读取 `environment.timeOfDay`、环境自检读取带 BOM 的 PID JSON 误报“未运行”、以及桥接拒绝重复客户端时未处理 `error` 事件导致重启时进程崩溃。
-> - 版本号 1.3.0-alpha（npm/桥模组/标签用 `1.3.0-alpha`，文档中文写作 `v1.3.0 α`）。
+> - 背包整理：仪表盘背包物品自动汉化（客户端 `lang:zh_cn`），每格提供丢弃按钮；提交后 Bot 丢弃对应槽位并自动后退 5 格避免再次拾取。
+> - 版本号 1.3.0-beta（npm/桥模组/标签用 `1.3.0-beta`，文档中文写作 `v1.3.0 β`）。
 > **v1.3.0 交付（从方块思考 + 空闲补充循环）**：
 > - 空闲重构：删除确定性科技树，改为「30 分钟模型自主补充（食物/工具/背包）→ 回家零 Token 待机 → 玩家指令或路过玩家回应唤醒」循环；补充阶段由模型用受限工具集从方块逐步决策。
 > - 双层工具并存：原子工具（走路/挖方块/放方块/用物品/交互/合成配方/选槽位）与复合脚本（跟随/采集/合成/冶炼/挖掘/建造/狩猎）同时保留，模型自由编排；脚本失败或覆盖不了时下降到原子层继续，永不因「没有对应脚本」拒绝。
@@ -1040,7 +1041,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts\prepare-fabric-clien
 
 1. 查看 `userdata/data/bot.pid.json`、`userdata/data/minecraft-client.pid.json` 是否属于当前项目根。
 2. 查看 `logs/background.stderr.log`、`logs/minecraft-client.stderr.log`。
-3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.3.0-alpha.jar` 存在。
+3. 确认 `dist/src/index.js`、HeadlessMc jar 和 `.runtime/minecraft/mods/minecraft-ai-fabric-bridge-1.3.0-beta.jar` 存在。
 4. 用 `Start-Bot.cmd` 成对启动，不要只开 Java 或只开 Node。
 5. 确认桥 host/port 相同且 `userdata/data/bridge-token.txt` 非空。
 6. 如果项目移动过，删除已经停止进程遗留的 PID 文件；停止脚本会做所有权检查，不要手工杀不明 PID。

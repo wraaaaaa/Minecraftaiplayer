@@ -19,7 +19,7 @@
 | 目标服务器 | Fabric 26.2 模组服（offline-mode:false） | 也可用“局域网兼容模式”加入本地/局域网 LAN 世界 |
 | 网络 | 可访问 npm 镜像、BMCLAPI/CERNET 资源镜像、GitHub 镜像 | 中国大陆已内置回退下载路线 |
 
-版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.3.0-alpha`。
+版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.3.0-beta`。
 
 ### 二、一键安装（推荐）
 
@@ -45,7 +45,7 @@
    .\gradlew.bat build --no-daemon
    ```
 
-   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-alpha.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
+   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-beta.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
 5. 初始化用户数据目录（只复制模板，不覆盖已有文件）：
 
    ```powershell
@@ -133,7 +133,7 @@
 - Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2` 原生客户端桥。
 - Windows 无界面启动，控制器与游戏客户端均隐藏在后台；提供安全启动、停止和 PID 记录。
 - 本机 Web 总控台：可视化编辑所有 Bot 参数、人设、规则、模组路径和秘密，并查看运行进程、世界坐标、生命、饱食度、维度、附近玩家及日志；“总聊天”把分玩家对话、结构化决策摘要、动作步骤、后置条件和完整脱敏错误合并成一条本机时间线。
-- 实时图形仪表盘：WebSocket 每秒推送的世界雷达、生命/饱食/氧气仪表、背包物品网格（耐久/附魔）、人数/Token/任务趋势图、任务/诊断时间线、配置总览与「环境自检」（一键检查 Node/Java/桥 jar/Fabric API/HeadlessMc/资源/模组/配置/密钥/依赖/进程/端口）；另有 Electron 原生桌面窗口（`npm run desktop`）与 Windows 便携版打包（`npm run dist:desktop`）。
+- 实时图形仪表盘：WebSocket 每秒推送的世界雷达、生命/饱食/氧气仪表、背包物品网格（耐久/附魔）、人数/Token/任务趋势图、任务/诊断时间线、配置总览与「环境自检」（一键检查 Node/Java/桥 jar/Fabric API/HeadlessMc/资源/模组/配置/密钥/依赖/进程/端口）；另有 Electron 原生桌面窗口（双击 `Open-Desktop.cmd`，或命令行 `npm run desktop`）。
 - 游戏内合成语音：Bot 的自然回复可通过火山引擎、OpenAI、MiMo、音频多模态或自定义 TTS 生成 PCM，再借 Simple Voice Chat 以 Bot 自身位置发送；文字先行，语音失败不阻塞陪伴和动作。
 - DeepSeek、火山方舟（豆包）、小米 MiMo Chat Completions function calling 与 OpenAI Responses function calling；模型名、端点、推理强度、API/Token 硬预算均可配置。DeepSeek 思考模式会在工具轮之间正确回传 `reasoning_content`，但不会把隐藏思维链写入日志、WebUI 或游戏聊天。
 - DeepSeek 等纯文本模型使用结构化世界状态。识别到多模态模型后自动在首轮加入视觉图；小米 `mimo-v2.5`/`mimo-v2.5-pro` 会启用视觉、可用语音帧与攻略搜索。无摄像帧时生成真实方块/实体语义图；没有语音桥帧时明确保持“听觉不可用”，不会伪造听见。
@@ -202,7 +202,7 @@ Fabric 桥只监听/连接本机回环地址，不向局域网或公网开放控
 npm run dashboard
 ```
 
-需要独立原生窗口时执行 `npm run desktop`（Electron 单实例窗口，自动拉起 WebUI 服务）；`npm run dist:desktop` 可打包 Windows 便携版 `.exe`（需能访问 Electron 二进制下载源，国内可设 `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`）。
+需要独立原生窗口时双击 `Open-Desktop.cmd`（等价于 `npm run desktop`）：Electron 单实例窗口自动拉起 WebUI 服务并打开总控台，无需浏览器。
 
 地址固定为 `http://127.0.0.1:3210`，只允许本机访问。页面包括：
 
@@ -489,7 +489,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 本轮修复了显式“吃东西”动作在食物已经消耗后仍停留于 `consuming_safe_food` 的完成判定：客户端现在先观察服务端同步后的物品种类/数量变化，再判断是否仍在使用物品。任何涉及世界修改的新动作仍必须在管理员授权的可丢弃场地现场验收，不能只凭自动测试和构建宣称可用。
 
-v1.3.0 α 本轮已实机验证：实时仪表盘在浏览器与 Electron 桌面窗口内均正常渲染（世界雷达、三项仪表、背包明细、三条趋势折线、任务/诊断时间线、配置总览密钥脱敏与环境自检），WebSocket 每秒快照可正常收到，环境自检能识别运行中的 Bot/客户端进程与桥/WebUI 端口；同时修复了仪表盘前端语法错误、趋势图例内联样式违反 CSP、环境自检误读带 BOM 的 PID JSON、以及桥接拒绝重复客户端时未处理 `error` 事件导致重启崩溃的问题。Electron 原生窗口的打包（`npm run dist:desktop`）仍需在可访问 Electron 二进制下载源的目标机器上单独验收。
+v1.3.0 β 本轮已实机验证：实时仪表盘在浏览器与 Electron 原生桌面窗口内均正常渲染（世界雷达、三项仪表、背包明细、三条趋势折线、任务/诊断时间线、配置总览密钥脱敏与环境自检），WebSocket 每秒快照可正常收到，环境自检能识别运行中的 Bot/客户端进程与桥/WebUI 端口；同时修复了仪表盘前端语法错误、趋势图例内联样式违反 CSP、环境自检误读带 BOM 的 PID JSON、以及桥接拒绝重复客户端时未处理 `error` 事件导致重启崩溃的问题。
 
 ## 开发与验证
 

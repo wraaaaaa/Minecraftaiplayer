@@ -18,6 +18,7 @@ import type { DiagnosticDocument } from '../diagnostics/diagnostic-store.js'
 import type { ProgressionDocument } from '../progression/progression-store.js'
 import { PROMPT_DOCUMENTS, PromptWorkspace, type PromptDocuments } from '../prompts/prompt-workspace.js'
 import { AdminCommandInbox } from '../admin/admin-command-inbox.js'
+import { InventoryDiscardInbox } from '../admin/inventory-discard-inbox.js'
 import { mergeManagedEnv } from './env-file.js'
 import { redactForWebUi } from './redaction.js'
 import { runEnvironmentCheck } from './environment-check.js'
@@ -32,6 +33,7 @@ const host = '127.0.0.1'
 const MAX_BODY_BYTES = 2 * 1024 * 1024
 const secretKeys = ['MINECRAFT_LOGIN_PASSWORD', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'OPENAI_API_KEY', 'MIMO_API_KEY', 'VOLCENGINE_TTS_APP_ID', 'VOLCENGINE_TTS_ACCESS_TOKEN', 'CUSTOM_TTS_API_KEY'] as const
 const adminInbox = new AdminCommandInbox(userDataPath('data', 'admin-inbox'))
+const discardInbox = new InventoryDiscardInbox(userDataPath('data', 'inventory-discard-inbox'))
 
 type WebUiBotConfig = BotConfig
 
@@ -424,6 +426,12 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
     if (typeof payload.message !== 'string') throw new Error('message 必须是字符串')
     const command = await adminInbox.submit(payload.message)
     return json(response, 202, { ok: true, command: { id: command.id, status: command.status, createdAt: command.createdAt } })
+  }
+  if (request.method === 'POST' && pathname === '/api/inventory/discard') {
+    const payload = object(await body(request), 'discard')
+    if (!Array.isArray(payload.slots) || payload.slots.length === 0) throw new Error('slots 必须是非空数组')
+    const command = await discardInbox.submit(payload.slots)
+    return json(response, 202, { ok: true, discard: { id: command.id, status: command.status, createdAt: command.createdAt } })
   }
   if (request.method === 'GET' && pathname === '/api/skin/image') return await sendSkinImage(response)
   if (request.method === 'GET' && pathname === '/api/memory/download') return await sendStorageDownload(response, 'memory')
