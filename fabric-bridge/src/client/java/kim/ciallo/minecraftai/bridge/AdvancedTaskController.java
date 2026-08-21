@@ -232,7 +232,7 @@ public final class AdvancedTaskController {
 
             double distance = player.distanceTo(target);
             if (distance > 2.7D || !player.hasLineOfSight(target)) {
-                if (!navigator.drive(client, player, target.position(), 2.1D, distance > 6.0D, tick)
+                if (!navigator.drive(client, player, target.position(), 2.1D, true, tick)
                     && navigator.consecutivePlanFailures() >= 12) {
                     finish(client, this, false, "no_safe_route_to_hunt_target: " + purpose
                         + "; target=" + target.getId());
@@ -288,7 +288,7 @@ public final class AdvancedTaskController {
             }
             double distance = player.distanceTo(target);
             if (distance > 2.8D || !player.hasLineOfSight(target)) {
-                if (!navigator.drive(client, player, target.position(), 2.1D, distance > 6.0D, tick)
+                if (!navigator.drive(client, player, target.position(), 2.1D, true, tick)
                     && navigator.consecutivePlanFailures() >= 12) {
                     finish(client, this, false, "no_safe_route_to_attack_target; target=" + target.getId());
                 }
