@@ -615,7 +615,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private static boolean isAdvancedAction(String type) {
         return switch (type) {
-            case "attack_hostile", "hunt_entity", "accept_items", "smelt_item", "trade_villager", "enchant_item",
+            case "attack_hostile", "hunt_entity", "ranged_attack_continuously", "accept_items", "smelt_item", "trade_villager", "enchant_item",
                 "sleep_in_bed", "excavate_tunnel", "explore_frontier", "build_nether_portal", "travel_to_dimension" -> true;
             default -> false;
         };

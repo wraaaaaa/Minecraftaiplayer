@@ -106,6 +106,7 @@ export const AGENT_TOOLS: readonly LlmToolDefinition[] = Object.freeze([
   { name: 'accept_items_from_player', description: '接近明确玩家并拾取其身边刚丢出的物品；以背包真实增量确认。', parameters: objectSchema({ player: string('玩家名'), item_id: string('物品 ID，可填 any'), count: integer('数量', 1, 64), radius: integer('玩家周围搜索半径', 1, 6) }) },
   { name: 'equip_for', description: '穿装备/穿戴：按用途从背包穿上当前最好的盔甲和主手工具；general 即普通穿戴。', parameters: objectSchema({ purpose: { type: 'string', enum: ['general', 'mining', 'combat', 'end_combat'] } }) },
   { name: 'hunt_for', description: '连续狩猎合法目标并收取掉落。', parameters: objectSchema({ purpose: { type: 'string', enum: ['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'] }, count: integer('数量', 1, 64) }) },
+  { name: 'ranged_attack_continuously', description: '启动客户端持续用弓/弩攻击敌对生物：自动选择目标（死亡/脱离自动切换）、稳定瞄准（带提前量）、实时监听箭矢总数；没箭/没弓/没目标会自动结束并退回近战。适合苦力怕、凋灵、远程怪或需要保持距离时。', parameters: objectSchema({ target_id: string('可选的怪物实体 ID，留空自动选最近的敌对生物') }) },
   { name: 'send_server_command', description: '仅尝试 tp/teleport 到玩家；无权限后改用寻路。', parameters: objectSchema({ command: string('不带 / 的命令') }) },
   { name: 'stop_all_actions', description: '立即停止动作并释放按键。', parameters: objectSchema({}) },
   { name: 'wait_ticks', description: '等待 1–100 tick；20 tick≈1秒。', parameters: objectSchema({ ticks: integer('tick', 1, 100) }) },
@@ -226,6 +227,7 @@ function toAction(call: LlmToolCall, requesterName?: string): ToolOperation {
       if (!['food', 'wool', 'leather', 'ender_pearl', 'blaze_rod'].includes(purpose)) throw new Error('purpose 无效')
       return { type: 'hunt_entity', purpose: purpose as 'food' | 'wool' | 'leather' | 'ender_pearl' | 'blaze_rod', count: whole(args, 'count', 1, 64) }
     }
+    case 'ranged_attack_continuously': return { type: 'ranged_attack_continuously', ...(text(args, 'target_id') ? { targetId: text(args, 'target_id') } : {}) }
     case 'search_game_guide': return { searchQuery: text(args, 'query').slice(0, 240) }
     case 'send_server_command': return { type: 'send_server_command', command: text(args, 'command').replace(/^\/+/, '') }
     case 'stop_all_actions': return { type: 'stop' }
