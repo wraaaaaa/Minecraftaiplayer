@@ -30,6 +30,7 @@ export interface WorldState {
     safeFood?: boolean
     enchantments?: Array<{ id: string; level: number }>
     discardReason?: 'worn_tool' | 'unsafe_food' | 'filler_excess' | 'keep'
+    valuable?: boolean
   }>
   freeSlots?: number
   selectedHotbarSlot?: number

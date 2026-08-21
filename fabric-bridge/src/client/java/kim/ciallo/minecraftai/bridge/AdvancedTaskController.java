@@ -89,7 +89,7 @@ public final class AdvancedTaskController {
         String type = string(action, "type", "");
         try {
             active = switch (type) {
-                case "hunt_entity" -> new HuntTask(id, action);
+                case "hunt_entity" -> new HuntTask(id, action, client.player);
                 case "attack_hostile" -> new DefendTask(id, action);
                 case "accept_items" -> new AcceptItemsTask(id, action, client.player);
                 case "smelt_item" -> new SmeltTask(id, action, client.player);
@@ -186,14 +186,14 @@ public final class AdvancedTaskController {
         private Vec3 lastDeathPosition;
         private long lastAttackTick;
 
-        HuntTask(String id, JsonObject action) {
+        HuntTask(String id, JsonObject action, LocalPlayer player) {
             super(id, "hunt_entity", HUNT_TIMEOUT_TICKS);
             purpose = string(action, "purpose", "food").toLowerCase(Locale.ROOT);
             if (!Set.of("food", "wool", "leather", "ender_pearl", "blaze_rod").contains(purpose)) {
                 throw new IllegalArgumentException("unknown hunt purpose " + purpose);
             }
             wanted = integer(action, "count", 1, 64, 1);
-            baseline = purposeInventoryCount(Minecraft.getInstance().player, purpose);
+            baseline = purposeInventoryCount(player, purpose);
         }
 
         @Override
@@ -271,10 +271,12 @@ public final class AdvancedTaskController {
             }
             if (target instanceof Mob mob) {
                 LivingEntity threatened = mob.getTarget();
-                boolean stillThreatening = protectPlayer.isBlank()
-                    ? threatened == player
-                    : threatened instanceof AbstractClientPlayer protectedPlayer
-                        && protectedPlayer.getGameProfile().name().equalsIgnoreCase(protectPlayer);
+                // 尚未锁定仇恨时仍视为威胁（目标存活且仍在附近），避免过早报成功。
+                boolean stillThreatening = threatened == null
+                    || (protectPlayer.isBlank()
+                        ? threatened == player
+                        : threatened instanceof AbstractClientPlayer protectedPlayer
+                            && protectedPlayer.getGameProfile().name().equalsIgnoreCase(protectPlayer));
                 if (!stillThreatening) {
                     finish(client, this, true, "threat_changed_target");
                     return;
@@ -286,7 +288,10 @@ public final class AdvancedTaskController {
             }
             double distance = player.distanceTo(target);
             if (distance > 2.8D || !player.hasLineOfSight(target)) {
-                navigator.drive(client, player, target.position(), 2.1D, distance > 6.0D, tick);
+                if (!navigator.drive(client, player, target.position(), 2.1D, distance > 6.0D, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_attack_target; target=" + target.getId());
+                }
                 return;
             }
             navigator.release(client);
@@ -343,7 +348,7 @@ public final class AdvancedTaskController {
             ItemEntity offered = client.level.getEntitiesOfClass(
                     ItemEntity.class,
                     player.getBoundingBox().inflate(radius + 8.0D),
-                    item -> item.isAlive() && !item.isRemoved() && item.tickCount <= 600
+                    item -> item.isAlive() && !item.isRemoved() && item.tickCount <= 200
                         && (requestedItemId == null || itemId(item.getItem()).equals(requestedItemId))
                 ).stream()
                 .min(Comparator.comparingDouble(player::distanceToSqr))
@@ -352,7 +357,7 @@ public final class AdvancedTaskController {
                 navigator.release(client);
                 if (lastSeenDropTick == 0L) lastSeenDropTick = tick;
                 if (tick - lastSeenDropTick > 200L) {
-                    finish(client, this, false, "no recent matching dropped item found within " + radius + " blocks of " + playerName);
+                    finish(client, this, false, "no recent matching dropped item found within " + (radius + 8) + " blocks of the bot");
                 }
                 return;
             }
@@ -442,7 +447,7 @@ public final class AdvancedTaskController {
                 if (menu.getSlot(0).getItem().isEmpty()) {
                     int source = findPlayerMenuSlot(menu, inputId);
                     if (source < 0) { finish(client, this, false, "smelt_input_missing_after_open"); return; }
-                    quickMove(client, player, menu, source);
+                    moveItemCount(client, player, menu, source, 0, Math.min(wanted, menu.getSlot(source).getItem().getCount()));
                     phaseTick = tick;
                     return;
                 }
@@ -492,6 +497,7 @@ public final class AdvancedTaskController {
         private int offerIndex = -1;
         private String resultId;
         private int baseline;
+        private int tradesDone;
         private long phaseTick;
 
         TradeTask(String id, JsonObject action, LocalPlayer player) {
@@ -541,6 +547,7 @@ public final class AdvancedTaskController {
             if (phase == Phase.TAKE) {
                 if (!menu.getSlot(2).getItem().isEmpty()) {
                     quickMove(client, player, menu, 2);
+                    tradesDone++;
                     phase = Phase.VERIFY;
                     phaseTick = tick;
                 } else if (tick - phaseTick > 80L) finish(client, this, false, "server did not populate merchant result slot");
@@ -549,6 +556,8 @@ public final class AdvancedTaskController {
             int delta = inventoryCount(player, resultId) - baseline;
             if (delta >= wanted) finish(client, this, true, "verified_trade_inventory_delta=" + delta + "; result=" + resultId);
             else if (tick - phaseTick > 60L) finish(client, this, false, "server did not confirm full traded item in inventory; delta=" + delta + "; wanted=" + wanted);
+            else if (tradesDone >= wanted) { /* 已交易足够多次仍不足，避免死循环 */ }
+            else { phase = Phase.SELECT; phaseTick = tick; }
         }
     }
 
@@ -671,7 +680,10 @@ public final class AdvancedTaskController {
                 if (bed == null) { finish(client, this, false, "no_loaded_bed_nearby"); return; }
             }
             if (player.distanceToSqr(Vec3.atCenterOf(bed)) > 12.25D) {
-                navigator.drive(client, player, Vec3.atCenterOf(bed), 2.2D, true, tick);
+                if (!navigator.drive(client, player, Vec3.atCenterOf(bed), 2.2D, true, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_bed");
+                }
                 return;
             }
             navigator.release(client);
@@ -1066,6 +1078,8 @@ public final class AdvancedTaskController {
         private int index;
         private long interactionTick;
         private boolean igniting;
+        private long lastPortalScanTick;
+        private BlockPos cachedPortal;
 
         PortalBuildTask(String id, JsonObject action, Minecraft client) {
             super(id, "build_nether_portal", CONTAINER_TIMEOUT_TICKS * 3);
@@ -1082,13 +1096,23 @@ public final class AdvancedTaskController {
         @Override
         void tick(Minecraft client) {
             LocalPlayer player = client.player;
-            BlockPos existingPortal = findBlock(client, base, 8, state -> state.is(Blocks.NETHER_PORTAL));
+            BlockPos existingPortal;
+            if (tick - lastPortalScanTick >= 20L) {
+                existingPortal = findBlock(client, base, 8, state -> state.is(Blocks.NETHER_PORTAL));
+                cachedPortal = existingPortal;
+                lastPortalScanTick = tick;
+            } else {
+                existingPortal = cachedPortal;
+            }
             if (existingPortal != null) {
                 finish(client, this, true, "verified_nether_portal_formed_at=" + existingPortal.toShortString());
                 return;
             }
             if (player.distanceToSqr(Vec3.atCenterOf(base)) > 30.25D) {
-                navigator.drive(client, player, Vec3.atCenterOf(base), 4.5D, true, tick);
+                if (!navigator.drive(client, player, Vec3.atCenterOf(base), 4.5D, true, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_portal_base");
+                }
                 return;
             }
             if (index < frame.size()) {
@@ -1178,7 +1202,10 @@ public final class AdvancedTaskController {
                 lastPortalScan = tick;
             }
             if (portal != null) {
-                navigator.drive(client, player, Vec3.atCenterOf(portal), 0.2D, false, tick);
+                if (!navigator.drive(client, player, Vec3.atCenterOf(portal), 0.2D, false, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_portal");
+                }
                 return;
             }
             if (current.equals("minecraft:the_end") && targetDimension.equals("minecraft:overworld")) {
@@ -1186,7 +1213,10 @@ public final class AdvancedTaskController {
                 double exitDx = player.getX() - centralExit.x;
                 double exitDz = player.getZ() - centralExit.z;
                 if (Math.sqrt(exitDx * exitDx + exitDz * exitDz) > 8.0D) {
-                    navigator.drive(client, player, centralExit, 5.0D, true, tick);
+                    if (!navigator.drive(client, player, centralExit, 5.0D, true, tick)
+                        && navigator.consecutivePlanFailures() >= 12) {
+                        finish(client, this, false, "no_safe_route_to_central_exit");
+                    }
                     return;
                 }
                 finish(client, this, false, "no_loaded_end_exit_portal_near_central_island");
@@ -1201,7 +1231,7 @@ public final class AdvancedTaskController {
                 return;
             }
 
-            if (tick - lastFrameScan >= 40L || frames.isEmpty()) {
+            if (tick - lastFrameScan >= 200L || frames.isEmpty()) {
                 frames = findBlocksVertical(client, player.blockPosition(), 40, state -> state.is(Blocks.END_PORTAL_FRAME), 24);
                 lastFrameScan = tick;
             }
@@ -1218,7 +1248,10 @@ public final class AdvancedTaskController {
                         return;
                     }
                     if (player.distanceToSqr(Vec3.atCenterOf(emptyFrame)) > 16.0D) {
-                        navigator.drive(client, player, Vec3.atCenterOf(emptyFrame), 2.5D, true, tick);
+                        if (!navigator.drive(client, player, Vec3.atCenterOf(emptyFrame), 2.5D, true, tick)
+                            && navigator.consecutivePlanFailures() >= 12) {
+                            finish(client, this, false, "no_safe_route_to_end_portal_frame");
+                        }
                         return;
                     }
                     navigator.release(client);
@@ -1279,7 +1312,10 @@ public final class AdvancedTaskController {
             }
             if (searchGoal != null) {
                 if (player.distanceToSqr(searchGoal) > 16.0D) {
-                    navigator.drive(client, player, searchGoal, 3.0D, true, tick);
+                    if (!navigator.drive(client, player, searchGoal, 3.0D, true, tick)
+                        && navigator.consecutivePlanFailures() >= 12) {
+                        finish(client, this, false, "no_safe_route_to_triangulation_goal");
+                    }
                     return;
                 }
                 navigator.release(client);
@@ -1291,6 +1327,7 @@ public final class AdvancedTaskController {
                 return;
             }
             if (!ensureHotbarItem(client, player, "minecraft:ender_eye")) return;
+            if (eyeThrows >= 32) { finish(client, this, false, "stronghold search exceeded 32 eye throws"); return; }
             throwOrigin = player.position();
             lastEyePosition = null;
             client.gameMode.useItem(player, InteractionHand.MAIN_HAND);
@@ -1298,12 +1335,14 @@ public final class AdvancedTaskController {
             eyeThrownTick = tick;
             eyeThrows++;
             waitingForEye = true;
-            if (eyeThrows > 32) finish(client, this, false, "stronghold search exceeded 32 eye throws");
         }
 
         private void tickStrongholdDig(Minecraft client, LocalPlayer player) {
             if (searchGoal != null && player.distanceToSqr(searchGoal) > 16.0D) {
-                navigator.drive(client, player, searchGoal, 3.0D, true, tick);
+                if (!navigator.drive(client, player, searchGoal, 3.0D, true, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_stronghold_dig_goal");
+                }
                 return;
             }
             searchGoal = null;
@@ -1521,7 +1560,7 @@ public final class AdvancedTaskController {
         int kind = id.endsWith("_sword") ? 5 : id.endsWith("_pickaxe") ? 4 : id.endsWith("_axe") ? 3 : 1;
         int preference = 0;
         if (preferred != null) {
-            String p = preferred.toLowerCase();
+            String p = preferred.toLowerCase(Locale.ROOT);
             boolean armor = id.endsWith("_helmet") || id.endsWith("_chestplate") || id.endsWith("_leggings") || id.endsWith("_boots");
             if ((p.contains("sword") || p.contains("sharpness") || p.contains("looting") || p.contains("sweeping")) && id.endsWith("_sword")) preference = 200;
             else if ((p.contains("pickaxe") || p.contains("efficiency") || p.contains("fortune") || p.contains("silk")) && id.endsWith("_pickaxe")) preference = 200;
@@ -1712,6 +1751,22 @@ public final class AdvancedTaskController {
 
     private static void quickMove(Minecraft client, LocalPlayer player, AbstractContainerMenu menu, int slot) {
         client.gameMode.handleContainerInput(menu.containerId, slot, 0, ContainerInput.QUICK_MOVE, player);
+    }
+
+    /** 只把 count 个物品从源槽移入目标槽；源堆不超过 count 时整堆快速移动，否则左键拿起→右键逐格放→左键放回剩余。 */
+    private static void moveItemCount(Minecraft client, LocalPlayer player, AbstractContainerMenu menu, int source, int dest, int count) {
+        if (count <= 0) return;
+        ItemStack stack = menu.getSlot(source).getItem();
+        if (stack.isEmpty()) return;
+        if (stack.getCount() <= count) {
+            quickMove(client, player, menu, source);
+            return;
+        }
+        client.gameMode.handleContainerInput(menu.containerId, source, 0, ContainerInput.PICKUP, player);
+        for (int i = 0; i < count; i++) {
+            client.gameMode.handleContainerInput(menu.containerId, dest, 1, ContainerInput.PICKUP, player);
+        }
+        client.gameMode.handleContainerInput(menu.containerId, source, 0, ContainerInput.PICKUP, player);
     }
 
     private static boolean dangerousFluidAdjacent(Minecraft client, BlockPos position) {

@@ -18,10 +18,11 @@ function portOpen() {
 
 async function ensureServer() {
   if (await portOpen()) return
-  const entry = path.join(projectRoot, 'dist', 'src', 'webui', 'server.js')
+  // 复用 start-webui-background.ps1：自带 PID 跟踪与 stdout/stderr 日志，避免无日志孤儿进程。
+  const script = path.join(projectRoot, 'scripts', 'start-webui-background.ps1')
   try {
-    spawn('node', [entry], { cwd: projectRoot, stdio: 'ignore', detached: true, windowsHide: true }).unref()
-  } catch { /* 后端未构建时静默，由页面报错 */ }
+    spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', script], { cwd: projectRoot, stdio: 'ignore', detached: true, windowsHide: true }).unref()
+  } catch { /* 启动失败由下方端口探测超时兜底 */ }
   for (let i = 0; i < 50; i++) {
     await new Promise(resolve => setTimeout(resolve, 300))
     if (await portOpen()) return

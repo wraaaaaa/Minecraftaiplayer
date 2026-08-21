@@ -337,7 +337,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
 
     private void autoConnect(Minecraft client) {
         if (client.getConnection() != null || tick < 40 || tick - lastConnectAttempt < 600) return;
-        String host = environment("MCAI_SERVER_HOST", "你的域名.com");
+        String host = environment("MCAI_SERVER_HOST", "127.0.0.1");
         int port;
         try {
             port = Integer.parseInt(environment("MCAI_SERVER_PORT", "25565"));
@@ -1045,11 +1045,12 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
         if (client.gameMode == null || player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) {
             return new ActionResult(false, "normal inventory with empty cursor is required");
         }
-        String authorizedPlayer = action.has("authorizedPlayer") && !action.get("authorizedPlayer").isJsonNull() ? action.get("authorizedPlayer").getAsString() : null;
         JsonArray slots = action.has("slots") && action.get("slots").isJsonArray() ? action.getAsJsonArray("slots") : new JsonArray();
         if (slots.isEmpty()) return new ActionResult(false, "no discard slots provided");
+        boolean forceValuable = action.has("forceValuable") && !action.get("forceValuable").isJsonNull() && action.get("forceValuable").getAsBoolean();
         int discardedStacks = 0;
         int discardedItems = 0;
+        int skippedValuable = 0;
         for (JsonElement element : slots) {
             if (!element.isJsonObject()) continue;
             JsonObject request = element.getAsJsonObject();
@@ -1057,7 +1058,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             if (slot < 0 || slot >= player.getInventory().getNonEquipmentItems().size()) continue;
             ItemStack stack = player.getInventory().getItem(slot);
             if (stack.isEmpty()) continue;
-            if (InventoryCleanup.isValuable(stack) && authorizedPlayer != null && !authorizedPlayer.equalsIgnoreCase(ownerName)) continue;
+            if (InventoryCleanup.isValuable(stack) && !forceValuable) { skippedValuable++; continue; }
             int count = Math.max(1, Math.min((int) number(request, "count", stack.getCount()), stack.getCount()));
             int menuSlot = slot < 9 ? InventoryMenu.USE_ROW_SLOT_START + slot : slot;
             if (count == stack.getCount()) {
@@ -1075,7 +1076,7 @@ public final class MinecraftAiBridgeClient implements ClientModInitializer {
             double targetZ = player.getZ() + Math.sin(angle) * 5.0D;
             retreat = setMovement(new MovementTarget(null, targetX, player.getY(), targetZ, false, 1.2), player);
         }
-        return new ActionResult(true, "discarded_stacks=" + discardedStacks + "; discarded_items=" + discardedItems + "; retreat_engaged=" + retreat);
+        return new ActionResult(true, "discarded_stacks=" + discardedStacks + "; discarded_items=" + discardedItems + "; skipped_valuable=" + skippedValuable + "; retreat_engaged=" + retreat);
     }
 
     private ActionResult discardWornTools(Minecraft client, LocalPlayer player, JsonObject action) {

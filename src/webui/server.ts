@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { access, copyFile, mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
+import { access, copyFile, mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { loadProjectConfig, validateConfig } from '../config/load-config.js'
@@ -430,7 +430,7 @@ async function api(request: IncomingMessage, response: ServerResponse, pathname:
   if (request.method === 'POST' && pathname === '/api/inventory/discard') {
     const payload = object(await body(request), 'discard')
     if (!Array.isArray(payload.slots) || payload.slots.length === 0) throw new Error('slots 必须是非空数组')
-    const command = await discardInbox.submit(payload.slots)
+    const command = await discardInbox.submit(payload.slots, payload.forceValuable === true)
     return json(response, 202, { ok: true, discard: { id: command.id, status: command.status, createdAt: command.createdAt } })
   }
   if (request.method === 'GET' && pathname === '/api/skin/image') return await sendSkinImage(response)
@@ -554,10 +554,18 @@ const server = createServer(async (request, response) => {
 server.listen(port, host, () => console.log(`Minecraft AI Control Center: http://${host}:${port}`))
 
 // 轻量实时快照：只读运行时相关数据，不含提示词文档与玩家画像，供 1 秒级推送。
+// 用 mtime 缓存：所有源文件均未变化时直接复用上次快照，避免每秒重读/解析大文件。
+let liveCache: { key: string; snapshot: unknown } | null = null
+
 async function liveSnapshot(): Promise<unknown> {
   const config = await readJson<WebUiBotConfig>(files.config, files.configExample)
   const memoryFile = resolveUserData(config.storage.memoryFile)
   const taskFile = resolveUserData(config.storage.taskFile ?? 'data/tasks.json')
+  const sourcePaths = [files.runtimeStatus, files.playerMonitorState, files.diagnostics, memoryFile, taskFile, files.botPid, files.clientPid, files.botLog, files.gameLog]
+  const key = (await Promise.all(sourcePaths.map(async p => {
+    try { return `${p}:${(await stat(p)).mtimeMs}` } catch { return `${p}:missing` }
+  }))).join('|')
+  if (liveCache && liveCache.key === key) return liveCache.snapshot
   const [live, monitor, diagnostics, memory, tasks, bot, client, botLogs, gameLogs] = await Promise.all([
     readRuntimeJson<RuntimeStatus>(files.runtimeStatus).catch(() => null),
     readMonitorSnapshot(),
@@ -566,7 +574,7 @@ async function liveSnapshot(): Promise<unknown> {
     readRuntimeJson<TaskDocument>(taskFile).catch(() => null),
     processStatus(files.botPid), processStatus(files.clientPid), tail(files.botLog), tail(files.gameLog)
   ])
-  return {
+  const snapshot = {
     live,
     monitor,
     diagnostics: diagnostics ? { events: (diagnostics.events ?? []).slice(-40) } : null,
@@ -575,6 +583,8 @@ async function liveSnapshot(): Promise<unknown> {
     runtime: { bot, client },
     logs: { bot: botLogs, game: gameLogs }
   }
+  liveCache = { key, snapshot }
+  return snapshot
 }
 
 const wss = new WebSocketServer({ noServer: true })

@@ -10,6 +10,7 @@ export interface InventoryDiscardSlot { slot: number; count: number }
 export interface InventoryDiscard {
   id: string
   slots: InventoryDiscardSlot[]
+  forceValuable?: boolean
   status: InventoryDiscardStatus
   createdAt: string
   updatedAt: string
@@ -20,7 +21,7 @@ function validateSlot(slot: InventoryDiscardSlot): InventoryDiscardSlot {
   if (!slot || typeof slot !== 'object') throw new Error('丢弃槽位无效')
   const index = Number(slot.slot)
   const count = Number(slot.count)
-  if (!Number.isInteger(index) || index < 0 || index > 45) throw new Error('丢弃槽位编号无效（0-45）')
+  if (!Number.isInteger(index) || index < 0 || index > 35) throw new Error('丢弃槽位编号无效（0-35）')
   if (!Number.isInteger(count) || count < 1 || count > 64) throw new Error('丢弃数量无效（1-64）')
   return { slot: index, count }
 }
@@ -46,12 +47,12 @@ export class InventoryDiscardInbox {
     }
   }
 
-  async submit(slots: InventoryDiscardSlot[]): Promise<InventoryDiscard> {
+  async submit(slots: InventoryDiscardSlot[], forceValuable = false): Promise<InventoryDiscard> {
     if (!Array.isArray(slots) || slots.length === 0) throw new Error('丢弃槽位不能为空')
     const clean = slots.map(validateSlot)
     await this.#ensureDirectory()
     const at = new Date().toISOString()
-    const command: InventoryDiscard = { id: `${Date.now().toString(36).padStart(10, '0')}-${randomUUID()}`, slots: clean, status: 'pending', createdAt: at, updatedAt: at }
+    const command: InventoryDiscard = { id: `${Date.now().toString(36).padStart(10, '0')}-${randomUUID()}`, slots: clean, forceValuable, status: 'pending', createdAt: at, updatedAt: at }
     const temporary = path.join(this.directory, `.${command.id}.tmp`)
     const target = this.#file(command.id, 'pending')
     await writeFile(temporary, `${JSON.stringify(command, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })

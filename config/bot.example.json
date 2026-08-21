@@ -8,7 +8,7 @@
     "version": "26.2",
     "username": "CialloAI",
     "auth": "offline",
-    "connectTimeoutMs": 30000,
+    "connectTimeoutMs": 90000,
     "reconnectDelayMs": 10000,
     "autoRespawn": true,
     "respawnDelayMs": 3000,

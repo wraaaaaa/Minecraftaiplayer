@@ -19,7 +19,7 @@
 | 目标服务器 | Fabric 26.2 模组服（offline-mode:false） | 也可用“局域网兼容模式”加入本地/局域网 LAN 世界 |
 | 网络 | 可访问 npm 镜像、BMCLAPI/CERNET 资源镜像、GitHub 镜像 | 中国大陆已内置回退下载路线 |
 
-版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.3.0-beta`。
+版本对应：Minecraft `26.2`、Fabric Loader `0.19.3`、Fabric API `0.156.0+26.2`、HeadlessMc `2.10.0`、桥模组 `minecraft-ai-fabric-bridge 1.3.0-gamma`。
 
 ### 二、一键安装（推荐）
 
@@ -45,7 +45,7 @@
    .\gradlew.bat build --no-daemon
    ```
 
-   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-beta.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
+   产物为 `fabric-bridge\build\libs\minecraft-ai-fabric-bridge-1.3.0-gamma.jar`；`prepare-fabric-client.ps1` 会把它与 Fabric API、万用皮肤加载器一起放进 `.runtime\minecraft\mods\`。
 5. 初始化用户数据目录（只复制模板，不覆盖已有文件）：
 
    ```powershell
@@ -489,7 +489,7 @@ Fabric 客户端读取服务器提示后，从 `MINECRAFT_LOGIN_PASSWORD` 取得
 
 本轮修复了显式“吃东西”动作在食物已经消耗后仍停留于 `consuming_safe_food` 的完成判定：客户端现在先观察服务端同步后的物品种类/数量变化，再判断是否仍在使用物品。任何涉及世界修改的新动作仍必须在管理员授权的可丢弃场地现场验收，不能只凭自动测试和构建宣称可用。
 
-v1.3.0 β 本轮已实机验证：实时仪表盘在浏览器与 Electron 原生桌面窗口内均正常渲染（世界雷达、三项仪表、背包明细、三条趋势折线、任务/诊断时间线、配置总览密钥脱敏与环境自检），WebSocket 每秒快照可正常收到，环境自检能识别运行中的 Bot/客户端进程与桥/WebUI 端口；同时修复了仪表盘前端语法错误、趋势图例内联样式违反 CSP、环境自检误读带 BOM 的 PID JSON、以及桥接拒绝重复客户端时未处理 `error` 事件导致重启崩溃的问题。
+v1.3.0 γ 本轮按代码复查清单修复了 27 项问题：重连计数成功后不复位、村民交易只交易一次、seek_shelter 中途失败无回退、敌人判断依赖客户端 getTarget 失真、丢弃贵重物保护恒失效、熔炼整叠过量消耗，以及传送门/要塞全量扫描无节流、导航无失败兜底、空手切换只搜热键栏、SWAP 不还原物品位置、环境检查端口恒通过、Electron 后端无日志等。此前 v1.3.0 β 已实机验证：实时仪表盘在浏览器与 Electron 原生桌面窗口内均正常渲染（世界雷达、三项仪表、背包明细、三条趋势折线、任务/诊断时间线、配置总览密钥脱敏与环境自检），WebSocket 每秒快照可正常收到，环境自检能识别运行中的 Bot/客户端进程与桥/WebUI 端口；同时修复了仪表盘前端语法错误、趋势图例内联样式违反 CSP、环境自检误读带 BOM 的 PID JSON、以及桥接拒绝重复客户端时未处理 `error` 事件导致重启崩溃的问题。
 
 ## 开发与验证
 

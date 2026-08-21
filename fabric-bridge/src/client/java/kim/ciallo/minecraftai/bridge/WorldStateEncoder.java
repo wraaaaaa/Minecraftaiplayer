@@ -189,6 +189,7 @@ public final class WorldStateEncoder {
             String itemId = BuiltInRegistries.ITEM.getKey(stack.getItem()).toString();
             int countInInventory = inventoryCountOf(player, itemId);
             encoded.addProperty("discardReason", InventoryCleanup.discardReason(stack, countInInventory));
+            encoded.addProperty("valuable", InventoryCleanup.isValuable(stack));
             output.add(encoded);
         }
         return output;

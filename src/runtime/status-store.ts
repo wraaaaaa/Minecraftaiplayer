@@ -38,7 +38,9 @@ export function compactRuntimeWorld(world: WorldState): WorldState {
       ...(item.slot === undefined ? {} : { slot: item.slot }),
       ...(item.durability === undefined ? {} : { durability: item.durability }),
       ...(item.maxDurability === undefined ? {} : { maxDurability: item.maxDurability }),
-      ...(item.enchanted === undefined ? {} : { enchanted: item.enchanted })
+      ...(item.enchanted === undefined ? {} : { enchanted: item.enchanted }),
+      ...(item.discardReason ? { discardReason: item.discardReason } : {}),
+      ...(item.valuable === true ? { valuable: true } : {})
     })),
     ...(world.freeSlots === undefined ? {} : { freeSlots: world.freeSlots }),
     ...(world.selectedHotbarSlot === undefined ? {} : { selectedHotbarSlot: world.selectedHotbarSlot }),

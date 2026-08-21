@@ -110,7 +110,8 @@ export async function runEnvironmentCheck(): Promise<EnvironmentCheckResult> {
   items.push(item('client_proc', '客户端进程', clientAlive ? 'pass' : 'warn', clientAlive ? 'PID ' + client.pid : '未运行'))
 
   items.push(item('bridge_port', '桥接端口 8765', await portListening(8765) ? 'pass' : 'warn', '127.0.0.1:8765'))
-  items.push(item('webui_port', 'WebUI 端口 3210', 'pass', '127.0.0.1:3210'))
+  const webUiPort = Number.parseInt(process.env.MCAI_WEBUI_PORT ?? '3210', 10)
+  items.push(item('webui_port', `WebUI 端口 ${webUiPort}`, await portListening(webUiPort) ? 'pass' : 'warn', `127.0.0.1:${webUiPort}`))
 
   const failures = items.filter(entry => entry.status === 'fail').length
   const warnings = items.filter(entry => entry.status === 'warn').length

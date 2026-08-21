@@ -189,6 +189,8 @@ pre { min-height: 250px; max-height: 420px; margin: 0; padding: 15px; overflow: 
 .inv-enchant { position: absolute; top: 4px; right: 32px; font-style: normal; font-size: 8px; padding: 1px 4px; border-radius: 4px; color: #fff; background: #8e6bd6; }
 .inv-discard { position: absolute; top: 3px; right: 3px; font-size: 9px; padding: 2px 5px; border: none; border-radius: 5px; color: #fff; background: var(--red); cursor: pointer; line-height: 1.2; }
 .inv-discard:hover { background: #c0392b; }
+.inv-valuable { border-color: #e0a800; background: #fff8e6; }
+.inv-valuable-tag { position: absolute; top: 20px; right: 3px; font-style: normal; font-size: 8px; padding: 1px 4px; border-radius: 4px; color: #fff; background: #d97706; }
 .discard-status { margin-bottom: 8px; padding: 6px 9px; border-radius: 7px; font-size: 11px; background: #eef2fc; color: #3c4a6b; }
 .discard-status.ok { color: #1c7a45; background: #e4f6ec; }
 .discard-status.error { color: #b23b3b; background: #fdeeee; }

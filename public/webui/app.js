@@ -633,26 +633,32 @@ function renderInventory(live) {
       card.append(bar)
     }
     if (item.enchanted) { const badge = document.createElement('em'); badge.className = 'inv-enchant'; badge.textContent = '附魔'; card.append(badge) }
+    if (item.valuable) { card.classList.add('inv-valuable'); const tag = document.createElement('em'); tag.className = 'inv-valuable-tag'; tag.textContent = '贵重'; card.append(tag) }
     if (typeof item.slot === 'number') {
       const discard = document.createElement('button')
       discard.type = 'button'
       discard.className = 'inv-discard'
       discard.textContent = '丢弃'
       discard.title = '丢弃整堆：' + (item.name || item.itemId || '?')
-      discard.addEventListener('click', () => discardItem(item.slot, item.count ?? 1))
+      discard.addEventListener('click', () => discardItem(item.slot, item.count ?? 1, item.valuable === true))
       card.append(discard)
     }
     return card
   }))
 }
 
-async function discardItem(slot, count) {
+async function discardItem(slot, count, valuable) {
   const status = $('discardStatus')
   status.classList.remove('hidden')
   status.className = 'discard-status'
+  let forceValuable = false
+  if (valuable) {
+    if (!window.confirm('该物品被标记为贵重物品（钻石/下界合金/附魔书等），丢弃不可恢复。确认要丢弃吗？')) return
+    forceValuable = true
+  }
   status.textContent = '正在提交丢弃（槽位 ' + slot + ' × ' + count + '）…'
   try {
-    await request('/api/inventory/discard', { method: 'POST', body: JSON.stringify({ slots: [{ slot, count }] }) })
+    await request('/api/inventory/discard', { method: 'POST', body: JSON.stringify({ slots: [{ slot, count }], forceValuable }) })
     status.className = 'discard-status ok'
     status.textContent = '已提交丢弃；Bot 丢弃后将自动后退 5 格避免再次拾取。'
   } catch (error) {

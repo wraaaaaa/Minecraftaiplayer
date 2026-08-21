@@ -22,7 +22,7 @@ type VoiceBridgeAction =
   | { type: 'voice_playback_begin'; sessionId: string; sampleRate: number; expectedBytes: number }
   | { type: 'voice_playback_chunk'; sessionId: string; sequence: number; data: string }
   | { type: 'voice_playback_end'; sessionId: string }
-type InventoryDiscardAction = { type: 'discard_inventory_items'; slots: Array<{ slot: number; count: number }>; authorizedPlayer: string }
+type InventoryDiscardAction = { type: 'discard_inventory_items'; slots: Array<{ slot: number; count: number }>; authorizedPlayer: string; forceValuable?: boolean }
 type BridgeAction = AgentAction | { type: 'chat'; message: string } | VoiceBridgeAction | InventoryDiscardAction
 
 type BridgeMessage = {
@@ -52,7 +52,7 @@ type BridgeMessage = {
   sequence?: number
   seq?: number
   observedAt?: number
-  inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; foodNutrition?: number; foodSaturation?: number; safeFood?: boolean; enchantments?: Array<{ id?: string; level?: number }>; discardReason?: string }>
+  inventory?: Array<{ name?: string; itemId?: string; placeableBlockId?: string; count?: number; slot?: number; durability?: number | { damage?: number; max?: number; remaining?: number }; maxDurability?: number; enchanted?: boolean; foodNutrition?: number; foodSaturation?: number; safeFood?: boolean; enchantments?: Array<{ id?: string; level?: number }>; discardReason?: string; valuable?: boolean }>
   freeSlots?: number
   selectedHotbarSlot?: number
   nearbyBlocks?: Array<{ blockId?: string; x?: number; y?: number; z?: number; distance?: number; resourceCategory?: string; classification?: string; blockEntity?: boolean; replaceable?: boolean; fluid?: boolean; destroySpeed?: number }>
@@ -212,9 +212,9 @@ export class FabricBridgeClient implements ActionExecutor {
     return this.#sendAction(action)
   }
 
-  /** 仪表盘背包整理：按槽位丢弃并后退，绕过模型直接执行；authorizedPlayer 固定为主人。 */
-  async discardInventory(slots: Array<{ slot: number; count: number }>): Promise<ActionResult> {
-    return this.#sendAction({ type: 'discard_inventory_items', slots, authorizedPlayer: this.#ownerName })
+  /** 仪表盘背包整理：按槽位丢弃并后退，绕过模型直接执行；authorizedPlayer 固定为主人，贵重物品需显式 forceValuable。 */
+  async discardInventory(slots: Array<{ slot: number; count: number }>, forceValuable = false): Promise<ActionResult> {
+    return this.#sendAction({ type: 'discard_inventory_items', slots, authorizedPlayer: this.#ownerName, forceValuable })
   }
 
   #accept(socket: Socket): void {
@@ -342,7 +342,7 @@ export class FabricBridgeClient implements ActionExecutor {
       ...(typeof onGround === 'boolean' ? { onGround } : {}),
       ...(typeof message.dimension === 'string' ? { dimension: message.dimension } : {}),
       ...(typeof message.timeOfDay === 'number' ? { timeOfDay: message.timeOfDay } : {}),
-      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(typeof item.foodNutrition === 'number' ? { foodNutrition: item.foodNutrition } : {}), ...(typeof item.foodSaturation === 'number' ? { foodSaturation: item.foodSaturation } : {}), ...(typeof item.safeFood === 'boolean' ? { safeFood: item.safeFood } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}), ...(item.discardReason === 'worn_tool' || item.discardReason === 'unsafe_food' || item.discardReason === 'filler_excess' || item.discardReason === 'keep' ? { discardReason: item.discardReason } : {}) }] : []),
+      inventory: (message.inventory ?? []).flatMap((item) => typeof item.name === 'string' && typeof item.count === 'number' ? [{ name: item.name, count: item.count, ...(typeof item.itemId === 'string' ? { itemId: item.itemId } : {}), ...(typeof item.placeableBlockId === 'string' ? { placeableBlockId: item.placeableBlockId } : {}), ...(typeof item.slot === 'number' ? { slot: item.slot } : {}), ...(typeof item.durability === 'number' ? { durability: item.durability } : typeof item.durability?.damage === 'number' ? { durability: item.durability.damage } : {}), ...(typeof item.maxDurability === 'number' ? { maxDurability: item.maxDurability } : typeof item.durability === 'object' && typeof item.durability.max === 'number' ? { maxDurability: item.durability.max } : {}), ...(typeof item.enchanted === 'boolean' ? { enchanted: item.enchanted } : Array.isArray(item.enchantments) ? { enchanted: item.enchantments.length > 0 } : {}), ...(typeof item.foodNutrition === 'number' ? { foodNutrition: item.foodNutrition } : {}), ...(typeof item.foodSaturation === 'number' ? { foodSaturation: item.foodSaturation } : {}), ...(typeof item.safeFood === 'boolean' ? { safeFood: item.safeFood } : {}), ...(Array.isArray(item.enchantments) ? { enchantments: item.enchantments.flatMap(enchantment => typeof enchantment.id === 'string' && typeof enchantment.level === 'number' ? [{ id: enchantment.id, level: enchantment.level }] : []) } : {}), ...(item.valuable === true ? { valuable: true } : {}), ...(item.discardReason === 'worn_tool' || item.discardReason === 'unsafe_food' || item.discardReason === 'filler_excess' || item.discardReason === 'keep' ? { discardReason: item.discardReason } : {}) }] : []),
       ...(typeof message.freeSlots === 'number' ? { freeSlots: message.freeSlots } : {}),
       ...(typeof message.selectedHotbarSlot === 'number' ? { selectedHotbarSlot: message.selectedHotbarSlot } : {}),
       ...(message.nearbyBlocks ? { nearbyBlocks: message.nearbyBlocks.flatMap(block => {
@@ -553,6 +553,7 @@ export class FabricBridgeClient implements ActionExecutor {
     const longRunning = ['navigate_to', 'step_on_block', 'break_block_at', 'place_block_at', 'craft_recipe', 'use_held_item',
       'equip_best', 'prepare_for', 'unequip_armor', 'make_inventory_room', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
       'accept_items', 'return_home',
+      'discard_inventory_items',
       'attack_hostile', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
       'explore_frontier', 'travel_to_dimension', 'build_nether_portal', 'seek_shelter', 'build_shelter'].includes(action.type)
     const shelterAction = action.type === 'seek_shelter' || action.type === 'build_shelter'

@@ -76,6 +76,7 @@ export class BotRuntime {
       client.setProactiveHandler((world) => controller.proactiveTick(world))
       try {
         await client.connect()
+        reconnectAttempts = 0
         this.#logger.info('运行时已就绪，后台等待玩家消息')
         let adminPolling = false
         const pollAdmin = async (): Promise<void> => {
@@ -105,7 +106,7 @@ export class BotRuntime {
               const command = await discardInbox.claimNext()
               if (!command) break
               try {
-                const result = await client.discardInventory(command.slots)
+                const result = await client.discardInventory(command.slots, command.forceValuable === true)
                 await discardInbox.finish(command, result.ok, result.detail)
               } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error)

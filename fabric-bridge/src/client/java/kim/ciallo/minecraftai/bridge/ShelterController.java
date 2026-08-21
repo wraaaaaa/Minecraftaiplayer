@@ -68,7 +68,7 @@ public final class ShelterController {
     private static final int DEFAULT_BUILD_TIMEOUT_TICKS = 2_400;
     private static final int DEFAULT_SEEK_RADIUS = 24;
     private static final int DEFAULT_SEEK_TIMEOUT_TICKS = 1_200;
-    private static final int INVENTORY_CONFIRM_TICKS = 40;
+    private static final int INVENTORY_CONFIRM_TICKS = 120;
     private static final int PLACEMENT_CONFIRM_TICKS = 4;
     private static final int PLACEMENT_TIMEOUT_TICKS = 60;
     private static final int MOVE_STUCK_TICKS = 80;
@@ -397,7 +397,7 @@ public final class ShelterController {
                 + "; home=" + remembered));
             return null;
         }
-        return new SeekTask(id, dimensionId(client), target, timeout, tick);
+        return new SeekTask(id, dimensionId(client), target, radius, timeout, tick);
     }
 
     private abstract class ShelterTask {
@@ -439,6 +439,8 @@ public final class ShelterController {
         private int stableTicks;
         private long phaseStartedTick;
         private long inventoryRequestTick = -1L;
+        private int materialSwapSourceSlot = -1;
+        private int materialSwapDestinationSlot = -1;
         private Vec3 lastProgressPosition;
         private long lastProgressTick;
         private PlacementSupport support;
@@ -803,6 +805,7 @@ public final class ShelterController {
         }
 
         private final String dimension;
+        private final int radius;
         private ShelterTarget target;
         private Phase phase = Phase.MOVE;
         private HomePhase homePhase = HomePhase.INITIAL;
@@ -812,16 +815,19 @@ public final class ShelterController {
         private long lastProgressTick;
         private long phaseStartedTick;
         private String interactionDetail = "not_sent";
+        private int handSwapBackpackSlot = -1;
 
         SeekTask(
             String id,
             String dimension,
             ShelterTarget target,
+            int radius,
             int timeoutTicks,
             long startedTick
         ) {
             super(id, "seek_shelter", startedTick, timeoutTicks);
             this.dimension = dimension;
+            this.radius = radius;
             this.target = target;
         }
 
@@ -849,6 +855,10 @@ public final class ShelterController {
                 return;
             }
 
+            if (target.waypoints().isEmpty()) {
+                fallbackToShelter(client, player);
+                return;
+            }
             BlockPos waypoint = target.waypoints().get(Math.min(waypointIndex, target.waypoints().size() - 1));
             MovementOutcome outcome = moveConservatively(client, player, waypoint);
             if (outcome == MovementOutcome.BLOCKED) {
@@ -917,7 +927,7 @@ public final class ShelterController {
             BlockHitResult hit = new BlockHitResult(Vec3.atCenterOf(bed), Direction.UP, bed, false);
             lookAt(player, hit.getLocation());
             InteractionResult result = client.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
-            restoreSelectedSlot(player, previousSlot);
+            restoreSelectedSlot(client, player, previousSlot);
             interactionDetail = result.getClass().getSimpleName();
             if (!result.consumesAction()) {
                 finish(client, this, false, "bed interaction was rejected: " + interactionDetail + progressSuffix());
@@ -930,6 +940,7 @@ public final class ShelterController {
 
         private int selectEmptyHand(Minecraft client, LocalPlayer player) {
             int previous = player.getInventory().getSelectedSlot();
+            handSwapBackpackSlot = -1;
             for (int slot = 0; slot < 9; slot++) {
                 if (player.getInventory().getItem(slot).isEmpty()) {
                     if (slot != previous) {
@@ -939,10 +950,23 @@ public final class ShelterController {
                     return previous;
                 }
             }
+            // 热键栏 9 格全满：与背包空槽 SWAP，确保主手为空，避免右键床/门时放置方块。
+            for (int slot = 9; slot < player.getInventory().getNonEquipmentItems().size(); slot++) {
+                if (player.getInventory().getItem(slot).isEmpty()) {
+                    client.gameMode.handleContainerInput(player.inventoryMenu.containerId, previous, slot, ContainerInput.SWAP, player);
+                    handSwapBackpackSlot = slot;
+                    return previous;
+                }
+            }
             return previous;
         }
 
-        private void restoreSelectedSlot(LocalPlayer player, int slot) {
+        private void restoreSelectedSlot(Minecraft client, LocalPlayer player, int slot) {
+            if (handSwapBackpackSlot >= 0) {
+                // 还原被 SWAP 出去的原热键栏物品位置
+                client.gameMode.handleContainerInput(player.inventoryMenu.containerId, player.getInventory().getSelectedSlot(), handSwapBackpackSlot, ContainerInput.SWAP, player);
+                handSwapBackpackSlot = -1;
+            }
             if (player.getInventory().getSelectedSlot() != slot) {
                 player.getInventory().setSelectedSlot(slot);
                 player.connection.send(new ServerboundSetCarriedItemPacket(slot));
@@ -950,7 +974,7 @@ public final class ShelterController {
         }
 
         private void fallbackToShelter(Minecraft client, LocalPlayer player) {
-            ShelterTarget fallback = findFallbackShelter(client, player, 14);
+            ShelterTarget fallback = findFallbackShelter(client, player, radius);
             if (fallback == null) {
                 finish(client, this, false, "recorded home became unsafe and no fallback shelter was found"
                     + progressSuffix());
@@ -983,14 +1007,13 @@ public final class ShelterController {
 
             if (homePhase == HomePhase.MOVE_OUTSIDE) {
                 if (target.waypoints().isEmpty()) {
-                finish(client, this, false, "recorded home has no navigation waypoints" + progressSuffix());
-                return;
-            }
+                    fallbackToShelter(client, player);
+                    return;
+                }
             BlockPos outside = target.waypoints().get(0);
                 MovementOutcome outcome = moveConservatively(client, player, outside);
                 if (outcome == MovementOutcome.BLOCKED) {
-                    finish(client, this, false, "no collision-safe loaded route to recorded home entrance"
-                        + progressSuffix());
+                    fallbackToShelter(client, player);
                     return;
                 }
                 if (outcome == MovementOutcome.MOVING) {
@@ -1030,8 +1053,7 @@ public final class ShelterController {
                 }
                 doorStableTicks = 0;
                 if (tick - phaseStartedTick > PLACEMENT_TIMEOUT_TICKS) {
-                    finish(client, this, false, "server did not confirm recorded home door opening; interaction="
-                        + interactionDetail + progressSuffix());
+                    fallbackToShelter(client, player);
                 }
                 return;
             }
@@ -1039,8 +1061,7 @@ public final class ShelterController {
             if (homePhase == HomePhase.MOVE_INSIDE) {
                 MovementOutcome outcome = moveConservatively(client, player, target.goal());
                 if (outcome == MovementOutcome.BLOCKED) {
-                    finish(client, this, false, "open recorded door did not provide a collision-safe path inside"
-                        + progressSuffix());
+                    fallbackToShelter(client, player);
                     return;
                 }
                 if (outcome == MovementOutcome.MOVING) {
@@ -1062,8 +1083,7 @@ public final class ShelterController {
                 }
                 if (tick - phaseStartedTick < 2L) return;
                 if (doorwayOccupied(client, player, door)) {
-                    finish(client, this, false, "refused to close recorded home door while an entity occupies its doorway"
-                        + progressSuffix());
+                    fallbackToShelter(client, player);
                     return;
                 }
                 if (!interactRecordedDoor(client, player, door, false)) return;
@@ -1081,8 +1101,7 @@ public final class ShelterController {
                 }
                 doorStableTicks = 0;
                 if (tick - phaseStartedTick > PLACEMENT_TIMEOUT_TICKS) {
-                    finish(client, this, false, "server did not confirm recorded home door closing; interaction="
-                        + interactionDetail + progressSuffix());
+                    fallbackToShelter(client, player);
                 }
             }
         }
@@ -1108,7 +1127,7 @@ public final class ShelterController {
             );
             lookAt(player, hit.getLocation());
             InteractionResult result = client.gameMode.useItemOn(player, InteractionHand.MAIN_HAND, hit);
-            restoreSelectedSlot(player, previousSlot);
+            restoreSelectedSlot(client, player, previousSlot);
             interactionDetail = result.getClass().getSimpleName();
             if (!result.consumesAction()) {
                 finish(client, this, false, "recorded home door interaction was rejected while "
@@ -1323,6 +1342,8 @@ public final class ShelterController {
             ContainerInput.SWAP,
             player
         );
+        task.materialSwapSourceSlot = source;
+        task.materialSwapDestinationSlot = destination;
         inventory.setSelectedSlot(destination);
         player.connection.send(new ServerboundSetCarriedItemPacket(destination));
         task.inventoryRequestTick = tick;
@@ -1627,8 +1648,12 @@ public final class ShelterController {
         return !client.level.getEntitiesOfClass(
             Mob.class,
             new AABB(position).inflate(radius),
-            mob -> mob.isAlive() && !mob.isRemoved()
-                && (mob instanceof Enemy || mob.getTarget() != null)
+            mob -> {
+                if (!mob.isAlive() || mob.isRemoved()) return false;
+                if (mob instanceof Enemy) return true;
+                // 中立生物只有在明确以玩家为仇恨目标时才视为威胁，避免把攻击村民等目标误判为威胁。
+                return mob.getTarget() == player;
+            }
         ).isEmpty();
     }
 
@@ -1815,6 +1840,18 @@ public final class ShelterController {
         if (active != task) return;
         navigator.release(client);
         clearMovement(client);
+        if (task instanceof BuildTask buildTask
+            && buildTask.materialSwapSourceSlot >= 0 && buildTask.materialSwapDestinationSlot >= 0
+            && client.player != null) {
+            // 还原建房时被 SWAP 出去的原热键栏物品位置
+            client.gameMode.handleContainerInput(
+                client.player.inventoryMenu.containerId,
+                buildTask.materialSwapDestinationSlot,
+                buildTask.materialSwapSourceSlot,
+                ContainerInput.SWAP,
+                client.player
+            );
+        }
         if (taskInitialSelectedSlot >= 0 && client.player != null
             && client.player.getInventory().getSelectedSlot() != taskInitialSelectedSlot) {
             client.player.getInventory().setSelectedSlot(taskInitialSelectedSlot);
