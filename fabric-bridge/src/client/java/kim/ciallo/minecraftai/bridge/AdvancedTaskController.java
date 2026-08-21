@@ -92,6 +92,7 @@ public final class AdvancedTaskController {
                 case "hunt_entity" -> new HuntTask(id, action, client.player);
                 case "attack_hostile" -> new DefendTask(id, action);
                 case "ranged_attack_continuously" -> new RangedAttackTask(id, action);
+                case "combat_continuously" -> new CombatTask(id, action);
                 case "accept_items" -> new AcceptItemsTask(id, action, client.player);
                 case "smelt_item" -> new SmeltTask(id, action, client.player);
                 case "trade_villager" -> new TradeTask(id, action, client.player);
@@ -389,12 +390,7 @@ public final class AdvancedTaskController {
         }
 
         private void aimAtTarget(Minecraft client, LocalPlayer player, LivingEntity target, double distance) {
-            Vec3 motion = target.getDeltaMovement();
-            double flightTime = Math.min(2.0D, Math.max(0.35D, distance / 53.0D));
-            double leadX = motion.x * flightTime;
-            double leadZ = motion.z * flightTime;
-            double drop = Math.min(1.5D, distance * 0.025D);
-            lookAt(player, target.getX() + leadX, target.getEyeY() + drop, target.getZ() + leadZ);
+            aimRangedAt(client, player, target, distance);
         }
 
         private LivingEntity findRangedTarget(Minecraft client, LocalPlayer player) {
@@ -408,26 +404,115 @@ public final class AdvancedTaskController {
                 .orElse(null);
         }
 
-        private int findBowSlot(Minecraft client, LocalPlayer player) {
-            for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
-                ItemStack stack = player.getInventory().getItem(slot);
-                if (!stack.isEmpty() && isBowOrCrossbow(stack)) return slot;
-            }
-            for (int slot = Inventory.getSelectionSize(); slot < player.getInventory().getNonEquipmentItems().size(); slot++) {
-                ItemStack stack = player.getInventory().getItem(slot);
-                if (!stack.isEmpty() && isBowOrCrossbow(stack)) {
-                    if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) return -1;
-                    int destination = player.getInventory().getSelectedSlot();
-                    client.gameMode.handleContainerInput(player.inventoryMenu.containerId, slot, destination, ContainerInput.SWAP, player);
-                    return destination;
-                }
-            }
-            return -1;
+    }
+
+    /**
+     * 本地近战/远程混合战斗：每 tick 用确定性规则决定「用近战还是远程」，切换不经过模型、即时生效。
+     * 爆炸怪/远程危险怪且射程内且有箭有弓 → 远程；否则近战。没箭/没弓自动退回近战；目标死/消失自动切换。
+     */
+    private final class CombatTask extends Task {
+        private static final double RANGED_MIN = 4.0D;
+        private static final double RANGED_MAX = 32.0D;
+        private static final int FULL_DRAW_TICKS = 18;
+        private static final int SHOT_COOLDOWN_TICKS = 8;
+        private final int requestedTargetId;
+        private LivingEntity target;
+        private long lastAttackTick;
+        private long drawStartTick = -1;
+        private long lastShotTick = -1;
+        private boolean bowDrawn;
+
+        CombatTask(String id, JsonObject action) {
+            super(id, "combat_continuously", HUNT_TIMEOUT_TICKS * 3);
+            requestedTargetId = integer(action, "targetId", -1, Integer.MAX_VALUE, -1);
         }
 
-        private static boolean isBowOrCrossbow(ItemStack stack) {
-            String id = itemId(stack);
-            return id.equals("minecraft:bow") || id.equals("minecraft:crossbow");
+        @Override
+        void tick(Minecraft client) {
+            LocalPlayer player = client.player;
+            if (player == null || client.level == null) return;
+            if (target == null || !target.isAlive() || target.isRemoved()) {
+                target = findHostile(client, player, requestedTargetId, "");
+                if (target == null) { releaseBow(client, player); finish(client, this, false, "no_combat_target"); return; }
+            }
+            double distance = player.distanceTo(target);
+            boolean hasArrows = inventoryCount(player, "minecraft:arrow") > 0;
+            boolean hasBow = findBowSlot(client, player) >= 0;
+            // 本地决策：近战还是远程（不经过模型）
+            boolean ranged = hasArrows && hasBow
+                && (isDangerousRangedTarget(target) || (distance >= RANGED_MIN && distance <= RANGED_MAX));
+            if (ranged) {
+                tickRanged(client, player, target, distance);
+            } else {
+                releaseBow(client, player);
+                tickMelee(client, player, target, distance);
+            }
+        }
+
+        private void tickMelee(Minecraft client, LocalPlayer player, LivingEntity target, double distance) {
+            if (distance > 2.8D || !player.hasLineOfSight(target)) {
+                if (!navigator.drive(client, player, target.position(), 2.1D, true, tick)
+                    && navigator.consecutivePlanFailures() >= 12) {
+                    finish(client, this, false, "no_safe_route_to_combat_target; target=" + target.getId());
+                }
+                return;
+            }
+            navigator.release(client);
+            lookAt(player, target.getX(), target.getEyeY(), target.getZ());
+            if (tick - lastAttackTick < 8L || player.getAttackStrengthScale(0.5F) < 0.9F) return;
+            if (!player.canAttack(target) || !player.isWithinAttackRange(player.getInventory().getSelectedItem(), target.getBoundingBox(), 0.0D)) return;
+            client.gameMode.attack(player, target);
+            player.swing(InteractionHand.MAIN_HAND);
+            lastAttackTick = tick;
+        }
+
+        private void tickRanged(Minecraft client, LocalPlayer player, LivingEntity target, double distance) {
+            if (inventoryCount(player, "minecraft:arrow") <= 0) { releaseBow(client, player); finish(client, this, false, "no_arrows"); return; }
+            int bowSlot = findBowSlot(client, player);
+            if (bowSlot < 0) { releaseBow(client, player); finish(client, this, false, "no_bow_or_crossbow"); return; }
+            if (player.getInventory().getSelectedSlot() != bowSlot) {
+                player.getInventory().setSelectedSlot(bowSlot);
+                player.connection.send(new ServerboundSetCarriedItemPacket(bowSlot));
+                return;
+            }
+            if (distance < 5.0D) {
+                releaseBow(client, player);
+                lookAt(player, target.getX(), target.getEyeY(), target.getZ());
+                client.options.keyDown.setDown(true);
+                return;
+            }
+            client.options.keyDown.setDown(false);
+            if (distance > RANGED_MAX) { releaseBow(client, player); finish(client, this, false, "target_out_of_range:" + (int) Math.round(distance)); return; }
+            if (tick - lastShotTick < SHOT_COOLDOWN_TICKS) return;
+            aimRangedAt(client, player, target, distance);
+            if (!bowDrawn) {
+                client.gameMode.useItem(player, InteractionHand.MAIN_HAND);
+                if (!player.isUsingItem()) { finish(client, this, false, "bow_use_rejected"); return; }
+                client.options.keyUse.setDown(true);
+                bowDrawn = true;
+                drawStartTick = tick;
+                return;
+            }
+            if (tick - drawStartTick >= FULL_DRAW_TICKS) {
+                releaseBow(client, player);
+                lastShotTick = tick;
+            }
+        }
+
+        private void releaseBow(Minecraft client, LocalPlayer player) {
+            if (bowDrawn || player.isUsingItem()) {
+                client.options.keyUse.setDown(false);
+                client.gameMode.releaseUsingItem(player);
+            }
+            bowDrawn = false;
+            drawStartTick = -1;
+        }
+
+        private static boolean isDangerousRangedTarget(LivingEntity target) {
+            String id = BuiltInRegistries.ENTITY_TYPE.getKey(target.getType()).toString();
+            return id.equals("minecraft:creeper") || id.equals("minecraft:end_crystal")
+                || id.equals("minecraft:wither") || id.equals("minecraft:guardian") || id.equals("minecraft:elder_guardian")
+                || id.equals("minecraft:ghast") || id.equals("minecraft:phantom");
         }
     }
 
@@ -1565,6 +1650,42 @@ public final class AdvancedTaskController {
             case "blaze_rod" -> id.equals("minecraft:blaze");
             default -> false;
         };
+    }
+
+    /** 弹道瞄准：综合 射程(弓速) + 距离(飞行时间) + 怪物移速/方向(矢量提前量) + 垂直移动 + 重力下坠补偿。 */
+    private static void aimRangedAt(Minecraft client, LocalPlayer player, LivingEntity target, double distance) {
+        if (player == null || target == null) return;
+        Vec3 motion = target.getDeltaMovement();
+        double arrowSpeed = 60.0D; // 满弓箭速（blocks/s），弓/弩接近
+        double flightTime = Math.min(1.6D, Math.max(0.2D, distance / arrowSpeed)); // 飞行时间=距离/箭速，封顶防远距过冲
+        double leadX = motion.x * flightTime;
+        double leadY = motion.y * flightTime;
+        double leadZ = motion.z * flightTime;
+        double gravity = 20.0D; // 箭重力（blocks/s^2）
+        double dropCompensation = 0.5D * gravity * flightTime * flightTime;
+        lookAt(player, target.getX() + leadX, target.getEyeY() + leadY + dropCompensation, target.getZ() + leadZ);
+    }
+
+    private static int findBowSlot(Minecraft client, LocalPlayer player) {
+        for (int slot = 0; slot < Inventory.getSelectionSize(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && isBowOrCrossbow(stack)) return slot;
+        }
+        for (int slot = Inventory.getSelectionSize(); slot < player.getInventory().getNonEquipmentItems().size(); slot++) {
+            ItemStack stack = player.getInventory().getItem(slot);
+            if (!stack.isEmpty() && isBowOrCrossbow(stack)) {
+                if (player.containerMenu != player.inventoryMenu || !player.inventoryMenu.getCarried().isEmpty()) return -1;
+                int destination = player.getInventory().getSelectedSlot();
+                client.gameMode.handleContainerInput(player.inventoryMenu.containerId, slot, destination, ContainerInput.SWAP, player);
+                return destination;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isBowOrCrossbow(ItemStack stack) {
+        String id = itemId(stack);
+        return id.equals("minecraft:bow") || id.equals("minecraft:crossbow");
     }
 
     private static LivingEntity findHostile(Minecraft client, LocalPlayer player, int requestedId, String protectPlayer) {

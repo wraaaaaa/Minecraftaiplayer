@@ -554,7 +554,7 @@ export class FabricBridgeClient implements ActionExecutor {
       'equip_best', 'prepare_for', 'unequip_armor', 'make_inventory_room', 'use_item', 'collect_own_drops', 'gather_resource', 'craft_item', 'place_block', 'drop_item',
       'accept_items', 'return_home',
       'discard_inventory_items',
-      'attack_hostile', 'ranged_attack_continuously', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
+      'attack_hostile', 'ranged_attack_continuously', 'combat_continuously', 'hunt_entity', 'smelt_item', 'trade_villager', 'enchant_item', 'sleep_in_bed', 'excavate_tunnel',
       'explore_frontier', 'travel_to_dimension', 'build_nether_portal', 'seek_shelter', 'build_shelter'].includes(action.type)
     const shelterAction = action.type === 'seek_shelter' || action.type === 'build_shelter'
     const veryLongAction = action.type === 'smelt_item' || action.type === 'excavate_tunnel'

@@ -15,6 +15,7 @@ export type AgentAction =
   | { type: 'equip_best'; purpose: 'general' | 'mining' | 'combat' | 'end_combat' }
   | { type: 'attack_hostile'; targetId?: string; protectPlayer?: string }
   | { type: 'ranged_attack_continuously'; targetId?: string }
+  | { type: 'combat_continuously'; targetId?: string }
   | { type: 'hunt_entity'; purpose: 'food' | 'wool' | 'leather' | 'ender_pearl' | 'blaze_rod'; count: number }
   | { type: 'collect_own_drops'; itemId?: string; count: number; radius: number }
   | { type: 'gather_resource'; resource: string; count: number; authorizedPlayer?: string; verifiedWilderness?: boolean; targetBlock?: { x: number; y: number; z: number } }
