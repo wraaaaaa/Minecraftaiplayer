@@ -16,5 +16,5 @@ if not exist "%~dp0node_modules\electron\dist\electron.exe" (
   exit /b 1
 )
 
-rem 以原生窗口启动（不依赖浏览器）
-start "" "%~dp0node_modules\electron\dist\electron.exe" "%~dp0"
+rem 以原生窗口启动（不依赖浏览器）；用 `.` 作为应用路径，避免 %~dp0 尾部反斜杠转义引号导致启动失败
+start "" "%~dp0node_modules\electron\dist\electron.exe" .
