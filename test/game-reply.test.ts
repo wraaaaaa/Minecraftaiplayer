@@ -26,6 +26,12 @@ test('停止所有动作等执行回执不会进入游戏聊天', () => {
   assert.equal(naturalGameText(raw, '我在。', 'wraaaaaa'), '好啦，我就在这里乖乖等你，哪儿也不去喵~')
 })
 
+test('世界状态技术词、坐标与内部判定不会泄露进游戏聊天', () => {
+  const raw = '@wraaaaaa 系统中积雪被标记为 natural_resource（可替换、destroySpeed 0.1），但它邻近大片 cherry_planks 地板和 stone_bricks 建筑，所以 blockSurvey 判定为 protected_structure_nearby。不过积雪本身是独立在建筑平台上方的薄雪层（y=65，在 cherry_planks 地板上方一层）。这些雪落在主人家的平台上，是需要清理的自然积雪。关键问题：破坏操作一'
+  const out = naturalGameText(raw, '回退', 'wraaaaaa')
+  assert.doesNotMatch(out, /natural_resource|destroySpeed|cherry_planks|stone_bricks|blockSurvey|protected_structure_nearby|y=65|破坏操作|关键问题/)
+})
+
 test('确认语有轮换且同一玩家不会连续收到完全相同文本', () => {
   const composer = new ReplyComposer()
   const replies = Array.from({ length: 8 }, (_, index) => composer.acknowledgement(`task-${index}`))
